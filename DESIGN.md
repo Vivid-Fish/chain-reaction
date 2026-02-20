@@ -131,6 +131,7 @@ From the Gemini conversation, refined by simulation data:
 | v5 | 2026-02-20 | Fix tap vs dot visual confusion (ripple), soft auras, remove slow-mo, faster dots, escalating explosions |
 | v5.1 | 2026-02-20 | Radius tuned to 0.11 via sweep data, build info in UI |
 | v6 | 2026-02-20 | Dot types: gravity (purple, pulls), volatile (orange, 1.5x radius). Property transmission. |
+| v7 | 2026-02-20 | Setback progression (-2 rounds), mercy (+5%/fail), spectator bot mode (?watch or W key), replay recording (R key). |
 
 ## Playtest Feedback Log
 
