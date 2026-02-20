@@ -35,6 +35,10 @@
     // CONSTANTS
     // =====================================================================
 
+    // Build info
+    const BUILD_VERSION = 'v5.1';
+    const BUILD_DATE = '2026-02-20';
+
     // Explosion radius — generous! Fun moments should be frequent
     const EXPLOSION_RADIUS_PCT = 0.11;
     const EXPLOSION_RADIUS_MIN_PX = 35;
@@ -1467,6 +1471,13 @@
             ctx.fillStyle = 'rgba(255,255,255,0.25)';
             ctx.fillText(`Best: Round ${bestRound}`, W/2, H - 12 * s);
         }
+
+        // Build info — bottom-right, very subtle
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.font = `300 ${9 * s | 0}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillText(`${BUILD_VERSION} · ${BUILD_DATE}`, W - 8 * s, H - 6 * s);
     }
 
     function drawStartScreen() {
