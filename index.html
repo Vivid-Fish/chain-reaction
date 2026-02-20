@@ -22,10 +22,12 @@
             color: white; 
             pointer-events: none;
             text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            z-index: 10;
         }
+        #level { font-size: 14px; opacity: 0.7; }
         #score { font-size: 64px; font-weight: bold; }
-        #best { font-size: 14px; opacity: 0.7; margin-top: 5px; }
-        #dotsLeft { font-size: 12px; opacity: 0.5; margin-top: 5px; }
+        #target { font-size: 12px; opacity: 0.5; margin-top: 2px; }
+        #best { font-size: 12px; opacity: 0.4; margin-top: 5px; }
         #start, #gameOver { 
             position: absolute; 
             top: 50%; 
@@ -33,18 +35,24 @@
             transform: translate(-50%, -50%); 
             text-align: center; 
             color: white;
+            z-index: 20;
         }
-        #start h1, #gameOver h1 { 
+        #start h1 { 
             font-size: 48px; 
-            margin-bottom: 20px; 
+            margin-bottom: 15px; 
             text-shadow: 0 2px 20px rgba(0,0,0,0.8);
         }
-        #start p, #gameOver p { 
+        #start p { 
             font-size: 16px; 
             opacity: 0.8; 
             margin-bottom: 30px; 
             line-height: 1.6;
         }
+        #gameOver { display: none; }
+        #gameOver h1 { font-size: 36px; margin-bottom: 10px; }
+        #gameOver p { font-size: 14px; opacity: 0.7; margin-bottom: 20px; }
+        #chainDisplay { font-size: 48px; font-weight: bold; color: #ff6b6b; }
+        #nearMiss { font-size: 12px; opacity: 0.6; margin-top: 10px; }
         .btn { 
             background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%); 
             border: none; 
@@ -54,42 +62,44 @@
             border-radius: 50px; 
             cursor: pointer; 
             box-shadow: 0 4px 20px rgba(255, 107, 107, 0.4);
-            transition: transform 0.1s, box-shadow 0.1s;
+            transition: transform 0.1s;
+            margin-top: 20px;
         }
-        .btn:active { 
-            transform: scale(0.95); 
-            box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3);
-        }
-        #gameOver { display: none; }
-        #testResults { 
-            position: absolute; 
-            bottom: 10px; 
-            left: 10px; 
-            color: rgba(255,255,255,0.3); 
-            font-size: 10px; 
-            font-family: monospace;
-            max-width: 200px;
+        .btn:active { transform: scale(0.95); }
+        #tapHint {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.4);
+            font-size: 14px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s;
         }
     </style>
 </head>
 <body>
     <canvas id="game"></canvas>
     <div id="ui">
+        <div id="level">Level 1</div>
         <div id="score">0</div>
+        <div id="target">Target: 3</div>
         <div id="best">Best: 0</div>
-        <div id="dotsLeft">50 dots</div>
     </div>
+    <div id="tapHint">Tap anywhere to start chain</div>
     <div id="start">
         <h1>Chain Reaction</h1>
-        <p>Tap to explode.<br>Chain reactions score big.<br>Clear all 50 dots.</p>
+        <p>One tap. One chain.<br>Watch the dots drift.<br>Find the perfect moment.</p>
         <button class="btn" onclick="startGame()">Play</button>
     </div>
     <div id="gameOver">
-        <h1 id="endTitle">Cleared!</h1>
-        <p id="endScore">Score: 0</p>
-        <button class="btn" onclick="resetGame()">Play Again</button>
+        <h1 id="endTitle">Chain Complete</h1>
+        <div id="chainDisplay">0</div>
+        <p id="endDetail">Target was 3</p>
+        <p id="nearMiss"></p>
+        <button class="btn" onclick="nextLevel()">Continue</button>
     </div>
-    <div id="testResults"></div>
 
     <script>
         const canvas = document.getElementById('game');
@@ -102,124 +112,214 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // Game constants - TUNABLE
-        const DOT_COUNT = 50;
-        const EXPLOSION_RADIUS = 120;  // Chain reaction distance
-        const EXPLOSION_DURATION = 20; // Frames
-        const DOT_RADIUS = 6;
-        const MIN_DOT_DISTANCE = 30;   // Minimum spacing
-        
+        // TUNABLE CONSTANTS
+        const EXPLOSION_RADIUS_PCT = 0.13; // 13% of min(screen width, height)
+        const EXPLOSION_GROW_MS = 300;
+        const EXPLOSION_HOLD_MS = 1200;
+        const EXPLOSION_SHRINK_MS = 500;
+        const CHAIN_STAGGER_MS = 100;
+        const CHAIN_JITTER_MS = 20;
+        const MIN_NOTE_SEPARATION_MS = 40;
+        const DOT_SPEED_MIN = 0.3;
+        const DOT_SPEED_MAX = 0.8;
+        const HIT_FREEZE_FRAMES = 3;
+        const SCREEN_MARGIN = 15;
+
+        // Level progression (dots, target, required %)
+        const LEVELS = [
+            { dots: 10, target: 3 },   // 30%
+            { dots: 15, target: 6 },   // 40%
+            { dots: 20, target: 10 },  // 50%
+            { dots: 25, target: 15 },  // 60%
+            { dots: 30, target: 20 },  // 67%
+            { dots: 35, target: 24 },  // 69%
+            { dots: 40, target: 30 },  // 75%
+            { dots: 45, target: 36 },  // 80%
+            { dots: 50, target: 42 },  // 84%
+            { dots: 55, target: 48 },  // 87%
+            { dots: 60, target: 54 },  // 90%
+            { dots: 60, target: 58 },  // 97%
+        ];
+
+        let currentLevel = 0;
         let dots = [];
         let explosions = [];
-        let score = 0;
-        let bestScore = localStorage.getItem('chainReactionBest') || 0;
-        let gameActive = false;
         let particles = [];
-        
+        let score = 0;
+        let chainCount = 0;
+        let bestScore = localStorage.getItem('chainReactionBest') || 0;
+        let gameState = 'start'; // start, playing, resolving, ended
+        let freezeFrames = 0;
+        let lastTime = 0;
+        let generationTiming = {}; // Track when each generation can fire
+
         document.getElementById('best').textContent = 'Best: ' + bestScore;
+
+        // Easing functions
+        const easeOutExpo = t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+        const easeInQuad = t => t * t;
 
         class Dot {
             constructor(x, y) {
                 this.x = x;
                 this.y = y;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                // Normalize to desired speed range
+                const speed = DOT_SPEED_MIN + Math.random() * (DOT_SPEED_MAX - DOT_SPEED_MIN);
+                const currentSpeed = Math.hypot(this.vx, this.vy);
+                this.vx = (this.vx / currentSpeed) * speed;
+                this.vy = (this.vy / currentSpeed) * speed;
+                
                 this.active = true;
-                this.pulse = Math.random() * Math.PI * 2;
+                this.pulsePhase = Math.random() * Math.PI * 2;
+                this.radius = 6;
+                this.generation = -1; // Which explosion generation caught this dot
+            }
+            
+            update() {
+                if (!this.active) return;
+                
+                this.x += this.vx;
+                this.y += this.vy;
+                this.pulsePhase += 0.05;
+                
+                // Bounce off walls with margin
+                if (this.x < SCREEN_MARGIN || this.x > canvas.width - SCREEN_MARGIN) {
+                    this.vx *= -1;
+                    this.x = Math.max(SCREEN_MARGIN, Math.min(canvas.width - SCREEN_MARGIN, this.x));
+                }
+                if (this.y < SCREEN_MARGIN || this.y > canvas.height - SCREEN_MARGIN) {
+                    this.vy *= -1;
+                    this.y = Math.max(SCREEN_MARGIN, Math.min(canvas.height - SCREEN_MARGIN, this.y));
+                }
+            }
+            
+            getHue() {
+                // Top = cyan (200), bottom = orange (20)
+                return 200 - (this.y / canvas.height) * 180;
             }
             
             draw() {
                 if (!this.active) return;
                 
-                this.pulse += 0.05;
-                const glow = Math.sin(this.pulse) * 0.3 + 0.7;
+                const pulse = Math.sin(this.pulsePhase) * 0.3 + 0.7;
+                const hue = this.getHue();
                 
+                // Outer glow ring
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, DOT_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(100, 181, 246, ${glow})`;
-                ctx.fill();
-                
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, DOT_RADIUS + 3, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(100, 181, 246, ${glow * 0.5})`;
+                ctx.arc(this.x, this.y, this.radius + 3, 0, Math.PI * 2);
+                ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${pulse * 0.4})`;
                 ctx.lineWidth = 1;
                 ctx.stroke();
+                
+                // Core dot
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${hue}, 80%, 60%, ${pulse})`;
+                ctx.fill();
             }
         }
 
         class Explosion {
-            constructor(x, y) {
+            constructor(x, y, generation = 0) {
                 this.x = x;
                 this.y = y;
-                this.life = EXPLOSION_DURATION;
-                this.maxLife = EXPLOSION_DURATION;
-                this.chainCount = 0;
+                this.generation = generation;
+                this.createdAt = performance.now();
+                this.phase = 'grow'; // grow, hold, shrink, done
+                this.radius = 0;
+                this.maxRadius = Math.min(canvas.width, canvas.height) * EXPLOSION_RADIUS_PCT;
+                this.hasCheckedChain = false;
             }
             
-            update() {
-                this.life--;
+            update(now) {
+                const age = now - this.createdAt;
                 
-                // Check for chain reactions
-                if (this.life === Math.floor(EXPLOSION_DURATION * 0.7)) {
-                    dots.forEach(dot => {
-                        if (!dot.active) return;
-                        const dist = Math.hypot(dot.x - this.x, dot.y - this.y);
-                        if (dist < EXPLOSION_RADIUS && dist > 0) {
-                            dot.active = false;
-                            this.chainCount++;
-                            explosions.push(new Explosion(dot.x, dot.y));
-                            createParticles(dot.x, dot.y);
-                            score += 10 * this.chainCount; // Multiplier for chains
-                        }
-                    });
+                // Phase transitions
+                if (this.phase === 'grow' && age >= EXPLOSION_GROW_MS) {
+                    this.phase = 'hold';
+                } else if (this.phase === 'hold' && age >= EXPLOSION_GROW_MS + EXPLOSION_HOLD_MS) {
+                    this.phase = 'shrink';
+                } else if (this.phase === 'shrink' && age >= EXPLOSION_GROW_MS + EXPLOSION_HOLD_MS + EXPLOSION_SHRINK_MS) {
+                    this.phase = 'done';
+                    return false; // Remove from array
                 }
                 
-                return this.life > 0;
+                // Radius calculation
+                if (this.phase === 'grow') {
+                    const t = age / EXPLOSION_GROW_MS;
+                    this.radius = this.maxRadius * easeOutExpo(t);
+                } else if (this.phase === 'hold') {
+                    this.radius = this.maxRadius;
+                } else if (this.phase === 'shrink') {
+                    const t = (age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS;
+                    this.radius = this.maxRadius * (1 - easeInQuad(t));
+                }
+                
+                return true;
             }
             
             draw() {
-                const progress = 1 - (this.life / this.maxLife);
-                const radius = EXPLOSION_RADIUS * progress;
-                const alpha = 1 - progress;
+                const progress = 1 - (this.radius / this.maxRadius);
+                const alpha = this.phase === 'shrink' ? 1 - easeInQuad((performance.now() - this.createdAt - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS) : 1;
                 
-                // Shockwave
+                // Shockwave ring
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(255, 107, 107, ${alpha})`;
-                ctx.lineWidth = 3;
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255, 140, 80, ${alpha})`;
+                ctx.lineWidth = 2;
                 ctx.stroke();
                 
                 // Core
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, radius * 0.3, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 200, 100, ${alpha})`;
+                ctx.arc(this.x, this.y, this.radius * 0.25, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 220, 140, ${alpha})`;
                 ctx.fill();
             }
         }
 
-        function createParticles(x, y) {
+        function createParticles(x, y, hue) {
+            // Burst particles
             for (let i = 0; i < 8; i++) {
-                const angle = (Math.PI * 2 * i) / 8;
+                const angle = (Math.PI * 2 * i) / 8 + Math.random() * 0.4;
+                const speed = 4 + Math.random() * 6;
                 particles.push({
                     x, y,
-                    vx: Math.cos(angle) * 5,
-                    vy: Math.sin(angle) * 5,
-                    life: 30,
-                    color: `hsl(${Math.random() * 60 + 10}, 100%, 60%)`
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 20 + Math.random() * 15,
+                    maxLife: 35,
+                    hue,
+                    type: 'burst'
+                });
+            }
+            // Drift particles
+            for (let i = 0; i < 4; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: -1 - Math.random() * 2, // Rise
+                    life: 40 + Math.random() * 30,
+                    maxLife: 70,
+                    hue,
+                    type: 'drift'
                 });
             }
         }
 
-        function generateDots() {
+        function generateDots(count) {
             dots = [];
+            const minDist = 35;
             let attempts = 0;
             
-            while (dots.length < DOT_COUNT && attempts < 1000) {
-                const x = Math.random() * (canvas.width - 40) + 20;
-                const y = Math.random() * (canvas.height - 100) + 80;
+            while (dots.length < count && attempts < 2000) {
+                const x = SCREEN_MARGIN + Math.random() * (canvas.width - SCREEN_MARGIN * 2);
+                const y = SCREEN_MARGIN + Math.random() * (canvas.height - SCREEN_MARGIN * 2);
                 
                 let valid = true;
                 for (let dot of dots) {
-                    const dist = Math.hypot(dot.x - x, dot.y - y);
-                    if (dist < MIN_DOT_DISTANCE) {
+                    if (Math.hypot(dot.x - x, dot.y - y) < minDist) {
                         valid = false;
                         break;
                     }
@@ -234,86 +334,218 @@
 
         function startGame() {
             document.getElementById('start').style.display = 'none';
-            generateDots();
+            document.getElementById('tapHint').style.opacity = '1';
+            currentLevel = 0;
+            startLevel();
+        }
+
+        function startLevel() {
+            const level = LEVELS[currentLevel];
+            generateDots(level.dots);
             explosions = [];
             particles = [];
             score = 0;
-            gameActive = true;
-            updateUI();
-        }
-
-        function resetGame() {
-            document.getElementById('gameOver').style.display = 'none';
-            startGame();
-        }
-
-        function endGame() {
-            gameActive = false;
+            chainCount = 0;
+            gameState = 'playing';
+            generationTiming = {};
             
-            if (score > bestScore) {
-                bestScore = score;
-                localStorage.setItem('chainReactionBest', bestScore);
-                document.getElementById('best').textContent = 'Best: ' + bestScore;
+            document.getElementById('level').textContent = `Level ${currentLevel + 1}`;
+            document.getElementById('target').textContent = `Target: ${level.target}`;
+            document.getElementById('score').textContent = '0';
+            document.getElementById('tapHint').textContent = 'Tap anywhere to start chain';
+            document.getElementById('tapHint').style.opacity = '1';
+        }
+
+        function handleTap(e) {
+            if (gameState !== 'playing') return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+            const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+            
+            // ONE TAP PER LEVEL - disable further input
+            gameState = 'resolving';
+            document.getElementById('tapHint').style.opacity = '0';
+            
+            // Hit freeze
+            freezeFrames = HIT_FREEZE_FRAMES;
+            
+            // Create initial explosion
+            explosions.push(new Explosion(x, y, 0));
+            
+            // Check for immediate dot hits
+            let hitDot = false;
+            dots.forEach(dot => {
+                if (!dot.active) return;
+                if (Math.hypot(dot.x - x, dot.y - y) <= explosions[0].maxRadius) {
+                    dot.active = false;
+                    dot.generation = 0;
+                    chainCount++;
+                    scheduleExplosion(dot.x, dot.y, 1);
+                    createParticles(dot.x, dot.y, dot.getHue());
+                    hitDot = true;
+                }
+            });
+            
+            // Miss sound/visual if no dot hit
+            if (!hitDot) {
+                createParticles(x, y, 200);
             }
-            
-            const activeDots = dots.filter(d => d.active).length;
-            const title = activeDots === 0 ? 'Perfect!' : 'Cleared!';
-            
-            document.getElementById('endTitle').textContent = title;
-            document.getElementById('endScore').textContent = `Score: ${score}`;
-            document.getElementById('gameOver').style.display = 'block';
         }
 
-        function updateUI() {
-            document.getElementById('score').textContent = score;
-            const active = dots.filter(d => d.active).length;
-            document.getElementById('dotsLeft').textContent = `${active} dots`;
+        function scheduleExplosion(x, y, generation) {
+            const baseDelay = generation * CHAIN_STAGGER_MS;
+            const jitter = (Math.random() - 0.5) * 2 * CHAIN_JITTER_MS;
+            const delay = Math.max(generationTiming[generation - 1] || 0, baseDelay + jitter);
+            
+            generationTiming[generation] = delay + MIN_NOTE_SEPARATION_MS;
+            
+            setTimeout(() => {
+                if (gameState === 'ended') return;
+                explosions.push(new Explosion(x, y, generation));
+                
+                // Check chain reactions
+                dots.forEach(dot => {
+                    if (!dot.active) return;
+                    if (Math.hypot(dot.x - x, dot.y - y) <= explosions[explosions.length - 1].maxRadius) {
+                        dot.active = false;
+                        dot.generation = generation;
+                        chainCount++;
+                        scheduleExplosion(dot.x, dot.y, generation + 1);
+                        createParticles(dot.x, dot.y, dot.getHue());
+                    }
+                });
+            }, delay);
+        }
+
+        function checkLevelEnd() {
+            // Check if all explosions are done
+            const activeExplosions = explosions.filter(e => e.phase !== 'done').length;
+            const activeDots = dots.filter(d => d.active).length;
+            
+            if (activeExplosions === 0 && gameState === 'resolving') {
+                gameState = 'ended';
+                const level = LEVELS[currentLevel];
+                const cleared = chainCount >= level.target;
+                
+                // Find near-miss dots (within 120% of explosion radius)
+                const radius = Math.min(canvas.width, canvas.height) * EXPLOSION_RADIUS_PCT * 1.2;
+                let nearMissCount = 0;
+                dots.forEach(dot => {
+                    if (dot.active) {
+                        let minDist = Infinity;
+                        explosions.forEach(e => {
+                            const d = Math.hypot(dot.x - e.x, dot.y - e.y) - e.maxRadius;
+                            minDist = Math.min(minDist, d);
+                        });
+                        if (minDist < radius * 0.2) nearMissCount++;
+                    }
+                });
+                
+                // Show end screen
+                document.getElementById('gameOver').style.display = 'block';
+                document.getElementById('chainDisplay').textContent = chainCount;
+                document.getElementById('endDetail').textContent = `Target was ${level.target}`;
+                
+                if (cleared) {
+                    document.getElementById('endTitle').textContent = 'Level Clear!';
+                    document.getElementById('endTitle').style.color = '#64b5f6';
+                    score = chainCount * 10;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        localStorage.setItem('chainReactionBest', bestScore);
+                        document.getElementById('best').textContent = 'Best: ' + bestScore;
+                    }
+                } else {
+                    document.getElementById('endTitle').textContent = 'Chain Complete';
+                    document.getElementById('endTitle').style.color = '#ff6b6b';
+                    const nearMissText = nearMissCount > 0 
+                        ? `${nearMissCount} dot${nearMissCount > 1 ? 's' : ''} were close` 
+                        : 'Try a different position';
+                    document.getElementById('nearMiss').textContent = nearMissText;
+                }
+                
+                // Update button
+                const btn = document.querySelector('#gameOver .btn');
+                btn.textContent = cleared ? 'Next Level' : 'Try Again';
+                btn.onclick = cleared ? nextLevel : retryLevel;
+            }
+        }
+
+        function nextLevel() {
+            currentLevel++;
+            if (currentLevel >= LEVELS.length) {
+                currentLevel = 0; // Loop back or show victory
+            }
+            document.getElementById('gameOver').style.display = 'none';
+            startLevel();
+        }
+
+        function retryLevel() {
+            document.getElementById('gameOver').style.display = 'none';
+            startLevel();
         }
 
         function update() {
-            explosions = explosions.filter(e => e.update());
+            const now = performance.now();
             
+            // Hit freeze
+            if (freezeFrames > 0) {
+                freezeFrames--;
+                return;
+            }
+            
+            // Update dots
+            dots.forEach(dot => dot.update());
+            
+            // Update explosions
+            explosions = explosions.filter(e => e.update(now));
+            
+            // Update particles
             particles = particles.filter(p => {
                 p.x += p.vx;
                 p.y += p.vy;
-                p.vx *= 0.95;
-                p.vy *= 0.95;
+                if (p.type === 'burst') {
+                    p.vx *= 0.93;
+                    p.vy *= 0.93;
+                    p.vy += 0.05;
+                } else {
+                    p.vy -= 0.02; // Rise
+                    p.vx *= 0.97;
+                    p.vy *= 0.97;
+                }
                 p.life--;
                 return p.life > 0;
             });
             
-            if (gameActive && explosions.length === 0) {
-                const activeDots = dots.filter(d => d.active).length;
-                if (activeDots === 0 || (activeDots === dots.length && score === 0)) {
-                    // Wait for player to make a move
-                } else if (activeDots > 0) {
-                    endGame();
-                }
+            // Check for level end
+            if (gameState === 'resolving') {
+                checkLevelEnd();
             }
             
-            updateUI();
+            // Update UI
+            document.getElementById('score').textContent = chainCount;
         }
 
         function draw() {
-            // Fade trail
-            ctx.fillStyle = 'rgba(10, 10, 26, 0.3)';
+            // Clear with trail effect
+            ctx.fillStyle = 'rgba(10, 10, 26, 0.4)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw particles
+            particles.forEach(p => {
+                const alpha = p.life / p.maxLife;
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = `hsla(${p.hue}, 100%, 60%, ${alpha})`;
+                ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+            });
+            ctx.globalAlpha = 1;
             
             // Draw dots
             dots.forEach(dot => dot.draw());
             
             // Draw explosions
             explosions.forEach(e => e.draw());
-            
-            // Draw particles
-            particles.forEach(p => {
-                ctx.globalAlpha = p.life / 30;
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-                ctx.fill();
-            });
-            ctx.globalAlpha = 1;
         }
 
         function loop() {
@@ -322,109 +554,12 @@
             requestAnimationFrame(loop);
         }
 
-        // Input handling
-        function handleTap(e) {
-            if (!gameActive) return;
-            
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
-            const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
-            
-            // Check if tapped near a dot
-            let hit = false;
-            dots.forEach(dot => {
-                if (!dot.active) return;
-                const dist = Math.hypot(dot.x - x, dot.y - y);
-                if (dist < 40) {
-                    dot.active = false;
-                    explosions.push(new Explosion(dot.x, dot.y));
-                    createParticles(dot.x, dot.y);
-                    score += 10;
-                    hit = true;
-                }
-            });
-            
-            // Allow tapping anywhere if no direct hit (explosion at tap point)
-            if (!hit) {
-                explosions.push(new Explosion(x, y));
-                createParticles(x, y);
-                score += 5;
-            }
-        }
-
+        // Input
         canvas.addEventListener('mousedown', handleTap);
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             handleTap(e);
         });
-
-        // TEST HARNESS
-        window.runTests = function(iterations = 100) {
-            const results = {
-                scores: [],
-                clearRates: [],
-                chainLengths: [],
-                avgExplosions: 0
-            };
-            
-            for (let i = 0; i < iterations; i++) {
-                // Simulate random game
-                generateDots();
-                let simScore = 0;
-                let simExplosions = 0;
-                let maxChain = 0;
-                
-                // Pick random starting dot
-                const startDot = dots[Math.floor(Math.random() * dots.length)];
-                
-                // Simulate chain
-                const toExplode = [startDot];
-                const exploded = new Set();
-                let chainCount = 0;
-                
-                while (toExplode.length > 0) {
-                    const dot = toExplode.shift();
-                    if (exploded.has(dot)) continue;
-                    exploded.add(dot);
-                    chainCount++;
-                    
-                    dots.forEach(other => {
-                        if (exploded.has(other)) return;
-                        const dist = Math.hypot(other.x - dot.x, other.y - dot.y);
-                        if (dist < EXPLOSION_RADIUS) {
-                            toExplode.push(other);
-                        }
-                    });
-                }
-                
-                maxChain = chainCount;
-                simScore = chainCount * 10;
-                
-                results.scores.push(simScore);
-                results.chainLengths.push(maxChain);
-                results.clearRates.push(chainCount === DOT_COUNT ? 1 : 0);
-            }
-            
-            const avgScore = results.scores.reduce((a,b) => a+b, 0) / iterations;
-            const avgChain = results.chainLengths.reduce((a,b) => a+b, 0) / iterations;
-            const clearRate = results.clearRates.reduce((a,b) => a+b, 0) / iterations;
-            const maxChain = Math.max(...results.chainLengths);
-            
-            const report = `
-Test Results (${iterations} games):
-Avg Score: ${avgScore.toFixed(0)}
-Avg Chain: ${avgChain.toFixed(1)} dots
-Clear Rate: ${(clearRate*100).toFixed(1)}%
-Max Chain: ${maxChain}
-            `.trim();
-            
-            document.getElementById('testResults').textContent = report;
-            console.log(report);
-            return results;
-        };
-
-        // Run quick test on load
-        setTimeout(() => window.runTests(50), 100);
 
         loop();
     </script>
