@@ -140,10 +140,9 @@
     let slowMo = 1.0;
     let slowMoTarget = 1.0;
 
-    // Touch/hover preview
-    let previewX = -100, previewY = -100;
-    let previewActive = false;
+    // Screen effects
     let screenFlash = 0;
+    let beatPulse = 0;
 
     // Music system
     const MUSIC_PATTERN = [
@@ -270,12 +269,12 @@
 
         playMusicNote(noteIdx, vol) {
             if (!this.initialized) return;
-            this._voicePlay(SCALE_NOTES[noteIdx], 'sine', vol, 0.15, 0.1, 0.4, 0.3, 1.2);
+            this._voicePlay(SCALE_NOTES[noteIdx], 'triangle', vol, 0.01, 0.08, 0.5, 0.4, 1.0);
         },
 
         playMusicBass(noteIdx) {
             if (!this.initialized) return;
-            this._voicePlay(SCALE_NOTES[noteIdx], 'sine', 0.025, 0.05, 0.1, 0.25, 0.4, 0.9);
+            this._voicePlay(SCALE_NOTES[noteIdx], 'sine', 0.12, 0.05, 0.1, 0.3, 0.5, 1.0);
         },
 
         playMiss() {
@@ -589,12 +588,12 @@
     function spawnCelebration(text, hue, scale) {
         floatingTexts.push({
             x: W/2, y: H * 0.35, text, hue,
-            age: 0, maxAge: 90, scale: scale || 1, celebration: true
+            age: 0, maxAge: 120, scale: scale || 1, celebration: true
         });
         emitCelebrationBurst(W/2, H/2, hue, Math.floor(40 * (scale || 1)));
         shakeTrauma = Math.min(1.0, shakeTrauma + 0.3 * (scale || 1));
         bgPulse = Math.min(0.4, bgPulse + 0.12 * (scale || 1));
-        screenFlash = Math.min(0.5, 0.15 * (scale || 1));
+        screenFlash = Math.min(0.6, 0.40 * (scale || 1));
     }
 
     function updateFloatingTexts() {
@@ -991,7 +990,12 @@
         audio.playChainNote(chainCount - 1, generation);
 
         spawnFloatingText(dot.x, dot.y - 15, `+${points}`, dot.getHue());
+        // Particles scale with chain — escalating visual intensity
         emitParticles(dot.x, dot.y, dot.getHue(), generation);
+        // Extra burst at high chains
+        if (chainCount >= 8) {
+            emitParticles(dot.x, dot.y, dot.getHue() + 20, Math.max(0, generation - 2));
+        }
 
         if (parentX !== undefined && parentY !== undefined) {
             spawnChainLine(parentX, parentY, dot.x, dot.y);
@@ -1005,9 +1009,9 @@
         else if (chainCount >= 10) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
         else if (chainCount >= 5) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
 
-        // Slow-mo on big chains
-        if (chainCount >= 5 && slowMo > 0.45) {
-            slowMoTarget = 0.4;
+        // Slow-mo on chains (0.3x at 3+ — dramatic, savoring)
+        if (chainCount >= 3 && slowMo > 0.35) {
+            slowMoTarget = 0.3;
         }
 
         // Celebrations
@@ -1088,8 +1092,10 @@
                 localStorage.setItem('cr3_bestScore', bestScore);
             }
 
-            spawnFloatingText(W/2, H/2, `Round ${round} Clear!`, 200);
+            // Lavish round-clear celebration (Peggle-style)
+            spawnCelebration(`Round ${round} Clear!`, 200, 1.4);
             audio.playRoundClear();
+            slowMoTarget = 0.2; // Dramatic slow-mo savoring the win
 
             round++;
             const nextParams = getRoundParams(round);
@@ -1144,15 +1150,17 @@
         updateChainLines();
         particles.update();
 
-        // Music system — rhythmic arpeggio
+        // Music system — rhythmic arpeggio (present, not buried)
         if (audio.initialized && gameState !== 'start' && now >= nextMusicBeat) {
             nextMusicBeat = now + MUSIC_BEAT_MS;
             const idx = musicBeat % MUSIC_PATTERN.length;
             const [noteIdx, volMult] = MUSIC_PATTERN[idx];
-            if (gameState !== 'resolving') {
-                audio.playMusicNote(noteIdx, 0.035 * volMult);
-            }
+            // Duck during resolving (chain notes are the star) but don't mute
+            const musicVol = gameState === 'resolving' ? 0.08 : 0.20;
+            audio.playMusicNote(noteIdx, musicVol * volMult);
             if (idx % 4 === 0) audio.playMusicBass(0);
+            // Beat pulse — background throbs with the music
+            beatPulse = Math.max(beatPulse, idx % 4 === 0 ? 0.08 : 0.04);
             musicBeat++;
         }
 
@@ -1219,9 +1227,10 @@
         ctx.fillStyle = '#020210';
         ctx.fillRect(0, 0, W, H);
 
+        const bp = bgPulse + beatPulse;
         const bgGrad = ctx.createRadialGradient(W/2, H * 0.55, 0, W/2, H * 0.55, Math.max(W, H) * 0.7);
-        bgGrad.addColorStop(0, `rgba(${12 + bgPulse * 60|0}, ${8 + bgPulse * 30|0}, ${25 + bgPulse * 80|0}, 1)`);
-        bgGrad.addColorStop(0.5, `rgba(${5 + bgPulse * 30|0}, ${4 + bgPulse * 15|0}, ${18 + bgPulse * 40|0}, 1)`);
+        bgGrad.addColorStop(0, `rgba(${12 + bp * 80|0}, ${8 + bp * 40|0}, ${25 + bp * 100|0}, 1)`);
+        bgGrad.addColorStop(0.5, `rgba(${5 + bp * 40|0}, ${4 + bp * 20|0}, ${18 + bp * 50|0}, 1)`);
         bgGrad.addColorStop(1, 'rgba(2, 2, 12, 1)');
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, W, H);
@@ -1247,21 +1256,24 @@
             ctx.globalCompositeOperation = 'source-over';
         }
 
-        // Screen flash on celebrations
+        // Screen flash on celebrations (40-50% opacity per research)
         if (screenFlash > 0.005) {
             ctx.fillStyle = `rgba(255, 255, 255, ${screenFlash})`;
             ctx.fillRect(0, 0, W, H);
-            screenFlash *= 0.82;
+            screenFlash *= 0.78;
             if (screenFlash < 0.005) screenFlash = 0;
         }
+
+        // Beat pulse decay
+        if (beatPulse > 0.001) beatPulse *= 0.86; else beatPulse = 0;
 
         drawAmbient();
 
         ctx.save();
         ctx.translate(shakeX, shakeY);
 
-        // Preview circle (before dots so dots draw on top)
-        drawPreview();
+        // Connection lines between chainable dots (always visible)
+        drawConnections();
 
         drawChainLines();
         for (const e of explosions) e.draw(ctx);
@@ -1275,56 +1287,91 @@
     }
 
     // =====================================================================
-    // PREVIEW — shows explosion radius, highlights dots in range
+    // CONNECTIONS — radius rings + lines between chainable dots
     // =====================================================================
-    function drawPreview() {
-        if (gameState !== 'playing' || previewX < 0) return;
+    function drawConnections() {
+        if (gameState !== 'playing' && gameState !== 'resolving') return;
+        const now = performance.now();
+        const pulse = Math.sin(now * 0.003) * 0.15 + 0.85;
         const r = explosionRadius;
 
-        ctx.globalCompositeOperation = 'lighter';
-
-        // Filled area
-        ctx.globalAlpha = 0.035;
-        const pg = ctx.createRadialGradient(previewX, previewY, 0, previewX, previewY, r);
-        pg.addColorStop(0, 'rgba(255, 220, 140, 0.4)');
-        pg.addColorStop(0.8, 'rgba(255, 200, 100, 0.08)');
-        pg.addColorStop(1, 'rgba(255, 180, 80, 0)');
-        ctx.fillStyle = pg;
-        ctx.fillRect(previewX - r, previewY - r, r * 2, r * 2);
-
-        // Ring
-        ctx.globalAlpha = 0.15;
-        ctx.beginPath();
-        ctx.arc(previewX, previewY, r, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 220, 140, 0.6)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Highlight dots in range
-        let count = 0;
-        for (const d of dots) {
-            if (!d.active) continue;
-            if (Math.hypot(d.x - previewX, d.y - previewY) <= r) {
-                count++;
-                ctx.globalAlpha = 0.2;
-                const hr = DOT_GLOW_SIZE * 1.4;
-                const hg = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, hr);
-                hg.addColorStop(0, 'rgba(255, 220, 100, 0.6)');
-                hg.addColorStop(1, 'rgba(255, 220, 100, 0)');
-                ctx.fillStyle = hg;
-                ctx.fillRect(d.x - hr, d.y - hr, hr * 2, hr * 2);
+        // Count neighbors for each active dot
+        for (let i = 0; i < dots.length; i++) {
+            if (dots[i].active) dots[i]._neighbors = 0;
+        }
+        const pairs = [];
+        for (let i = 0; i < dots.length; i++) {
+            const a = dots[i];
+            if (!a.active) continue;
+            for (let j = i + 1; j < dots.length; j++) {
+                const b = dots[j];
+                if (!b.active) continue;
+                const dist = Math.hypot(a.x - b.x, a.y - b.y);
+                if (dist <= r) {
+                    a._neighbors++;
+                    b._neighbors++;
+                    pairs.push(a, b, dist);
+                }
             }
         }
 
-        // Count above ring
-        if (count > 0) {
-            const s = Math.max(1, Math.min(W, H) / 600);
-            ctx.globalAlpha = 0.6;
-            ctx.font = `700 ${Math.round(15 * s)}px Inter, system-ui, sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            ctx.fillStyle = 'rgba(255, 220, 100, 0.9)';
-            ctx.fillText(count, previewX, previewY - r - 6 * s);
+        ctx.globalCompositeOperation = 'lighter';
+
+        // Draw blast-radius rings around every active dot
+        for (const d of dots) {
+            if (!d.active) continue;
+            const hue = d.getHue();
+            const n = d._neighbors;
+            const hasNeighbors = n > 0;
+
+            // Ring brightness scales with cluster size
+            const ringAlpha = (hasNeighbors
+                ? 0.12 + Math.min(0.25, n * 0.06)
+                : 0.06) * pulse * d.alpha;
+
+            ctx.globalAlpha = ringAlpha;
+            ctx.strokeStyle = `hsla(${hue}, 55%, 60%, 1)`;
+            ctx.lineWidth = hasNeighbors ? 1.5 : 1.0;
+
+            // Isolated dots: dashed ring. Clustered dots: solid ring.
+            if (!hasNeighbors) ctx.setLineDash([4, 8]);
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+            ctx.stroke();
+            if (!hasNeighbors) ctx.setLineDash([]);
+
+            // Faint radial fill for clustered dots (shows overlap zones)
+            if (hasNeighbors) {
+                const fillA = ringAlpha * 0.12;
+                ctx.globalAlpha = fillA;
+                const fg = ctx.createRadialGradient(d.x, d.y, r * 0.6, d.x, d.y, r);
+                fg.addColorStop(0, `hsla(${hue}, 40%, 50%, 0)`);
+                fg.addColorStop(1, `hsla(${hue}, 40%, 50%, 1)`);
+                ctx.fillStyle = fg;
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Connection lines between chainable pairs
+        for (let k = 0; k < pairs.length; k += 3) {
+            const a = pairs[k], b = pairs[k+1], dist = pairs[k+2];
+            const proximity = 1 - dist / r;
+            const hue = (a.getHue() + b.getHue()) / 2;
+            const alpha = proximity * 0.40 * pulse;
+
+            // Wide glow
+            ctx.globalAlpha = alpha * 0.4;
+            ctx.strokeStyle = `hsla(${hue}, 50%, 65%, 1)`;
+            ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+
+            // Bright core
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = `hsla(${hue}, 40%, 88%, 1)`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
         }
 
         ctx.globalAlpha = 1;
@@ -1496,39 +1543,10 @@
     // =====================================================================
     // INPUT
     // =====================================================================
-    // Desktop: mousemove for passive preview
-    canvas.addEventListener('pointermove', e => {
-        previewX = e.clientX;
-        previewY = e.clientY;
-    });
-
     canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
-        previewX = e.clientX;
-        previewY = e.clientY;
-        // Instant action for start/gameover
-        if (gameState === 'start' || gameState === 'gameover') {
-            handleTap(previewX, previewY);
-            return;
-        }
-        previewActive = true;
+        handleTap(e.clientX, e.clientY);
     });
-
-    canvas.addEventListener('pointerup', e => {
-        e.preventDefault();
-        if (previewActive && gameState === 'playing') {
-            previewX = e.clientX;
-            previewY = e.clientY;
-            handleTap(previewX, previewY);
-        }
-        previewActive = false;
-    });
-
-    canvas.addEventListener('pointerleave', () => {
-        previewX = -100;
-        previewActive = false;
-    });
-
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
     // =====================================================================
