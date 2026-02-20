@@ -82,6 +82,20 @@ In any 10-second window, how many "God Moments" exist? Too few = frustrating. To
 
 **Stubborn metric: DHR** — drift hits consistently below 30% sweet spot across all configs. Dots don't drift into active explosions enough. Potential fixes: shorter hold duration, faster dots, gravity mechanics.
 
+### v6 Results (dot types active, 2026-02-20)
+
+With gravity + volatile types at R5:
+
+| Metric | v5.1 (no types) | v6 (types) | Sweet Spot | Notes |
+|--------|-----------------|------------|------------|-------|
+| SCR | 3.04 | 3.60 | 2-5x | Better — type awareness raises skill ceiling |
+| DHR | 0.19 | 0.21 | 0.30-0.55 | Slight improvement from gravity pull |
+| F3 | 49% | 65% | 30-60% | Gravity creates sticky clusters (slightly high) |
+| R50 | 73px | 80px | 30-80px | On the edge |
+| Chaos | 83% | 90% | 40-85% | Gravity stabilizes clusters (too high) |
+
+Key insight: Gravity dots help DHR but also make clusters too stable (high F3, high chaos retention). May need to reduce gravity pull force or add volatile dots as destabilizers. The tension between gravity (stabilize) and volatile (destabilize) is exactly the design intent.
+
 **Mechanic variants tested** (in simulation only, not in game):
 - Gravity dots (pull neighbors) — didn't improve metrics alone
 - Volatile dots (1.5x explosion radius) — slightly higher max chains
@@ -116,6 +130,7 @@ From the Gemini conversation, refined by simulation data:
 | v4 | 2026-02-20 | Connection lines, radius rings, 3x louder music, slow-mo |
 | v5 | 2026-02-20 | Fix tap vs dot visual confusion (ripple), soft auras, remove slow-mo, faster dots, escalating explosions |
 | v5.1 | 2026-02-20 | Radius tuned to 0.11 via sweep data, build info in UI |
+| v6 | 2026-02-20 | Dot types: gravity (purple, pulls), volatile (orange, 1.5x radius). Property transmission. |
 
 ## Playtest Feedback Log
 
