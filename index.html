@@ -36,8 +36,13 @@
     // =====================================================================
 
     // Build info
-    const BUILD_VERSION = 'v6';
+    const BUILD_VERSION = 'v7';
     const BUILD_DATE = '2026-02-20';
+
+    // Progression — setback + mercy
+    const SETBACK_ROUNDS = 2;          // on death, go back 2 rounds (not to R1)
+    const MERCY_RADIUS_BONUS = 0.05;   // +5% explosion radius per consecutive fail
+    const MERCY_RADIUS_CAP = 0.15;     // max +15% mercy radius
 
     // Dot types — physics modifiers, not scripted combos
     const DOT_TYPES = {
@@ -154,6 +159,24 @@
     // Screen effects
     let screenFlash = 0;
     let beatPulse = 0;
+
+    // Progression state
+    let consecutiveFails = 0;       // how many times failed current round
+    let mercyBonus = 0;             // current mercy radius multiplier (0 to MERCY_RADIUS_CAP)
+    let peakRound = 0;              // highest round reached this session
+
+    // Spectator mode (bot autoplay)
+    const urlParams = new URLSearchParams(window.location.search);
+    let spectatorMode = urlParams.has('watch');
+    let botTarget = null;           // {x, y} where bot wants to tap
+    let botThinkTimer = 0;          // countdown before bot taps
+    let botScanInterval = 400;      // ms between bot scans
+    let botLastScan = 0;
+    let botReactionDelay = 600;     // ms from decision to tap
+
+    // Replay recording
+    let replayLog = [];             // [{t, type, data}, ...]
+    let replayStartTime = 0;
 
     // Music system
     const MUSIC_PATTERN = [
@@ -1199,13 +1222,22 @@
             audio.init();
             round = 1;
             totalScore = 0;
+            consecutiveFails = 0;
+            mercyBonus = 0;
+            peakRound = 1;
+            replayLog = [];
+            replayStartTime = performance.now();
             startRound();
             return;
         }
 
         if (gameState === 'gameover') {
-            round = 1;
-            totalScore = 0;
+            // Setback: go back SETBACK_ROUNDS, not to R1
+            round = Math.max(1, round - SETBACK_ROUNDS);
+            totalScore = Math.max(0, totalScore - score); // remove failed round score
+            // Mercy: consecutive fails on same frontier increase radius
+            consecutiveFails++;
+            mercyBonus = Math.min(MERCY_RADIUS_CAP, consecutiveFails * MERCY_RADIUS_BONUS);
             startRound();
             return;
         }
@@ -1215,10 +1247,15 @@
         audio.init();
         audio.playTap();
 
+        // Log tap for replay
+        replayLog.push({ t: performance.now() - replayStartTime, type: 'tap', data: { x, y, round, chainCount } });
+
         gameState = 'resolving';
         freezeFrames = HIT_FREEZE_FRAMES;
 
-        const exp = new Explosion(x, y, 0, explosionRadius, handleDotCaught);
+        // Apply mercy bonus to explosion radius
+        const effectiveRadius = explosionRadius * (1 + mercyBonus);
+        const exp = new Explosion(x, y, 0, effectiveRadius, handleDotCaught);
         explosions.push(exp);
 
         let hitAny = false;
@@ -1245,12 +1282,20 @@
                 localStorage.setItem('cr3_bestScore', bestScore);
             }
 
+            // Clear = reset mercy (you proved you can do it)
+            consecutiveFails = 0;
+            mercyBonus = 0;
+
+            // Log round clear for replay
+            replayLog.push({ t: performance.now() - replayStartTime, type: 'clear', data: { round, chainCount, score, target: params.target } });
+
             // Lavish round-clear celebration (Peggle-style)
             spawnCelebration(`Round ${round} Clear!`, 200, 1.4);
             audio.playRoundClear();
             slowMoTarget = 0.6; // Brief celebration pause
 
             round++;
+            if (round > peakRound) peakRound = round;
             const nextParams = getRoundParams(round);
             generateDots(nextParams.dots, nextParams.speedMin, nextParams.speedMax, nextParams.typeWeights);
             explosions = [];
@@ -1269,6 +1314,9 @@
             gameState = 'gameover';
             gameOverTimer = 0;
             audio.playGameOver();
+            // Log failure for replay
+            const frustration = params.target > 0 ? chainCount / params.target : 0;
+            replayLog.push({ t: performance.now() - replayStartTime, type: 'fail', data: { round, chainCount, target: params.target, frustration: +frustration.toFixed(2) } });
         }
     }
 
@@ -1569,6 +1617,12 @@
             ctx.font = `400 ${13 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.fillText(`Target: ${params.target}`, W/2, infoY);
+            // Mercy indicator (subtle)
+            if (mercyBonus > 0) {
+                ctx.font = `300 ${10 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
+                ctx.fillText(`+${Math.round(mercyBonus * 100)}% reach`, W/2, infoY + 18 * s);
+            }
         }
 
         if (gameState === 'gameover') drawGameOver();
@@ -1624,6 +1678,13 @@
             ctx.fillStyle = 'rgba(255,255,255,0.2)';
             ctx.fillText(`Best: Round ${bestRound}`, W/2, H/2 + subSize * 6);
         }
+
+        // Keyboard hints (desktop only)
+        if (W > 600) {
+            ctx.font = `200 ${Math.min(11, subSize * 0.65)}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.12)';
+            ctx.fillText('W: watch bot  ·  R: save replay', W/2, H/2 + subSize * 8);
+        }
     }
 
     function drawGameOver() {
@@ -1663,6 +1724,14 @@
                 ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
                 ctx.fillText('New Best!', W/2, H/2 + 58 * s);
             }
+
+            // Setback info
+            const restartRound = Math.max(1, round - SETBACK_ROUNDS);
+            if (restartRound > 1) {
+                ctx.font = `300 ${12 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                ctx.fillText(`Restart from Round ${restartRound}`, W/2, H/2 + 72 * s);
+            }
         }
 
         if (t > 0.6) {
@@ -1670,18 +1739,151 @@
             const pa = t3 * (0.3 + 0.1 * Math.sin(performance.now() * 0.003));
             ctx.font = `300 ${14 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = `rgba(255,255,255,${pa})`;
-            ctx.fillText('Tap to play again', W/2, H/2 + 100 * s);
+            ctx.fillText('Tap to try again', W/2, H/2 + 100 * s);
         }
 
         ctx.globalAlpha = 1;
     }
 
     // =====================================================================
+    // SPECTATOR BOT (greedy grid search)
+    // =====================================================================
+    function botFindBestTap() {
+        const gridSize = 20;
+        let bestX = W / 2, bestY = H / 2, bestCount = 0;
+        const r = explosionRadius * (1 + mercyBonus);
+        for (let gx = 0; gx < gridSize; gx++) {
+            for (let gy = 0; gy < gridSize; gy++) {
+                const x = (gx + 0.5) * W / gridSize;
+                const y = (gy + 0.5) * H / gridSize;
+                let count = 0;
+                for (const d of dots) {
+                    if (d.active && Math.hypot(d.x - x, d.y - y) <= r) count++;
+                }
+                if (count > bestCount) { bestCount = count; bestX = x; bestY = y; }
+            }
+        }
+        return { x: bestX, y: bestY, count: bestCount };
+    }
+
+    function updateBot(now) {
+        if (!spectatorMode) return;
+
+        if (gameState === 'start') {
+            handleTap(W / 2, H / 2);
+            return;
+        }
+
+        if (gameState === 'gameover' && gameOverTimer > 0.8) {
+            handleTap(W / 2, H / 2);
+            return;
+        }
+
+        if (gameState !== 'playing') return;
+
+        // Scan for best position periodically — but don't reset if already committed
+        if (!botTarget && now - botLastScan > botScanInterval) {
+            botLastScan = now;
+            const best = botFindBestTap();
+            if (best.count >= 1) {
+                botTarget = {
+                    x: best.x + (Math.random() - 0.5) * 20,
+                    y: best.y + (Math.random() - 0.5) * 20,
+                    count: best.count,
+                };
+                botThinkTimer = botReactionDelay + Math.random() * 200;
+            }
+        }
+
+        // Countdown reaction delay, then tap
+        if (botTarget) {
+            botThinkTimer -= 16.67;
+            if (botThinkTimer <= 0) {
+                // Re-evaluate at tap time (dots moved)
+                const fresh = botFindBestTap();
+                if (fresh.count >= 1) {
+                    handleTap(fresh.x + (Math.random() - 0.5) * 10, fresh.y + (Math.random() - 0.5) * 10);
+                }
+                botTarget = null;
+                botLastScan = now; // reset scan timer after tap
+            }
+        }
+    }
+
+    function drawBotOverlay() {
+        if (!spectatorMode) return;
+        const s = Math.max(1, Math.min(W, H) / 600);
+
+        // Bot target crosshair
+        if (botTarget && gameState === 'playing') {
+            const pulse = Math.sin(performance.now() * 0.008) * 0.3 + 0.7;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.4 * pulse;
+            ctx.strokeStyle = 'rgba(255, 255, 100, 1)';
+            ctx.lineWidth = 1.5;
+
+            // Crosshair
+            const cr = 15 * s;
+            ctx.beginPath();
+            ctx.moveTo(botTarget.x - cr, botTarget.y);
+            ctx.lineTo(botTarget.x + cr, botTarget.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(botTarget.x, botTarget.y - cr);
+            ctx.lineTo(botTarget.x, botTarget.y + cr);
+            ctx.stroke();
+
+            // Circle showing effective radius
+            ctx.globalAlpha = 0.15 * pulse;
+            ctx.beginPath();
+            ctx.arc(botTarget.x, botTarget.y, explosionRadius * (1 + mercyBonus), 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.restore();
+        }
+
+        // "WATCHING" label
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.font = `600 ${10 * s | 0}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255, 255, 100, 0.3)';
+        ctx.fillText('BOT', 8 * s, 8 * s);
+    }
+
+    // =====================================================================
+    // REPLAY DOWNLOAD
+    // =====================================================================
+    function downloadReplay() {
+        if (replayLog.length === 0) return;
+        const data = JSON.stringify({
+            version: BUILD_VERSION,
+            date: BUILD_DATE,
+            viewport: { w: W, h: H },
+            peakRound,
+            bestRound,
+            totalScore,
+            events: replayLog,
+        }, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `replay-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // =====================================================================
     // GAME LOOP
     // =====================================================================
     function loop() {
+        const now = performance.now();
+        updateBot(now);
         update();
         draw();
+        drawBotOverlay();
         requestAnimationFrame(loop);
     }
 
@@ -1690,9 +1892,20 @@
     // =====================================================================
     canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
-        handleTap(e.clientX, e.clientY);
+        if (!spectatorMode) handleTap(e.clientX, e.clientY);
     });
     canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e => {
+        if (e.key === 'w' || e.key === 'W') {
+            spectatorMode = !spectatorMode;
+            if (spectatorMode) { botTarget = null; botLastScan = 0; }
+        }
+        if (e.key === 'r' || e.key === 'R') {
+            downloadReplay();
+        }
+    });
 
     // =====================================================================
     // INIT
@@ -1701,6 +1914,7 @@
     generateDots(10, 0.5, 1.0);
     gameState = 'start';
     lastFrame = performance.now();
+    if (spectatorMode) audio.init();
     loop();
 
     </script>
