@@ -36,7 +36,7 @@
     // =====================================================================
 
     // Build info
-    const BUILD_VERSION = 'v8';
+    const BUILD_VERSION = 'v8.1';
     const BUILD_DATE = '2026-02-20';
 
     // Progression — setback + mercy
@@ -54,6 +54,7 @@
     // Cascade momentum — each chain generation grows bigger + lingers longer
     const CASCADE_RADIUS_GROWTH = 0.08;    // +8% explosion radius per generation
     const CASCADE_HOLD_GROWTH_MS = 200;    // +200ms hold duration per generation
+    const CASCADE_GEN_CAP = 4;             // max generation for cascade scaling (negative feedback loop)
 
     // Explosion radius — tighter base, cascade compensates
     const EXPLOSION_RADIUS_PCT = 0.10;
@@ -914,12 +915,13 @@
             // Volatile explosions have bigger radius (property transmission!)
             const typeDef = DOT_TYPES[this.dotType] || DOT_TYPES.standard;
             let baseRadius = radius * typeDef.radiusMult;
-            // Cascade momentum: each generation grows bigger + holds longer
-            if (generation > 0) {
-                baseRadius *= (1 + CASCADE_RADIUS_GROWTH * generation);
+            // Cascade momentum: each generation grows bigger + holds longer (capped)
+            const effectiveGen = Math.min(generation, CASCADE_GEN_CAP);
+            if (effectiveGen > 0) {
+                baseRadius *= (1 + CASCADE_RADIUS_GROWTH * effectiveGen);
             }
             this.explosionRadius = baseRadius;
-            this.holdMs = EXPLOSION_HOLD_MS + (generation > 0 ? CASCADE_HOLD_GROWTH_MS * generation : 0);
+            this.holdMs = EXPLOSION_HOLD_MS + (effectiveGen > 0 ? CASCADE_HOLD_GROWTH_MS * effectiveGen : 0);
             this.onCaught = onCaught;
             this.createdAt = performance.now();
             this.phase = 'grow';

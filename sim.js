@@ -42,6 +42,7 @@ const DEFAULT_CONFIG = {
     CASCADE_JITTER_MS: 25,
     CASCADE_RADIUS_GROWTH: 0.08,    // +8% per generation
     CASCADE_HOLD_GROWTH_MS: 200,    // +200ms hold per generation
+    CASCADE_GEN_CAP: 4,            // max generation for cascade scaling
     MIN_DOT_DISTANCE: 25,
     SCREEN_MARGIN: 16,
     MULT_THRESHOLDS: [
@@ -185,10 +186,11 @@ class Simulation {
         const radiusMult = dotType === 'volatile' ? 1.5 : 1.0;
         let maxRadius = this.explosionRadius * radiusMult;
         let holdMs = this.cfg.EXPLOSION_HOLD_MS;
-        // Cascade momentum: each generation grows bigger + holds longer
-        if (generation > 0) {
-            maxRadius *= (1 + this.cfg.CASCADE_RADIUS_GROWTH * generation);
-            holdMs += this.cfg.CASCADE_HOLD_GROWTH_MS * generation;
+        // Cascade momentum: each generation grows bigger + holds longer (capped)
+        const effectiveGen = Math.min(generation, this.cfg.CASCADE_GEN_CAP);
+        if (effectiveGen > 0) {
+            maxRadius *= (1 + this.cfg.CASCADE_RADIUS_GROWTH * effectiveGen);
+            holdMs += this.cfg.CASCADE_HOLD_GROWTH_MS * effectiveGen;
         }
         return {
             x, y, generation,

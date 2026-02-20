@@ -146,6 +146,7 @@ From the Gemini conversation, refined by simulation data:
 | v7 | 2026-02-20 | Setback progression (-2 rounds), mercy (+5%/fail), spectator bot mode (?watch or W key), replay recording (R key). |
 | v7.1 | 2026-02-20 | Mobile touch UI: pill buttons for bot/replay (no more keyboard-only). |
 | v8 | 2026-02-20 | **Cascade Momentum**: tighter base radius (0.10), +8% radius/gen, +200ms hold/gen, faster dots (0.7-1.4). First 5/5 metric config. DHR fixed: 0.21→0.31. |
+| v8.1 | 2026-02-20 | **Cascade Gen Cap**: cap=4 limits unchecked positive feedback. Fixes R14+ field wipes (47%→5% wipe rate). Meadows-inspired progression test. |
 
 ## Playtest Feedback Log
 
@@ -187,12 +188,43 @@ Cascade scaling on phone viewport (base ~40px):
 | 4 | 53px | 1.8s | Dramatic |
 | 6 | 59px (+48%) | 2.2s | Sustained sweep |
 
+## v8.1 Cascade Gen Cap — Meadows Framework
+
+### The Problem (Detected by Playtest, Not Metrics)
+Bot watched to R14 was wiping the entire field. Our metrics only tested R5 — a **Meadows Level 6 failure** (missing information flow). We had "the meter in the basement" — measuring the system at one point while it degraded at another.
+
+### Diagnosis via Leverage Points (Donella Meadows, 1999)
+- **Level 12 (parameters)**: What we'd been doing — tuning radius, speed, hold time. Lowest leverage.
+- **Level 7 (positive feedback loops)**: Cascade momentum IS an unchecked positive feedback loop. At R14 (45 dots), a deep chain hits gen 8-10+, growing radius to 80px+ and holding 3s+. It catches everything.
+- **Level 8 (negative feedback loops)**: What we needed — a cap that limits cascade growth. The system self-corrects.
+- **Level 6 (information flows)**: The progression test — "the meter in the front hall." Testing R1-R15 instead of just R5.
+
+### The Fix: CASCADE_GEN_CAP = 4
+Cascade scaling stops growing after generation 4. Gen-5+ explosions are the same size as gen-4 (radius ~53px, hold ~1.8s on phone). The crescendo still exists and feels dramatic, but it has a ceiling.
+
+### Progression Test Results (300 runs/round, greedy bot, phone viewport)
+
+| Config | AvgClear | AvgWipe | AvgDHR | Problems | WipeR10+ |
+|--------|----------|---------|--------|----------|----------|
+| v8 (no cap) | 60.6% | 20.1% | 0.347 | 3 | 46.2% |
+| **v8.1 (cap=4)** | **58.3%** | **1.8%** | **0.361** | **1** | **4.6%** |
+
+The cap *improves* DHR (0.347→0.361) because capped explosions don't trivially catch everything — dots still need to drift in. Single problem remaining: R1 trivial (98% clear, 12 dots target 1 — acceptable warm-up).
+
+### Tools Built
+| File | Purpose |
+|------|---------|
+| `progression-test.js` | Tests R1-R15 with greedy bot. Measures per-round clear rate, wipe rate, chain/target ratio, DHR. Flags trivial/wipe/wall rounds. |
+
+### Lesson
+Don't test one slice of a dynamic system and assume the whole system works. Progression creates runaway positive feedback — must test the full curve. The simulation harness was necessary but insufficient; the progression test is the real validator.
+
 ## Next Steps (Pending)
 
-1. **Playtest v8** — does cascade momentum feel good? Is the crescendo visible/exciting?
+1. **Playtest v8.1** — does the cascade cap feel natural? Is the crescendo still exciting?
 2. **Structured spawning** — "Salad not Soup": spawn dot types in clusters/veins so players can read the board.
-3. **Tune R7+ chaos** — chaos retention at R7 is ~94% (above 85% sweet spot). May need per-round cascade scaling.
-4. **Prism dot type** — doubles explosion expansion speed. Designed but not implemented.
+3. **Prism dot type** — doubles explosion expansion speed. Designed but not implemented.
+4. **R1 warm-up design** — 98% clear rate is trivially easy. Consider: fewer dots, tighter radius, or skip-to-R2 option.
 
 ## Reference Docs
 - `SPEC.md` — Original game spec (vision, rules, audio, visuals, progression)
