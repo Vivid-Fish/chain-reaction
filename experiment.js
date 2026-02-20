@@ -68,6 +68,7 @@ const DEFAULT_CONFIG = {
     cascade: false,
     cascadeRadiusGrowth: 0.10,  // +10% radius per generation
     cascadeDurationGrowth: 100, // +100ms hold per generation
+    cascadeGenCap: 4,           // max generation for cascade scaling
     cascadePullAtDepth: 5,      // start pulling dots at chain depth 5+
     cascadePullForce: 0.015,    // pull strength
 };
@@ -208,10 +209,11 @@ class Simulation {
         let maxRadius = this.explosionRadius * radiusMult;
         let holdMs = this.cfg.EXPLOSION_HOLD_MS;
 
-        // Cascade momentum: each generation bigger + longer
+        // Cascade momentum: each generation bigger + longer (capped)
         if (this.cfg.cascade && generation > 0) {
-            maxRadius *= (1 + this.cfg.cascadeRadiusGrowth * generation);
-            holdMs += this.cfg.cascadeDurationGrowth * generation;
+            const effectiveGen = Math.min(generation, this.cfg.cascadeGenCap);
+            maxRadius *= (1 + this.cfg.cascadeRadiusGrowth * effectiveGen);
+            holdMs += this.cfg.cascadeDurationGrowth * effectiveGen;
         }
 
         // Resonance: excited dots get bigger explosions
@@ -868,6 +870,11 @@ const EXPERIMENTS = {
     hold_150_r105: {
         label: 'CASCADE HOLD 150ms r=0.105 — slightly larger base',
         config: { cascade: true, EXPLOSION_RADIUS_PCT: 0.105, cascadeRadiusGrowth: 0.10, cascadeDurationGrowth: 150, cascadePullAtDepth: 99 },
+    },
+    // v8.1 — the shipped game config (cascade + cap)
+    v8_1: {
+        label: 'v8.1 SHIPPED — cascade +8%r +200ms hold, cap=4, speed 0.7-1.4',
+        config: { cascade: true, EXPLOSION_RADIUS_PCT: 0.10, cascadeRadiusGrowth: 0.08, cascadeDurationGrowth: 200, cascadeGenCap: 4, cascadePullAtDepth: 99, speedMin: 0.7, speedMax: 1.4 },
     },
     // Combos
     afterglow_resonance: {
