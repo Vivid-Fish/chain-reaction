@@ -4,14 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Chain Reaction</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
         body {
-            background: #0a0a1a;
+            background: #04040f;
             overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
             user-select: none;
             -webkit-user-select: none;
+            cursor: crosshair;
         }
         canvas { display: block; }
     </style>
@@ -20,137 +22,176 @@
     <canvas id="game"></canvas>
     <script>
     'use strict';
+
     // =========================================================================
-    // CHAIN REACTION — Full implementation per SPEC.md
+    // CHAIN REACTION — v2: Continuous, Hold-to-Charge, Beautiful
     // =========================================================================
 
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
 
-    // --- CONSTANTS -----------------------------------------------------------
-    const EXPLOSION_RADIUS_PCT = 0.22;
-    const EXPLOSION_GROW_MS = 300;
-    const EXPLOSION_HOLD_MS = 1200;
-    const EXPLOSION_SHRINK_MS = 500;
-    const CHAIN_STAGGER_MS = 100;
-    const CHAIN_JITTER_MS = 20;
-    const MIN_NOTE_SEPARATION_MS = 40;
-    const DOT_SPEED_MIN = 0.3;
-    const DOT_SPEED_MAX = 0.8;
+    // =====================================================================
+    // CONSTANTS — All taste-dependent values. Tune these.
+    // =====================================================================
+
+    // Explosion radius (% of reference dimension, capped)
+    const BASE_RADIUS_PCT = 0.09;
+    const MAX_CHARGE_RADIUS_PCT = 0.20;
+    const MAX_RADIUS_PX = 160;
+    const BASE_RADIUS_MIN_PX = 30;
+    const MAX_CHARGE_MS = 2000;
+
+    // Explosion lifecycle (ms)
+    const EXPLOSION_GROW_MS = 200;
+    const EXPLOSION_HOLD_MS = 800;
+    const EXPLOSION_SHRINK_MS = 400;
+    const TOTAL_EXPLOSION_MS = EXPLOSION_GROW_MS + EXPLOSION_HOLD_MS + EXPLOSION_SHRINK_MS;
+
+    // Cascade timing
+    const CASCADE_STAGGER_MS = 80;
+    const CASCADE_JITTER_MS = 25;
+
+    // Dots — scaled in resize() based on viewport
+    let DOT_RADIUS = 5;
+    let DOT_GLOW_SIZE = 18;
+    const MIN_DOT_DISTANCE = 28;
+    const SCREEN_MARGIN = 16;
+    const DOT_TRAIL_LENGTH = 8;
+
+    // Particles
+    const PARTICLE_POOL_SIZE = 4000;
+    const AMBIENT_PARTICLE_COUNT = 120;
+
+    // Screen shake
+    const SHAKE_MAX_OFFSET = 14;
+    const SHAKE_DECAY = 0.90;
+    const SHAKE_TRAUMA_PER_DOT = 0.055;
+
+    // Audio
+    const MAX_VOICES = 48;
+
+    // Visual
+    const BG_COLOR = { r: 4, g: 4, b: 15 };
+    const BG_CENTER_BOOST = 8;
+
+    // Hit freeze
     const HIT_FREEZE_FRAMES = 3;
-    const SCREEN_MARGIN = 15;
-    const MIN_DOT_DISTANCE = 25;
-    const PARTICLE_POOL_SIZE = 2000;
-    const SHAKE_MAX_OFFSET = 12;
-    const SHAKE_DECAY = 0.92;
-    const SHAKE_TRAUMA_PER_DOT = 0.06;
-    const BG_DEFAULT = { r: 10, g: 10, b: 26 };
-    const NEAR_MISS_RADIUS_FACTOR = 1.2;
 
-    const LEVELS = [
-        { dots: 10, target: 1 },   // 10% — tutorial
-        { dots: 15, target: 3 },   // 20% — easy
-        { dots: 20, target: 5 },   // 25% — first challenge
-        { dots: 25, target: 8 },   // 32% — read the layout
-        { dots: 30, target: 12 },  // 40% — strategic
-        { dots: 35, target: 18 },  // 51% — hard
-        { dots: 40, target: 25 },  // 63% — very hard
-        { dots: 45, target: 34 },  // 76% — expert
-        { dots: 50, target: 44 },  // 88% — near-impossible
-        { dots: 55, target: 52 },  // 95% — mastery
-        { dots: 60, target: 58 },  // 97% — legendary
-        { dots: 60, target: 60 },  // 100% — perfect play
-    ];
-
+    // Pentatonic scale (C major, 3 octaves)
     const PENTATONIC = [
         130.81, 146.83, 164.81, 196.00, 220.00,
         261.63, 293.66, 329.63, 392.00, 440.00,
         523.25, 587.33, 659.25, 783.99, 880.00,
     ];
 
-    // --- EASING --------------------------------------------------------------
+    // =====================================================================
+    // EASING
+    // =====================================================================
     const easeOutExpo = t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
     const easeInQuad = t => t * t;
+    const easeOutQuad = t => 1 - (1 - t) * (1 - t);
     const easeOutBack = t => 1 + 2.70158 * Math.pow(t - 1, 3) + 1.70158 * Math.pow(t - 1, 2);
     const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+    const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
 
-    // --- GLOBALS -------------------------------------------------------------
-    let W, H, explosionRadius;
-    let currentLevel = 0;
-    let score = 0;
-    let totalScore = 0;
+    // =====================================================================
+    // GLOBALS
+    // =====================================================================
+    let W, H, refDim;
+    let baseRadius, maxChargeRadius;
+    let round = 0;
     let chainCount = 0;
-    let bestScore = parseInt(localStorage.getItem('chainReactionBest') || '0', 10);
-    let gameState = 'start'; // start, playing, resolving, celebrating, failed, allclear
+    let score = 0;
+    let bestRound = parseInt(localStorage.getItem('cr2_bestRound') || '0', 10);
+    let bestScore = parseInt(localStorage.getItem('cr2_bestScore') || '0', 10);
+    let gameState = 'start'; // start, playing, resolving, roundclear, gameover
     let freezeFrames = 0;
-    let bgBrightness = 0;
+    let bgPulse = 0;
     let shakeTrauma = 0;
     let shakeX = 0, shakeY = 0;
-    let slowMo = 0; // countdown in ms
-    let slowMoFactor = 1;
-    let fadeAlpha = 0; // for transitions
-    let fadeDir = 0;
-    let textAlpha = 0;
-    let nearMissDots = [];
-    let nearMissCount = 0;
+    let textAnimations = [];
+    let floatingTexts = [];
+    let chainLines = [];
+    let pendingExplosions = [];
+    let scheduledDetonations = new Set();
+    let roundTransition = 0; // 0-1, for fade between rounds
+    let gameOverTimer = 0;
     let lastChainFreqs = [];
-    let lastNoteTime = 0;
-    let pendingExplosions = []; // scheduled but not yet created
 
-    // --- RESIZE --------------------------------------------------------------
+    // Charge state
+    let charging = false;
+    let chargeStart = 0;
+    let chargeX = 0, chargeY = 0;
+    let chargeRadius = 0;
+
+    // =====================================================================
+    // RESIZE
+    // =====================================================================
     function resize() {
         W = canvas.width = window.innerWidth;
         H = canvas.height = window.innerHeight;
-        explosionRadius = Math.min(W, H) * EXPLOSION_RADIUS_PCT;
+        refDim = Math.min(W, H, 800);
+        const screenMin = Math.min(W, H);
+        baseRadius = Math.max(BASE_RADIUS_MIN_PX, refDim * BASE_RADIUS_PCT);
+        maxChargeRadius = Math.min(MAX_RADIUS_PX, refDim * MAX_CHARGE_RADIUS_PCT);
+        // Dot sizes scale with actual viewport (NOT capped at 800)
+        DOT_RADIUS = Math.max(6, screenMin * 0.014);
+        DOT_GLOW_SIZE = Math.max(28, screenMin * 0.06);
     }
     window.addEventListener('resize', resize);
     resize();
 
-    // =========================================================================
+    // =====================================================================
+    // ROUND FORMULA
+    // =====================================================================
+    function getRoundParams(r) {
+        const dots = Math.min(60, Math.floor(8 + r * 2.2));
+        const pct = Math.min(0.95, 0.06 + (r - 1) * 0.03);
+        const target = Math.max(1, Math.ceil(dots * pct));
+        const speedMin = 0.3 + Math.min(0.3, (r - 1) * 0.012);
+        const speedMax = 0.6 + Math.min(0.6, (r - 1) * 0.024);
+        return { dots, target, pct, speedMin, speedMax };
+    }
+
+    // =====================================================================
     // AUDIO ENGINE
-    // =========================================================================
+    // =====================================================================
     const audio = {
         ctx: null,
         masterGain: null,
         compressor: null,
         delayNode: null,
         reverbNode: null,
+        chargeOsc: null,
+        chargeGain: null,
         voices: [],
-        maxVoices: 24,
         initialized: false,
-        reverbReady: false,
 
         init() {
             if (this.initialized) return;
             this.ctx = new (window.AudioContext || window.webkitAudioContext)();
             this.ctx.resume();
 
-            // Master gain
             this.masterGain = this.ctx.createGain();
-            this.masterGain.gain.value = 0.7;
+            this.masterGain.gain.value = 0.6;
 
-            // Compressor
             this.compressor = this.ctx.createDynamicsCompressor();
-            this.compressor.threshold.value = -20;
-            this.compressor.knee.value = 10;
-            this.compressor.ratio.value = 8;
+            this.compressor.threshold.value = -18;
+            this.compressor.knee.value = 12;
+            this.compressor.ratio.value = 6;
 
-            // Delay
-            this.delayNode = this._createDelay(0.15, 0.2, 0.15);
+            this.delayNode = this._createDelay(0.18, 0.25, 0.18);
 
-            // Signal chain (without reverb initially)
             this.masterGain.connect(this.compressor);
             this.compressor.connect(this.delayNode.input);
             this.delayNode.output.connect(this.ctx.destination);
 
-            // Generate reverb async
+            // Reverb (async)
             setTimeout(() => {
-                this.reverbNode = this._createReverb(1.5, 3.5, 0.18);
-                // Re-route: delay -> reverb -> destination
+                const reverb = this._createReverb(2.0, 3.0, 0.22);
                 this.delayNode.output.disconnect();
-                this.delayNode.output.connect(this.reverbNode.input);
-                this.reverbNode.output.connect(this.ctx.destination);
-                this.reverbReady = true;
+                this.delayNode.output.connect(reverb.input);
+                reverb.output.connect(this.ctx.destination);
             }, 0);
 
             this.initialized = true;
@@ -162,76 +203,133 @@
             return PENTATONIC[Math.max(0, Math.min(PENTATONIC.length - 1, idx))];
         },
 
-        playNote(y, depth) {
+        playNote(y, generation) {
             if (!this.initialized) return;
-            const freq = this.yToFreq(y);
-            lastChainFreqs.push(freq);
+            const baseFreq = this.yToFreq(y);
+            // Slight detuning for organic feel (±8 cents)
+            const detune = (Math.random() - 0.5) * 16;
+            const freq = baseFreq * Math.pow(2, detune / 1200);
 
-            // Enforce min note separation
-            const now = performance.now();
-            if (now - lastNoteTime < MIN_NOTE_SEPARATION_MS) return;
-            lastNoteTime = now;
+            lastChainFreqs.push(baseFreq);
 
-            // ADSR per spec
-            let attack, decayTime, sustainLevel, sustainTime, release, peakVol;
-            if (depth === 0) {
-                attack = 0.005; decayTime = 0.08; sustainLevel = 0.25;
-                sustainTime = 0.05; release = 0.3; peakVol = 0.18;
-            } else if (depth <= 3) {
-                attack = 0.015; decayTime = 0.08; sustainLevel = 0.25;
-                sustainTime = 0.05; release = 0.3 + depth * 0.04; peakVol = Math.max(0.05, 0.18 - depth * 0.012);
+            // ADSR varies by generation depth
+            let attack, decay, susLvl, susTime, release, vol;
+            if (generation === 0) {
+                attack = 0.003; decay = 0.06; susLvl = 0.3;
+                susTime = 0.08; release = 0.4; vol = 0.18;
+            } else if (generation <= 3) {
+                attack = 0.008; decay = 0.06; susLvl = 0.25;
+                susTime = 0.06; release = 0.35 + generation * 0.03;
+                vol = Math.max(0.06, 0.16 - generation * 0.01);
             } else {
-                attack = 0.015; decayTime = 0.06; sustainLevel = 0.20;
-                sustainTime = 0.03; release = 0.3 + depth * 0.04; peakVol = Math.max(0.05, 0.18 - depth * 0.012);
+                attack = 0.012; decay = 0.05; susLvl = 0.20;
+                susTime = 0.04; release = 0.3 + Math.min(generation * 0.03, 0.3);
+                vol = Math.max(0.04, 0.14 - generation * 0.008);
             }
 
-            this._voicePlay(freq, 'triangle', peakVol, attack, decayTime, sustainLevel, sustainTime, release);
+            // Main voice (triangle)
+            this._voicePlay(freq, 'triangle', vol, attack, decay, susLvl, susTime, release);
 
-            // Shimmer layer for shallow chains
-            if (depth <= 1) {
-                this._voicePlay(freq * 2, 'sine', peakVol * 0.12, 0.01, 0.05, 0.1, 0.02, 0.2);
+            // Shimmer (sine, octave up, quiet) for generations 0-2
+            if (generation <= 2) {
+                this._voicePlay(freq * 2, 'sine', vol * 0.10, 0.005, 0.04, 0.08, 0.02, 0.25);
+            }
+
+            // Sub bass (sine, octave down, very quiet) for generations 0-1
+            if (generation <= 1) {
+                this._voicePlay(freq * 0.5, 'sine', vol * 0.08, 0.01, 0.08, 0.15, 0.05, 0.5);
             }
         },
 
         playMiss() {
             if (!this.initialized) return;
-            const ctx = this.ctx;
-            const now = ctx.currentTime;
-            const bufSize = Math.floor(ctx.sampleRate * 0.1);
-            const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
-            const data = buf.getChannelData(0);
-            for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+            const c = this.ctx;
+            const now = c.currentTime;
+            const buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.08), c.sampleRate);
+            const d = buf.getChannelData(0);
+            for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (c.sampleRate * 0.02));
 
-            const src = ctx.createBufferSource();
-            src.buffer = buf;
-            const filter = ctx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.value = 800;
-            filter.Q.value = 1.0;
-            const gain = ctx.createGain();
-            gain.gain.setValueAtTime(0.0001, now);
-            gain.gain.linearRampToValueAtTime(0.08, now + 0.002);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.082);
-
-            src.connect(filter);
-            filter.connect(gain);
-            gain.connect(this.ctx.destination); // Dry, no reverb
-            src.start(now);
-            src.stop(now + 0.1);
-            src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
+            const src = c.createBufferSource(); src.buffer = buf;
+            const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 600;
+            const g = c.createGain();
+            g.gain.setValueAtTime(0.0001, now);
+            g.gain.linearRampToValueAtTime(0.06, now + 0.002);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+            src.connect(f); f.connect(g); g.connect(this.ctx.destination);
+            src.start(now); src.stop(now + 0.08);
+            src.onended = () => { src.disconnect(); f.disconnect(); g.disconnect(); };
         },
 
-        playLevelClearChord(freqs, isPerfect) {
+        playRelease() {
             if (!this.initialized) return;
-            const unique = [...new Set(freqs)].slice(-(isPerfect ? 5 : 3));
-            unique.forEach(f => {
-                this._voicePlay(f, 'sine', 0.15, 0.2, 0.1, 0.8, 1.5, 2.0);
+            // Low "whomp" on release
+            const c = this.ctx;
+            const now = c.currentTime;
+            const osc = c.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(80, now);
+            osc.frequency.exponentialRampToValueAtTime(30, now + 0.15);
+            const g = c.createGain();
+            g.gain.setValueAtTime(0.12, now);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+            osc.connect(g); g.connect(this.masterGain);
+            osc.start(now); osc.stop(now + 0.25);
+            osc.onended = () => { osc.disconnect(); g.disconnect(); };
+        },
+
+        startCharge() {
+            if (!this.initialized) return;
+            const c = this.ctx;
+            this.chargeOsc = c.createOscillator();
+            this.chargeOsc.type = 'sine';
+            this.chargeOsc.frequency.setValueAtTime(60, c.currentTime);
+            this.chargeGain = c.createGain();
+            this.chargeGain.gain.setValueAtTime(0, c.currentTime);
+            this.chargeGain.gain.linearRampToValueAtTime(0.04, c.currentTime + 0.3);
+            const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 400;
+            this.chargeOsc.connect(f); f.connect(this.chargeGain);
+            this.chargeGain.connect(this.masterGain);
+            this.chargeOsc.start();
+        },
+
+        updateCharge(progress) {
+            if (!this.chargeOsc) return;
+            const freq = 60 + progress * 200;
+            this.chargeOsc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            this.chargeGain.gain.setValueAtTime(0.03 + progress * 0.04, this.ctx.currentTime);
+        },
+
+        stopCharge() {
+            if (!this.chargeOsc) return;
+            try {
+                this.chargeGain.gain.linearRampToValueAtTime(0.0001, this.ctx.currentTime + 0.05);
+                this.chargeOsc.stop(this.ctx.currentTime + 0.06);
+            } catch(e) {}
+            this.chargeOsc = null;
+            this.chargeGain = null;
+        },
+
+        playRoundClear(freqs) {
+            if (!this.initialized) return;
+            const unique = [...new Set(freqs)].slice(-4);
+            unique.forEach((f, i) => {
+                setTimeout(() => {
+                    this._voicePlay(f, 'sine', 0.12, 0.15, 0.1, 0.7, 1.0, 1.8);
+                }, i * 60);
+            });
+        },
+
+        playGameOver() {
+            if (!this.initialized) return;
+            [220, 196, 164.81].forEach((f, i) => {
+                setTimeout(() => {
+                    this._voicePlay(f, 'triangle', 0.10, 0.1, 0.15, 0.5, 0.3, 1.5);
+                }, i * 150);
             });
         },
 
         _voicePlay(freq, type, vol, attack, decay, susLvl, susTime, release) {
-            // Voice stealing
-            while (this.voices.length >= this.maxVoices) {
+            while (this.voices.length >= MAX_VOICES) {
                 const old = this.voices.shift();
                 try {
                     old.gain.gain.setValueAtTime(old.gain.gain.value, this.ctx.currentTime);
@@ -239,26 +337,20 @@
                     old.osc.stop(this.ctx.currentTime + 0.01);
                 } catch(e) {}
             }
-
-            const ctx = this.ctx;
-            const now = ctx.currentTime;
-            const osc = ctx.createOscillator();
+            const c = this.ctx;
+            const now = c.currentTime;
+            const osc = c.createOscillator();
             osc.type = type;
             osc.frequency.setValueAtTime(freq, now);
-
-            const env = ctx.createGain();
+            const env = c.createGain();
             env.gain.setValueAtTime(0.0001, now);
             env.gain.linearRampToValueAtTime(vol, now + attack);
             env.gain.linearRampToValueAtTime(vol * susLvl, now + attack + decay);
             const relStart = now + attack + decay + susTime;
             env.gain.setValueAtTime(vol * susLvl, relStart);
             env.gain.exponentialRampToValueAtTime(0.0001, relStart + release);
-
-            osc.connect(env);
-            env.connect(this.masterGain);
-            osc.start(now);
-            osc.stop(relStart + release + 0.05);
-
+            osc.connect(env); env.connect(this.masterGain);
+            osc.start(now); osc.stop(relStart + release + 0.05);
             const voice = { osc, gain: env };
             this.voices.push(voice);
             osc.onended = () => {
@@ -269,58 +361,41 @@
         },
 
         _createDelay(time, feedback, wet) {
-            const ctx = this.ctx;
-            const input = ctx.createGain();
-            const output = ctx.createGain();
-            const delay = ctx.createDelay(2.0);
-            const fb = ctx.createGain();
-            const wetGain = ctx.createGain();
-            const dryGain = ctx.createGain();
-            const filter = ctx.createBiquadFilter();
-
-            delay.delayTime.value = time;
-            fb.gain.value = feedback;
-            wetGain.gain.value = wet;
-            dryGain.gain.value = 1.0;
-            filter.type = 'lowpass';
-            filter.frequency.value = 3000;
-
-            input.connect(dryGain); dryGain.connect(output);
-            input.connect(delay); delay.connect(filter); filter.connect(fb); fb.connect(delay);
-            delay.connect(wetGain); wetGain.connect(output);
-
+            const c = this.ctx;
+            const input = c.createGain(), output = c.createGain();
+            const delay = c.createDelay(2.0), fb = c.createGain();
+            const wetG = c.createGain(), dryG = c.createGain();
+            const filt = c.createBiquadFilter();
+            delay.delayTime.value = time; fb.gain.value = feedback;
+            wetG.gain.value = wet; dryG.gain.value = 1.0;
+            filt.type = 'lowpass'; filt.frequency.value = 2500;
+            input.connect(dryG); dryG.connect(output);
+            input.connect(delay); delay.connect(filt); filt.connect(fb); fb.connect(delay);
+            delay.connect(wetG); wetG.connect(output);
             return { input, output };
         },
 
-        _createReverb(duration, decay, mix) {
-            const ctx = this.ctx;
-            const rate = ctx.sampleRate;
-            const len = Math.floor(rate * duration);
-            const buf = ctx.createBuffer(2, len, rate);
+        _createReverb(dur, dec, mix) {
+            const c = this.ctx;
+            const len = Math.floor(c.sampleRate * dur);
+            const buf = c.createBuffer(2, len, c.sampleRate);
             for (let ch = 0; ch < 2; ch++) {
                 const d = buf.getChannelData(ch);
-                for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-decay * (i / rate));
+                for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-dec * (i / c.sampleRate));
             }
-            const convolver = ctx.createConvolver();
-            convolver.buffer = buf;
-
-            const input = ctx.createGain();
-            const output = ctx.createGain();
-            const wetGain = ctx.createGain();
-            const dryGain = ctx.createGain();
-            wetGain.gain.value = mix;
-            dryGain.gain.value = 1.0;
-
-            input.connect(dryGain); dryGain.connect(output);
-            input.connect(convolver); convolver.connect(wetGain); wetGain.connect(output);
-
+            const conv = c.createConvolver(); conv.buffer = buf;
+            const input = c.createGain(), output = c.createGain();
+            const wetG = c.createGain(), dryG = c.createGain();
+            wetG.gain.value = mix; dryG.gain.value = 1.0;
+            input.connect(dryG); dryG.connect(output);
+            input.connect(conv); conv.connect(wetG); wetG.connect(output);
             return { input, output };
         }
     };
 
-    // =========================================================================
-    // PARTICLE POOL (Float32Array struct-of-arrays)
-    // =========================================================================
+    // =====================================================================
+    // PARTICLE POOL
+    // =====================================================================
     const particles = {
         x: new Float32Array(PARTICLE_POOL_SIZE),
         y: new Float32Array(PARTICLE_POOL_SIZE),
@@ -356,19 +431,14 @@
                 this.life[i]--;
                 if (this.life[i] <= 0) {
                     this.count--;
-                    this.x[i] = this.x[this.count];
-                    this.y[i] = this.y[this.count];
-                    this.vx[i] = this.vx[this.count];
-                    this.vy[i] = this.vy[this.count];
-                    this.life[i] = this.life[this.count];
-                    this.maxLife[i] = this.maxLife[this.count];
-                    this.hue[i] = this.hue[this.count];
-                    this.size[i] = this.size[this.count];
-                    this.friction[i] = this.friction[this.count];
-                    this.gravity[i] = this.gravity[this.count];
-                } else {
-                    i++;
-                }
+                    if (i < this.count) {
+                        this.x[i] = this.x[this.count]; this.y[i] = this.y[this.count];
+                        this.vx[i] = this.vx[this.count]; this.vy[i] = this.vy[this.count];
+                        this.life[i] = this.life[this.count]; this.maxLife[i] = this.maxLife[this.count];
+                        this.hue[i] = this.hue[this.count]; this.size[i] = this.size[this.count];
+                        this.friction[i] = this.friction[this.count]; this.gravity[i] = this.gravity[this.count];
+                    }
+                } else { i++; }
             }
         },
 
@@ -376,15 +446,23 @@
             ctx.globalCompositeOperation = 'lighter';
             for (let i = 0; i < this.count; i++) {
                 const a = this.life[i] / this.maxLife[i];
-                const s = this.size[i];
-                ctx.globalAlpha = a;
-                ctx.fillStyle = `hsl(${this.hue[i]}, 100%, 60%)`;
-                if (s <= 3) {
-                    ctx.fillRect(this.x[i] - s * 0.5, this.y[i] - s * 0.5, s, s);
+                const s = this.size[i] * (0.4 + a * 0.6);
+                const alpha = a * a;
+                if (alpha < 0.01) continue;
+                ctx.globalAlpha = alpha;
+                const h = this.hue[i];
+                if (s > 3) {
+                    // Larger particles get a glow
+                    const gr = s * 2;
+                    const grd = ctx.createRadialGradient(this.x[i], this.y[i], 0, this.x[i], this.y[i], gr);
+                    grd.addColorStop(0, `hsla(${h}, 100%, ${70 + a * 20}%, 0.7)`);
+                    grd.addColorStop(0.5, `hsla(${h}, 90%, ${55 + a * 15}%, 0.15)`);
+                    grd.addColorStop(1, `hsla(${h}, 80%, 50%, 0)`);
+                    ctx.fillStyle = grd;
+                    ctx.fillRect(this.x[i] - gr, this.y[i] - gr, gr * 2, gr * 2);
                 } else {
-                    ctx.beginPath();
-                    ctx.arc(this.x[i], this.y[i], s * 0.5, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.fillStyle = `hsl(${h}, 100%, ${60 + a * 25}%)`;
+                    ctx.fillRect(this.x[i] - s * 0.5, this.y[i] - s * 0.5, s, s);
                 }
             }
             ctx.globalAlpha = 1;
@@ -394,145 +472,332 @@
         clear() { this.count = 0; }
     };
 
-    function emitParticles(x, y, hue, depth) {
-        // Scale particle count by depth
-        let burstCount = 8, driftCount = 4 + Math.floor(Math.random() * 5), sparkCount = Math.floor(Math.random() * 5);
-        if (depth >= 4 && depth <= 7) { burstCount = 6; driftCount = 3 + Math.floor(Math.random() * 3); sparkCount = Math.floor(Math.random() * 3); }
-        else if (depth >= 8) { burstCount = 4; driftCount = 2 + Math.floor(Math.random() * 2); sparkCount = 0; }
+    function emitParticles(x, y, hue, gen) {
+        const burstN = Math.max(4, 14 - Math.floor(gen / 3));
+        const driftN = Math.max(2, 8 - Math.floor(gen / 2));
+        const sparkN = Math.max(0, 6 - gen);
+        const emberN = gen < 6 ? 3 : 1;
 
-        // Burst
-        for (let i = 0; i < burstCount; i++) {
-            const angle = (Math.PI * 2 * i) / burstCount + (Math.random() - 0.5) * 0.4;
-            const speed = 4 + Math.random() * 6;
-            particles.spawn(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed,
-                20 + Math.random() * 15, hue, 2 + Math.random() * 3, 0.93, 0.05);
+        // Burst — fast, radial, colorful
+        for (let i = 0; i < burstN; i++) {
+            const a = (Math.PI * 2 * i) / burstN + (Math.random() - 0.5) * 0.5;
+            const spd = 3.5 + Math.random() * 5;
+            const h = hue + (Math.random() - 0.5) * 30;
+            particles.spawn(x, y, Math.cos(a)*spd, Math.sin(a)*spd,
+                22 + Math.random()*18, h, 2 + Math.random()*3, 0.92, 0.04);
         }
-        // Drift
-        for (let i = 0; i < driftCount; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 1 + Math.random() * 2;
-            particles.spawn(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed,
-                40 + Math.random() * 30, hue, 3 + Math.random() * 4, 0.97, -0.02);
+        // Drift — slow, upward, ethereal
+        for (let i = 0; i < driftN; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const spd = 0.8 + Math.random() * 1.5;
+            particles.spawn(x, y, Math.cos(a)*spd, Math.sin(a)*spd,
+                50 + Math.random()*35, hue + (Math.random()-0.5)*20,
+                3.5 + Math.random()*4, 0.97, -0.025);
         }
-        // Sparks
-        for (let i = 0; i < sparkCount; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 8 + Math.random() * 8;
-            particles.spawn(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed,
-                8 + Math.random() * 8, hue, 1 + Math.random(), 0.90, 0.1);
+        // Sparks — tiny, very fast
+        for (let i = 0; i < sparkN; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const spd = 7 + Math.random() * 9;
+            particles.spawn(x, y, Math.cos(a)*spd, Math.sin(a)*spd,
+                8 + Math.random()*8, hue + 30, 1 + Math.random()*0.8, 0.88, 0.12);
+        }
+        // Embers — tiny, very slow, long-lived
+        for (let i = 0; i < emberN; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const spd = 0.3 + Math.random() * 0.6;
+            particles.spawn(x, y, Math.cos(a)*spd, Math.sin(a)*spd,
+                100 + Math.random()*60, hue, 1.5 + Math.random(), 0.99, -0.008);
         }
     }
 
-    // =========================================================================
+    // =====================================================================
+    // AMBIENT BACKGROUND
+    // =====================================================================
+    const ambientStars = [];
+    function initAmbient() {
+        ambientStars.length = 0;
+        for (let i = 0; i < AMBIENT_PARTICLE_COUNT; i++) {
+            const isBright = Math.random() < 0.15; // 15% are brighter accent stars
+            ambientStars.push({
+                x: Math.random() * W, y: Math.random() * H,
+                vx: (Math.random() - 0.5) * 0.12,
+                vy: (Math.random() - 0.5) * 0.12,
+                size: isBright ? (1.5 + Math.random() * 2) : (0.5 + Math.random() * 1.8),
+                alpha: isBright ? (0.15 + Math.random() * 0.2) : (0.04 + Math.random() * 0.12),
+                phase: Math.random() * Math.PI * 2,
+                hue: isBright ? (180 + Math.random() * 60) : 220,
+            });
+        }
+    }
+
+    function updateAmbient() {
+        for (const s of ambientStars) {
+            s.x += s.vx; s.y += s.vy;
+            s.phase += 0.008;
+            if (s.x < 0) s.x = W; if (s.x > W) s.x = 0;
+            if (s.y < 0) s.y = H; if (s.y > H) s.y = 0;
+        }
+    }
+
+    function drawAmbient() {
+        ctx.globalCompositeOperation = 'lighter';
+        for (const s of ambientStars) {
+            const a = s.alpha * (0.5 + 0.5 * Math.sin(s.phase));
+            if (a < 0.01) continue;
+            ctx.globalAlpha = a;
+            if (s.size > 2) {
+                // Larger stars get a soft glow
+                const gr = s.size * 3;
+                const grd = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, gr);
+                grd.addColorStop(0, `hsla(${s.hue}, 40%, 80%, 0.6)`);
+                grd.addColorStop(0.3, `hsla(${s.hue}, 30%, 70%, 0.15)`);
+                grd.addColorStop(1, `hsla(${s.hue}, 30%, 60%, 0)`);
+                ctx.fillStyle = grd;
+                ctx.fillRect(s.x - gr, s.y - gr, gr * 2, gr * 2);
+            }
+            ctx.fillStyle = `hsla(${s.hue}, 30%, 85%, 1)`;
+            ctx.fillRect(s.x - s.size * 0.5, s.y - s.size * 0.5, s.size, s.size);
+        }
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // =====================================================================
+    // FLOATING TEXT
+    // =====================================================================
+    function spawnFloatingText(x, y, text, hue) {
+        floatingTexts.push({ x, y, text, hue, age: 0, maxAge: 50 });
+    }
+
+    function updateFloatingTexts() {
+        for (let i = floatingTexts.length - 1; i >= 0; i--) {
+            const ft = floatingTexts[i];
+            ft.age++;
+            ft.y -= 1.5 * (1 - ft.age / ft.maxAge); // Decelerate upward
+            if (ft.age >= ft.maxAge) floatingTexts.splice(i, 1);
+        }
+    }
+
+    function drawFloatingTexts() {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const baseSize = Math.max(14, Math.min(W, H) * 0.022);
+        for (const ft of floatingTexts) {
+            const a = 1 - easeInQuad(ft.age / ft.maxAge);
+            const scale = 0.8 + 0.4 * easeOutBack(Math.min(1, ft.age / 8));
+            ctx.globalAlpha = a;
+            const sz = Math.round(baseSize * scale);
+            ctx.save();
+            ctx.shadowColor = `hsla(${ft.hue}, 80%, 60%, 0.5)`;
+            ctx.shadowBlur = 8;
+            ctx.font = `600 ${sz}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = `hsl(${ft.hue}, 80%, 78%)`;
+            ctx.fillText(ft.text, ft.x, ft.y);
+            ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // =====================================================================
+    // CHAIN LINES
+    // =====================================================================
+    function spawnChainLine(x1, y1, x2, y2) {
+        chainLines.push({ x1, y1, x2, y2, age: 0, maxAge: 40 });
+    }
+
+    function updateChainLines() {
+        for (let i = chainLines.length - 1; i >= 0; i--) {
+            chainLines[i].age++;
+            if (chainLines[i].age >= chainLines[i].maxAge) chainLines.splice(i, 1);
+        }
+    }
+
+    function drawChainLines() {
+        ctx.globalCompositeOperation = 'lighter';
+        for (const cl of chainLines) {
+            const a = 0.15 * (1 - cl.age / cl.maxAge);
+            ctx.globalAlpha = a;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(cl.x1, cl.y1);
+            ctx.lineTo(cl.x2, cl.y2);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // =====================================================================
     // DOT
-    // =========================================================================
+    // =====================================================================
     class Dot {
-        constructor(x, y) {
+        constructor(x, y, speedMin, speedMax) {
             this.x = x; this.y = y;
-            const angle = Math.random() * Math.PI * 2;
-            const speed = DOT_SPEED_MIN + Math.random() * (DOT_SPEED_MAX - DOT_SPEED_MIN);
-            this.vx = Math.cos(angle) * speed;
-            this.vy = Math.sin(angle) * speed;
+            const a = Math.random() * Math.PI * 2;
+            const spd = speedMin + Math.random() * (speedMax - speedMin);
+            this.vx = Math.cos(a) * spd;
+            this.vy = Math.sin(a) * spd;
             this.active = true;
+            this.alpha = 0; // Fade in
             this.pulsePhase = Math.random() * Math.PI * 2;
-            this.baseRadius = 6;
-            this.generation = -1;
-            this.nearMiss = false;
-            this.nearMissPulse = 0;
+            this.trail = [];
+            this.bloomTimer = 0; // For detonation bloom effect
+            this.chargeHighlight = 0; // When in charge radius
         }
 
+        getHue() { return 195 - (this.y / H) * 180; }
+
         update() {
-            if (!this.active) return;
+            if (!this.active && this.bloomTimer <= 0) return;
+
+            if (this.bloomTimer > 0) {
+                this.bloomTimer--;
+                return;
+            }
+
+            // Fade in
+            if (this.alpha < 1) this.alpha = Math.min(1, this.alpha + 0.025);
+
             this.x += this.vx;
             this.y += this.vy;
-            this.pulsePhase += 0.04; // ~2.6s period
+            this.pulsePhase += 0.05;
 
+            // Bounce off edges
             if (this.x < SCREEN_MARGIN) { this.vx = Math.abs(this.vx); this.x = SCREEN_MARGIN; }
             if (this.x > W - SCREEN_MARGIN) { this.vx = -Math.abs(this.vx); this.x = W - SCREEN_MARGIN; }
             if (this.y < SCREEN_MARGIN) { this.vy = Math.abs(this.vy); this.y = SCREEN_MARGIN; }
             if (this.y > H - SCREEN_MARGIN) { this.vy = -Math.abs(this.vy); this.y = H - SCREEN_MARGIN; }
 
-            if (this.nearMiss) this.nearMissPulse += 0.1;
+            // Trail
+            this.trail.push({ x: this.x, y: this.y });
+            if (this.trail.length > DOT_TRAIL_LENGTH) this.trail.shift();
+
+            // Charge highlight decay
+            if (this.chargeHighlight > 0) this.chargeHighlight *= 0.85;
         }
 
-        getHue() {
-            return 200 - (this.y / H) * 180;
-        }
+        draw(ctx) {
+            if (!this.active && this.bloomTimer <= 0) return;
 
-        draw(ctx, dimmed) {
-            if (!this.active && !this.nearMiss) return;
-
-            const pulse = Math.sin(this.pulsePhase) * 0.15 + 0.85;
-            const r = this.baseRadius * (5/6 + (pulse * 2/6)); // 5-7px range
             const hue = this.getHue();
-            const alpha = dimmed ? 0.5 : pulse;
+            const pulse = Math.sin(this.pulsePhase) * 0.2 + 0.8;
+            const r = DOT_RADIUS * pulse;
+            const a = this.alpha;
 
-            // Near-miss red highlight
-            if (this.nearMiss && this.active) {
-                const nmPulse = Math.sin(this.nearMissPulse) * 0.5 + 0.5;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, r + 6, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(255, 80, 80, ${nmPulse * 0.6})`;
-                ctx.lineWidth = 2;
-                ctx.stroke();
+            // Bloom effect on detonation
+            if (this.bloomTimer > 0) {
+                const bt = 1 - this.bloomTimer / 12;
+                const br = r * (1 + bt * 5);
+                const ba = (1 - bt);
+                ctx.globalCompositeOperation = 'lighter';
+                // Bright expanding flash
+                ctx.globalAlpha = ba * 0.9;
+                const bloomGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, br);
+                bloomGrad.addColorStop(0, `hsla(${hue}, 70%, 95%, 1)`);
+                bloomGrad.addColorStop(0.3, `hsla(${hue}, 80%, 70%, 0.6)`);
+                bloomGrad.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+                ctx.fillStyle = bloomGrad;
+                ctx.fillRect(this.x - br, this.y - br, br * 2, br * 2);
+                ctx.globalAlpha = 1;
+                ctx.globalCompositeOperation = 'source-over';
+                return;
             }
 
-            // Outer glow ring
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, r + 3, 0, Math.PI * 2);
-            ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${alpha * 0.4})`;
-            ctx.lineWidth = 1;
-            ctx.stroke();
+            // Trail — soft glowing trail behind dot
+            ctx.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < this.trail.length - 1; i++) {
+                const t = this.trail[i];
+                const tp = (i + 1) / this.trail.length;
+                const ta = a * tp * 0.12;
+                const ts = r * tp * 0.8;
+                ctx.globalAlpha = ta;
+                const trailGrad = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, ts * 2);
+                trailGrad.addColorStop(0, `hsla(${hue}, 70%, 60%, 0.5)`);
+                trailGrad.addColorStop(1, `hsla(${hue}, 70%, 60%, 0)`);
+                ctx.fillStyle = trailGrad;
+                ctx.fillRect(t.x - ts * 2, t.y - ts * 2, ts * 4, ts * 4);
+            }
 
-            // Core dot
+            // Outer glow — large, soft, atmospheric
+            const glowR = DOT_GLOW_SIZE + this.chargeHighlight * 12;
+            const glowA = a * (0.14 + pulse * 0.08 + this.chargeHighlight * 0.2);
+            const glowGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowR);
+            glowGrad.addColorStop(0, `hsla(${hue}, 85%, 70%, ${glowA})`);
+            glowGrad.addColorStop(0.4, `hsla(${hue}, 80%, 55%, ${glowA * 0.4})`);
+            glowGrad.addColorStop(1, `hsla(${hue}, 80%, 50%, 0)`);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = glowGrad;
+            ctx.fillRect(this.x - glowR, this.y - glowR, glowR * 2, glowR * 2);
+            ctx.globalCompositeOperation = 'source-over';
+
+            // Core dot — bright, saturated
+            ctx.globalAlpha = a;
+            const coreGrad = ctx.createRadialGradient(
+                this.x - r * 0.2, this.y - r * 0.2, 0,
+                this.x, this.y, r
+            );
+            coreGrad.addColorStop(0, `hsla(${hue}, 60%, 95%, 1)`);
+            coreGrad.addColorStop(0.4, `hsla(${hue}, 85%, ${65 + pulse * 10}%, 1)`);
+            coreGrad.addColorStop(1, `hsla(${hue}, 90%, ${45 + pulse * 10}%, 0.9)`);
             ctx.beginPath();
             ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-            ctx.fillStyle = `hsla(${hue}, 80%, 60%, ${alpha})`;
+            ctx.fillStyle = coreGrad;
             ctx.fill();
+
+            ctx.globalAlpha = 1;
         }
     }
 
-    // =========================================================================
+    // =====================================================================
     // EXPLOSION
-    // =========================================================================
+    // =====================================================================
     class Explosion {
-        constructor(x, y, generation, onCaught) {
+        constructor(x, y, generation, explosionRadius, onCaught, parentX, parentY) {
             this.x = x; this.y = y;
             this.generation = generation;
+            this.explosionRadius = explosionRadius;
             this.onCaught = onCaught;
             this.createdAt = performance.now();
             this.phase = 'grow';
             this.radius = 0;
-            this.maxRadius = explosionRadius;
             this.caught = new Set();
-            this.hue = 200 - (y / H) * 180;
+            this.hue = 195 - (y / H) * 180;
+            this.parentX = parentX;
+            this.parentY = parentY;
+            this.shockwaveRadius = 0;
+            this.flashAlpha = 1;
         }
 
         update(now) {
             const age = now - this.createdAt;
 
+            // Flash fades quickly
+            this.flashAlpha = Math.max(0, 1 - age / 80);
+
+            // Shockwave expands fast
+            this.shockwaveRadius = Math.min(this.explosionRadius * 1.6, age * 0.8);
+
             if (this.phase === 'grow') {
                 if (age >= EXPLOSION_GROW_MS) this.phase = 'hold';
-                const t = Math.min(age / EXPLOSION_GROW_MS, 1);
-                this.radius = this.maxRadius * easeOutExpo(t);
+                this.radius = this.explosionRadius * easeOutExpo(Math.min(age / EXPLOSION_GROW_MS, 1));
             } else if (this.phase === 'hold') {
                 if (age >= EXPLOSION_GROW_MS + EXPLOSION_HOLD_MS) this.phase = 'shrink';
-                this.radius = this.maxRadius;
+                this.radius = this.explosionRadius;
             } else if (this.phase === 'shrink') {
-                const shrinkAge = age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS;
-                if (shrinkAge >= EXPLOSION_SHRINK_MS) { this.phase = 'done'; return false; }
-                const t = shrinkAge / EXPLOSION_SHRINK_MS;
-                this.radius = this.maxRadius * (1 - easeInQuad(t));
+                const t = (age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS;
+                if (t >= 1) { this.phase = 'done'; return false; }
+                this.radius = this.explosionRadius * (1 - easeInQuad(t));
             }
 
-            // Per-frame detection during grow and hold
+            // Per-frame detection
             if (this.phase === 'grow' || this.phase === 'hold') {
                 for (let i = 0; i < dots.length; i++) {
                     const dot = dots[i];
                     if (!dot.active || this.caught.has(i)) continue;
                     if (Math.hypot(dot.x - this.x, dot.y - this.y) <= this.radius) {
                         this.caught.add(i);
-                        if (this.onCaught) this.onCaught(dot, i, this.generation);
+                        if (this.onCaught) this.onCaught(dot, i, this.generation, this.x, this.y);
                     }
                 }
             }
@@ -541,6 +806,7 @@
 
         draw(ctx) {
             if (this.phase === 'done') return;
+            const r = Math.max(0.1, this.radius);
             const age = performance.now() - this.createdAt;
             let alpha = 1;
             if (this.phase === 'shrink') {
@@ -548,402 +814,505 @@
                 alpha = 1 - easeInQuad(Math.min(t, 1));
             }
 
-            const r = Math.max(0.1, this.radius); // Clamp to avoid negative radius errors
+            ctx.globalCompositeOperation = 'lighter';
 
-            const depth = this.generation;
-            const lightness = Math.min(90, 60 + depth * 5);
-            const saturation = Math.max(60, 80 - depth * 3);
+            // Layer 1: Large ambient glow (illuminates surroundings)
+            const ambR = r * 2.5;
+            ctx.globalAlpha = alpha * 0.12;
+            const ambGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, ambR);
+            ambGrad.addColorStop(0, `hsla(${this.hue + 10}, 60%, 70%, 1)`);
+            ambGrad.addColorStop(0.5, `hsla(${this.hue}, 50%, 50%, 0.3)`);
+            ambGrad.addColorStop(1, `hsla(${this.hue}, 50%, 40%, 0)`);
+            ctx.fillStyle = ambGrad;
+            ctx.fillRect(this.x - ambR, this.y - ambR, ambR * 2, ambR * 2);
 
-            // Radial gradient core glow
+            // Layer 2: Initial flash (bright white bloom)
+            if (this.flashAlpha > 0) {
+                ctx.globalAlpha = this.flashAlpha * 0.7;
+                const flashR = r * 0.6 * (1 + (1 - this.flashAlpha) * 0.8);
+                const flashGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, flashR);
+                flashGrad.addColorStop(0, '#ffffffee');
+                flashGrad.addColorStop(0.5, `hsla(50, 100%, 90%, 0.5)`);
+                flashGrad.addColorStop(1, `hsla(50, 100%, 80%, 0)`);
+                ctx.fillStyle = flashGrad;
+                ctx.fillRect(this.x - flashR, this.y - flashR, flashR * 2, flashR * 2);
+            }
+
+            // Layer 3: Shockwave ring (expanding, fading)
+            if (age < 400 && this.shockwaveRadius > 0) {
+                const sa = 0.45 * (1 - age / 400);
+                ctx.globalAlpha = sa;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, Math.max(0.1, this.shockwaveRadius), 0, Math.PI * 2);
+                ctx.strokeStyle = `hsla(${this.hue}, 70%, 85%, 1)`;
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+            }
+
+            // Layer 4: Core glow (the main visible body)
+            ctx.globalAlpha = alpha * 0.75;
             const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r);
-            grad.addColorStop(0, `hsla(40, 100%, 95%, ${alpha * 0.4})`);
-            grad.addColorStop(0.25, `hsla(40, 90%, 80%, ${alpha * 0.15})`);
-            grad.addColorStop(1, `hsla(${this.hue}, ${saturation}%, ${lightness}%, 0)`);
+            grad.addColorStop(0, `hsla(45, 100%, 95%, 0.9)`);
+            grad.addColorStop(0.15, `hsla(40, 95%, 80%, 0.6)`);
+            grad.addColorStop(0.4, `hsla(${this.hue + 15}, 80%, 65%, 0.3)`);
+            grad.addColorStop(0.7, `hsla(${this.hue}, 70%, 55%, 0.1)`);
+            grad.addColorStop(1, `hsla(${this.hue}, 60%, 45%, 0)`);
             ctx.fillStyle = grad;
             ctx.fillRect(this.x - r, this.y - r, r * 2, r * 2);
 
-            // Ring stroke
+            // Layer 5: Edge ring (warm, prominent)
+            ctx.globalAlpha = alpha * 0.85;
             ctx.beginPath();
-            ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(255, 140, 80, ${alpha})`;
-            ctx.lineWidth = 2;
+            ctx.arc(this.x, this.y, Math.max(0.1, r), 0, Math.PI * 2);
+            ctx.strokeStyle = `hsla(30, 95%, 65%, ${alpha})`;
+            ctx.lineWidth = 2.5;
             ctx.stroke();
 
-            // Core fill
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, r * 0.25, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255, 220, 140, ${alpha * 0.6})`;
-            ctx.fill();
+            // Layer 6: Inner bright core
+            ctx.globalAlpha = alpha * 0.8;
+            const coreR = r * 0.2;
+            const coreGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, coreR);
+            coreGrad.addColorStop(0, `hsla(50, 100%, 97%, 1)`);
+            coreGrad.addColorStop(1, `hsla(45, 90%, 80%, 0)`);
+            ctx.fillStyle = coreGrad;
+            ctx.fillRect(this.x - coreR, this.y - coreR, coreR * 2, coreR * 2);
+
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
         }
     }
 
-    // =========================================================================
+    // =====================================================================
     // GAME STATE
-    // =========================================================================
+    // =====================================================================
     let dots = [];
     let explosions = [];
-    let scheduledDetonations = new Set(); // dot indices already scheduled
 
-    function generateDots(count) {
+    function generateDots(count, speedMin, speedMax) {
         dots = [];
         let attempts = 0;
+        const topMargin = SCREEN_MARGIN + 50;
         while (dots.length < count && attempts < 5000) {
             const x = SCREEN_MARGIN + Math.random() * (W - SCREEN_MARGIN * 2);
-            const y = SCREEN_MARGIN + 60 + Math.random() * (H - SCREEN_MARGIN * 2 - 80);
+            const y = topMargin + Math.random() * (H - topMargin - SCREEN_MARGIN);
             let valid = true;
             for (const d of dots) {
                 if (Math.hypot(d.x - x, d.y - y) < MIN_DOT_DISTANCE) { valid = false; break; }
             }
-            if (valid) dots.push(new Dot(x, y));
+            if (valid) dots.push(new Dot(x, y, speedMin, speedMax));
             attempts++;
         }
     }
 
-    function startLevel() {
-        const level = LEVELS[currentLevel];
-        generateDots(level.dots);
+    function startRound() {
+        const params = getRoundParams(round);
+        generateDots(params.dots, params.speedMin, params.speedMax);
         explosions = [];
         scheduledDetonations = new Set();
         pendingExplosions = [];
+        chainLines = [];
+        floatingTexts = [];
         particles.clear();
         chainCount = 0;
         score = 0;
-        nearMissDots = [];
-        nearMissCount = 0;
         lastChainFreqs = [];
-        lastNoteTime = 0;
         shakeTrauma = 0;
-        bgBrightness = 0;
-        slowMo = 0;
-        slowMoFactor = 1;
-        fadeAlpha = 0;
-        textAlpha = 0;
+        bgPulse = 0;
+        charging = false;
         gameState = 'playing';
     }
 
-    function detonateDot(dot, dotIndex, generation) {
+    function detonateDot(dot, dotIndex, generation, parentX, parentY) {
         dot.active = false;
-        dot.generation = generation;
+        dot.bloomTimer = 12;
         chainCount++;
 
-        // Score: 10 * (depth + 1)
-        score += 10 * (generation + 1);
+        const points = 10 * (generation + 1);
+        score += points;
 
-        // Audio
+        // Audio — every dot gets a voice
         audio.playNote(dot.y, generation);
+
+        // Floating score text
+        spawnFloatingText(dot.x, dot.y - 15, `+${points}`, dot.getHue());
 
         // Particles
         emitParticles(dot.x, dot.y, dot.getHue(), generation);
 
+        // Chain line from parent
+        if (parentX !== undefined && parentY !== undefined) {
+            spawnChainLine(parentX, parentY, dot.x, dot.y);
+        }
+
         // Screen shake
         shakeTrauma = Math.min(1.0, shakeTrauma + SHAKE_TRAUMA_PER_DOT);
+        bgPulse = Math.min(0.2, bgPulse + 0.025);
 
-        // Background pulse
-        bgBrightness = Math.min(0.15, bgBrightness + 0.02);
-
-        // Schedule child explosion with stagger
-        const delay = CHAIN_STAGGER_MS + (Math.random() - 0.5) * 2 * CHAIN_JITTER_MS;
-        const scheduleTime = performance.now() + delay;
+        // Schedule child explosion
+        const delay = CASCADE_STAGGER_MS + (Math.random() - 0.5) * 2 * CASCADE_JITTER_MS;
         pendingExplosions.push({
             x: dot.x, y: dot.y,
             generation: generation + 1,
-            time: scheduleTime
+            time: performance.now() + delay,
+            parentX: dot.x, parentY: dot.y,
         });
     }
 
-    function handleDotCaught(dot, dotIndex, generation) {
+    function handleDotCaught(dot, dotIndex, generation, expX, expY) {
         if (scheduledDetonations.has(dotIndex)) return;
         scheduledDetonations.add(dotIndex);
-        detonateDot(dot, dotIndex, generation);
+        detonateDot(dot, dotIndex, generation, expX, expY);
     }
 
-    function handleTap(clientX, clientY) {
+    function handlePointerDown(x, y) {
         if (gameState === 'start') {
             audio.init();
-            startLevel();
+            round = 1;
+            startRound();
             return;
         }
 
-        if (gameState === 'failed') {
-            startLevel(); // retry
+        if (gameState === 'gameover') {
+            round = 1;
+            startRound();
             return;
         }
 
-        if (gameState === 'celebrating' || gameState === 'allclear') {
-            // Advance
-            if (gameState === 'allclear') {
-                currentLevel = 0;
-                totalScore = 0;
-            } else {
-                currentLevel++;
-                if (currentLevel >= LEVELS.length) {
-                    gameState = 'allclear';
-                    return;
-                }
-            }
-            startLevel();
+        if (gameState === 'roundclear') {
+            // Skip transition
+            round++;
+            startRound();
             return;
         }
 
         if (gameState !== 'playing') return;
 
-        const rect = canvas.getBoundingClientRect();
-        const x = clientX - rect.left;
-        const y = clientY - rect.top;
+        audio.init();
 
-        // ONE TAP — lock input
-        gameState = 'resolving';
-        audio.init(); // ensure audio context
-
-        // Hit freeze (on player tap only)
-        freezeFrames = HIT_FREEZE_FRAMES;
-
-        // Create initial explosion
-        const exp = new Explosion(x, y, 0, handleDotCaught);
-        explosions.push(exp);
-
-        // Check if any dot is immediately in range
-        let hitAny = false;
-        for (let i = 0; i < dots.length; i++) {
-            const dot = dots[i];
-            if (!dot.active) continue;
-            if (Math.hypot(dot.x - x, dot.y - y) <= explosionRadius) {
-                hitAny = true;
-                // Will be caught by per-frame detection
-            }
-        }
-
-        if (!hitAny) {
-            // Miss
-            audio.playMiss();
-        }
+        // Start charging
+        charging = true;
+        chargeStart = performance.now();
+        chargeX = x; chargeY = y;
+        chargeRadius = baseRadius;
+        audio.startCharge();
     }
 
-    function checkLevelEnd() {
-        // Check if all explosions finished and no pending detonations
-        if (explosions.length > 0) return;
-        if (pendingExplosions.length > 0) return;
-
-        const level = LEVELS[currentLevel];
-        const cleared = chainCount >= level.target;
-
-        totalScore += score;
-        if (totalScore > bestScore) {
-            bestScore = totalScore;
-            localStorage.setItem('chainReactionBest', bestScore);
-        }
-
-        if (cleared) {
-            // Check for perfect
-            const isPerfect = chainCount >= level.dots;
-
-            // Celebration
-            gameState = 'celebrating';
-            slowMo = 400;
-            slowMoFactor = 0.5;
-
-            // Remaining dot pulses
-            dots.forEach(d => {
-                if (d.active) {
-                    emitParticles(d.x, d.y, d.getHue(), 0);
-                }
-            });
-
-            // Level-clear chord
-            audio.playLevelClearChord(lastChainFreqs, isPerfect);
-
-            // Background swell
-            bgBrightness = 0.12;
-
-            textAlpha = 0;
-        } else {
-            gameState = 'failed';
-
-            // Find near-miss dots
-            nearMissDots = [];
-            nearMissCount = 0;
-            const nmRadius = explosionRadius * NEAR_MISS_RADIUS_FACTOR;
-            dots.forEach((dot, idx) => {
-                if (!dot.active) return;
-                // Check distance to any explosion center
-                let closest = Infinity;
-                scheduledDetonations.forEach(di => {
-                    const d = dots[di];
-                    const dist = Math.hypot(dot.x - d.x, dot.y - d.y);
-                    closest = Math.min(closest, dist);
-                });
-                // Also check initial tap
-                if (explosions.length === 0 && closest === Infinity) return;
-                if (closest <= nmRadius && closest > explosionRadius * 0.5) {
-                    dot.nearMiss = true;
-                    nearMissCount++;
-                }
-            });
-
-            // Dim remaining dots
-            textAlpha = 0;
-        }
-    }
-
-    // =========================================================================
-    // UPDATE
-    // =========================================================================
-    let lastFrameTime = performance.now();
-
-    function update() {
-        const now = performance.now();
-        const rawDt = now - lastFrameTime;
-        lastFrameTime = now;
-
-        // Hit freeze
-        if (freezeFrames > 0) {
-            freezeFrames--;
+    function handlePointerUp() {
+        if (!charging || gameState !== 'playing') {
+            if (charging) { audio.stopCharge(); charging = false; }
             return;
         }
 
-        // Slow-mo
-        if (slowMo > 0) {
-            slowMo -= rawDt;
-            slowMoFactor = slowMo > 0 ? 0.5 : 1;
+        // Calculate charge radius
+        const holdMs = performance.now() - chargeStart;
+        const chargeT = easeOutCubic(Math.min(holdMs / MAX_CHARGE_MS, 1));
+        const finalRadius = baseRadius + (maxChargeRadius - baseRadius) * chargeT;
+
+        charging = false;
+        audio.stopCharge();
+        audio.playRelease();
+
+        // ONE TAP — lock input
+        gameState = 'resolving';
+        freezeFrames = HIT_FREEZE_FRAMES;
+
+        // Create explosion
+        const exp = new Explosion(chargeX, chargeY, 0, finalRadius, handleDotCaught);
+        explosions.push(exp);
+
+        // Check for immediate miss
+        let hitAny = false;
+        for (const dot of dots) {
+            if (dot.active && Math.hypot(dot.x - chargeX, dot.y - chargeY) <= finalRadius) {
+                hitAny = true;
+                break;
+            }
+        }
+        if (!hitAny) audio.playMiss();
+    }
+
+    function checkRoundEnd() {
+        if (explosions.length > 0 || pendingExplosions.length > 0) return;
+
+        const params = getRoundParams(round);
+        if (chainCount >= params.target) {
+            // Round cleared
+            gameState = 'roundclear';
+            roundTransition = 0;
+            audio.playRoundClear(lastChainFreqs);
+
+            // Save progress
+            if (round > bestRound) {
+                bestRound = round;
+                localStorage.setItem('cr2_bestRound', bestRound);
+            }
+            const totalScore = score;
+            if (totalScore > bestScore) {
+                bestScore = totalScore;
+                localStorage.setItem('cr2_bestScore', bestScore);
+            }
+        } else {
+            // Failed — run over
+            gameState = 'gameover';
+            gameOverTimer = 0;
+            audio.playGameOver();
+        }
+    }
+
+    // =====================================================================
+    // UPDATE
+    // =====================================================================
+    let lastFrame = performance.now();
+
+    function update() {
+        const now = performance.now();
+        const rawDt = now - lastFrame;
+        lastFrame = now;
+
+        // Hit freeze
+        if (freezeFrames > 0) { freezeFrames--; return; }
+
+        // Ambient always updates
+        updateAmbient();
+        updateFloatingTexts();
+        updateChainLines();
+        particles.update();
+
+        // Charge update
+        if (charging) {
+            const holdMs = now - chargeStart;
+            const chargeT = easeOutCubic(Math.min(holdMs / MAX_CHARGE_MS, 1));
+            chargeRadius = baseRadius + (maxChargeRadius - baseRadius) * chargeT;
+            audio.updateCharge(chargeT);
+
+            // Highlight dots in charge radius
+            for (const dot of dots) {
+                if (!dot.active) continue;
+                if (Math.hypot(dot.x - chargeX, dot.y - chargeY) <= chargeRadius) {
+                    dot.chargeHighlight = 1;
+                } else {
+                    dot.chargeHighlight *= 0.9;
+                }
+            }
         }
 
         // Process pending explosions
-        const pendingNow = [];
         for (let i = pendingExplosions.length - 1; i >= 0; i--) {
             if (now >= pendingExplosions[i].time) {
-                pendingNow.push(pendingExplosions[i]);
+                const p = pendingExplosions[i];
+                // Child explosions use the same radius as the initial explosion
+                // (actually they should use the base radius — the charge only affects the initial tap)
+                explosions.push(new Explosion(p.x, p.y, p.generation, baseRadius, handleDotCaught, p.parentX, p.parentY));
                 pendingExplosions.splice(i, 1);
             }
         }
-        pendingNow.forEach(p => {
-            explosions.push(new Explosion(p.x, p.y, p.generation, handleDotCaught));
-        });
 
-        // Update dots (apply slow-mo to speed)
-        dots.forEach(d => {
-            if (!d.active && !d.nearMiss) return;
-            if (d.active) {
-                d.x += d.vx * slowMoFactor;
-                d.y += d.vy * slowMoFactor;
-                d.pulsePhase += 0.04 * slowMoFactor;
-
-                if (d.x < SCREEN_MARGIN) { d.vx = Math.abs(d.vx); d.x = SCREEN_MARGIN; }
-                if (d.x > W - SCREEN_MARGIN) { d.vx = -Math.abs(d.vx); d.x = W - SCREEN_MARGIN; }
-                if (d.y < SCREEN_MARGIN) { d.vy = Math.abs(d.vy); d.y = SCREEN_MARGIN; }
-                if (d.y > H - SCREEN_MARGIN) { d.vy = -Math.abs(d.vy); d.y = H - SCREEN_MARGIN; }
-            }
-            if (d.nearMiss) d.nearMissPulse += 0.1;
-        });
+        // Update dots
+        for (const d of dots) d.update();
 
         // Update explosions
         explosions = explosions.filter(e => e.update(now));
 
-        // Update particles
-        particles.update();
-
         // Screen shake
         if (shakeTrauma > 0.001) {
-            const shake = shakeTrauma * shakeTrauma;
-            shakeX = SHAKE_MAX_OFFSET * shake * (Math.random() * 2 - 1);
-            shakeY = SHAKE_MAX_OFFSET * shake * (Math.random() * 2 - 1);
+            const s = shakeTrauma * shakeTrauma;
+            shakeX = SHAKE_MAX_OFFSET * s * (Math.random() * 2 - 1);
+            shakeY = SHAKE_MAX_OFFSET * s * (Math.random() * 2 - 1);
             shakeTrauma *= SHAKE_DECAY;
-        } else {
-            shakeX = 0; shakeY = 0; shakeTrauma = 0;
+        } else { shakeX = 0; shakeY = 0; shakeTrauma = 0; }
+
+        // Background pulse decay
+        if (bgPulse > 0.001) bgPulse *= 0.93; else bgPulse = 0;
+
+        // Round clear transition
+        if (gameState === 'roundclear') {
+            roundTransition = Math.min(1, roundTransition + 0.012);
+            // Auto-advance after 2 seconds
+            if (roundTransition >= 1) {
+                round++;
+                startRound();
+            }
         }
 
-        // Background brightness decay
-        if (bgBrightness > 0.001) {
-            bgBrightness *= 0.92;
-        } else {
-            bgBrightness = 0;
+        // Game over timer
+        if (gameState === 'gameover') {
+            gameOverTimer = Math.min(1, gameOverTimer + 0.015);
         }
 
-        // Text fade in
-        if (gameState === 'celebrating' || gameState === 'failed' || gameState === 'allclear') {
-            textAlpha = Math.min(1, textAlpha + 0.03);
-        }
-
-        // Check level end
-        if (gameState === 'resolving') {
-            checkLevelEnd();
-        }
+        // Check round end
+        if (gameState === 'resolving') checkRoundEnd();
     }
 
-    // =========================================================================
+    // =====================================================================
     // DRAW
-    // =========================================================================
+    // =====================================================================
     function draw() {
-        // Background
-        const bgR = BG_DEFAULT.r + bgBrightness * 30;
-        const bgG = BG_DEFAULT.g + bgBrightness * 20;
-        const bgB = BG_DEFAULT.b + bgBrightness * 40;
-        ctx.fillStyle = `rgb(${bgR|0}, ${bgG|0}, ${bgB|0})`;
+        // Background — deep space with warm center
+        ctx.fillStyle = '#020210';
         ctx.fillRect(0, 0, W, H);
+
+        // Subtle warm center glow
+        const bgGrad = ctx.createRadialGradient(W/2, H * 0.55, 0, W/2, H * 0.55, Math.max(W, H) * 0.7);
+        bgGrad.addColorStop(0, `rgba(${12 + bgPulse * 60|0}, ${8 + bgPulse * 30|0}, ${25 + bgPulse * 80|0}, 1)`);
+        bgGrad.addColorStop(0.5, `rgba(${5 + bgPulse * 30|0}, ${4 + bgPulse * 15|0}, ${18 + bgPulse * 40|0}, 1)`);
+        bgGrad.addColorStop(1, `rgba(2, 2, 12, 1)`);
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Vignette (darker edges for depth)
+        const vigGrad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.25, W/2, H/2, Math.max(W,H)*0.75);
+        vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        vigGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+        ctx.fillStyle = vigGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Ambient stars (behind everything)
+        drawAmbient();
 
         ctx.save();
         ctx.translate(shakeX, shakeY);
 
-        // Draw explosions
-        explosions.forEach(e => e.draw(ctx));
+        // Chain lines
+        drawChainLines();
 
-        // Draw particles
+        // Explosions
+        for (const e of explosions) e.draw(ctx);
+
+        // Particles
         particles.draw(ctx);
 
-        // Draw dots
-        const dimmed = gameState === 'failed';
-        dots.forEach(d => d.draw(ctx, dimmed));
+        // Charge indicator
+        if (charging && gameState === 'playing') drawChargeIndicator();
+
+        // Dots
+        for (const d of dots) d.draw(ctx);
+
+        // Floating score texts
+        drawFloatingTexts();
 
         ctx.restore();
 
-        // UI overlay
+        // UI overlay (not affected by shake)
         drawUI();
     }
 
-    function drawUI() {
-        // Level / chain info (top)
-        if (gameState !== 'start') {
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
+    function drawChargeIndicator() {
+        const r = chargeRadius;
+        const holdMs = performance.now() - chargeStart;
+        const pulse = Math.sin(holdMs * 0.01) * 0.12 + 0.88;
+        const chargeT = Math.min(holdMs / MAX_CHARGE_MS, 1);
 
-            // Level
-            ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.6)';
-            ctx.fillText(`Level ${currentLevel + 1}`, W / 2, 15);
+        ctx.globalCompositeOperation = 'lighter';
 
-            // Chain count
-            ctx.font = 'bold 48px -apple-system, BlinkMacSystemFont, sans-serif';
-            if (gameState === 'failed') {
-                ctx.fillStyle = `rgba(255, 160, 80, ${0.8})`;
-            } else {
-                ctx.fillStyle = 'rgba(255,255,255,0.9)';
-            }
-            ctx.fillText(chainCount, W / 2, 32);
+        // Warm ambient glow that grows with charge
+        const ambR = r * (1.5 + chargeT * 0.8);
+        ctx.globalAlpha = 0.06 + chargeT * 0.08;
+        const ambGrad = ctx.createRadialGradient(chargeX, chargeY, 0, chargeX, chargeY, ambR);
+        ambGrad.addColorStop(0, `rgba(255, 200, 120, 0.4)`);
+        ambGrad.addColorStop(0.5, `rgba(255, 160, 80, 0.1)`);
+        ambGrad.addColorStop(1, `rgba(255, 120, 40, 0)`);
+        ctx.fillStyle = ambGrad;
+        ctx.fillRect(chargeX - ambR, chargeY - ambR, ambR * 2, ambR * 2);
 
-            // Target
-            const level = LEVELS[currentLevel];
-            ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.4)';
-            ctx.fillText(`Target: ${level.target}`, W / 2, 85);
+        // Inner fill glow
+        ctx.globalAlpha = (0.04 + chargeT * 0.06) * pulse;
+        const innerGrad = ctx.createRadialGradient(chargeX, chargeY, 0, chargeX, chargeY, r);
+        innerGrad.addColorStop(0, `rgba(255, 220, 150, 0.3)`);
+        innerGrad.addColorStop(0.6, `rgba(255, 180, 100, 0.08)`);
+        innerGrad.addColorStop(1, `rgba(255, 160, 80, 0)`);
+        ctx.fillStyle = innerGrad;
+        ctx.fillRect(chargeX - r, chargeY - r, r * 2, r * 2);
 
-            // Score
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.fillText(`Score: ${totalScore + score}`, W / 2, 102);
+        // Edge ring
+        ctx.globalAlpha = (0.35 + chargeT * 0.3) * pulse;
+        ctx.beginPath();
+        ctx.arc(chargeX, chargeY, r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 200, 120, 0.7)`;
+        ctx.lineWidth = 1.5 + chargeT;
+        ctx.stroke();
+
+        // Progress arc (sweeping)
+        if (chargeT < 1) {
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.arc(chargeX, chargeY, r + 5, -Math.PI/2, -Math.PI/2 + chargeT * Math.PI * 2);
+            ctx.strokeStyle = `rgba(255, 180, 60, 0.9)`;
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+        } else {
+            // Full charge — bright pulsing ring
+            ctx.globalAlpha = 0.5 + 0.3 * Math.sin(holdMs * 0.015);
+            ctx.beginPath();
+            ctx.arc(chargeX, chargeY, r + 5, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255, 220, 100, 1)`;
+            ctx.lineWidth = 3;
+            ctx.stroke();
         }
 
-        // State-specific overlays
+        // Center crosshair dot
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(chargeX, chargeY, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // =====================================================================
+    // UI
+    // =====================================================================
+    function drawUI() {
+        const params = getRoundParams(round);
+        const screenMin = Math.min(W, H);
+        const s = Math.max(1, screenMin / 600); // Scale factor (1.0 at 600px, 1.8 at 1080px)
+
         if (gameState === 'start') {
             drawStartScreen();
+            return;
+        }
+
+        // Round counter (top center)
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        // "ROUND" label
+        ctx.font = `200 ${13 * s | 0}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.letterSpacing = '2px';
+        ctx.fillText(`ROUND`, W/2, 14 * s);
+        ctx.letterSpacing = '0px';
+
+        // Round number
+        ctx.font = `200 ${38 * s | 0}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText(round, W/2, 28 * s);
+
+        // Chain count (during resolving)
+        const infoY = 72 * s;
+        if (gameState === 'resolving' || gameState === 'roundclear') {
+            const targetMet = chainCount >= params.target;
+            ctx.font = `700 ${14 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = targetMet ? 'rgba(255, 220, 100, 0.8)' : 'rgba(255,255,255,0.5)';
+            ctx.fillText(`${chainCount} / ${params.target}`, W/2, infoY);
         } else if (gameState === 'playing') {
+            ctx.font = `300 ${13 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.fillText(`Target: ${params.target}`, W/2, infoY);
+        }
+
+        // State overlays
+        if (gameState === 'roundclear') drawRoundClear();
+        if (gameState === 'gameover') drawGameOver();
+
+        // Best round (bottom)
+        if (bestRound > 0 && gameState === 'playing') {
             ctx.textAlign = 'center';
-            ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.35)';
-            ctx.fillText('Tap to start a chain', W / 2, H - 40);
-        } else if (gameState === 'celebrating') {
-            drawCelebration();
-        } else if (gameState === 'failed') {
-            drawFailure();
-        } else if (gameState === 'allclear') {
-            drawAllClear();
+            ctx.textBaseline = 'bottom';
+            ctx.font = `200 ${12 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.fillText(`Best: Round ${bestRound}`, W/2, H - 12 * s);
         }
     }
 
@@ -951,128 +1320,156 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        ctx.font = 'bold 48px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'white';
-        ctx.shadowColor = 'rgba(0,0,0,0.6)';
-        ctx.shadowBlur = 20;
-        ctx.fillText('Chain Reaction', W / 2, H / 2 - 40);
-        ctx.shadowBlur = 0;
+        const titleSize = Math.min(52, W * 0.10);
+        const subSize = Math.min(16, W * 0.038);
 
-        ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText('Tap to start a chain. Hit ' + LEVELS[0].target + ' to clear.', W / 2, H / 2 + 15);
+        // Title
+        ctx.save();
+        ctx.shadowColor = 'rgba(120, 180, 255, 0.4)';
+        ctx.shadowBlur = 40;
+        ctx.font = `200 ${titleSize}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.letterSpacing = `${Math.max(1, titleSize * 0.06)}px`;
+        ctx.fillText('CHAIN REACTION', W/2, H/2 - titleSize * 0.8);
+        // Draw again for extra glow
+        ctx.shadowBlur = 60;
+        ctx.shadowColor = 'rgba(100, 160, 255, 0.2)';
+        ctx.fillText('CHAIN REACTION', W/2, H/2 - titleSize * 0.8);
+        ctx.letterSpacing = '0px';
+        ctx.restore();
 
-        ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.fillText('Tap anywhere to begin', W / 2, H / 2 + 55);
+        // Instruction
+        ctx.font = `300 ${subSize}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.fillText('Hold to charge. Release to detonate.', W/2, H/2 + subSize * 1.2);
+
+        // Prompt
+        const promptAlpha = 0.2 + 0.12 * Math.sin(performance.now() * 0.003);
+        ctx.font = `300 ${Math.min(14, subSize * 0.85)}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = `rgba(255,255,255,${promptAlpha})`;
+        ctx.fillText('Tap anywhere to begin', W/2, H/2 + subSize * 3.5);
+
+        // Best score
+        if (bestRound > 0) {
+            ctx.font = `200 ${Math.min(13, subSize * 0.8)}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.fillText(`Best: Round ${bestRound}`, W/2, H/2 + subSize * 6);
+        }
     }
 
-    function drawCelebration() {
-        if (textAlpha <= 0) return;
+    function drawRoundClear() {
+        const t = easeOutCubic(Math.min(roundTransition * 2, 1));
+        const params = getRoundParams(round);
+        const isPerfect = chainCount >= params.dots;
+        const s = Math.max(1, Math.min(W, H) / 600);
+
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.globalAlpha = textAlpha;
+        ctx.globalAlpha = t;
 
-        const level = LEVELS[currentLevel];
-        const isPerfect = chainCount >= level.dots;
+        // Brief celebratory text
+        ctx.save();
+        const glowColor = isPerfect ? 'rgba(255, 215, 0, 0.5)' : 'rgba(100, 180, 255, 0.4)';
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 30 * s;
+        const clearSize = Math.round(28 * s * (0.8 + 0.2 * easeOutBack(t)));
+        ctx.font = `600 ${clearSize}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = isPerfect ? '#ffd700' : '#88ccff';
+        ctx.fillText(isPerfect ? 'Perfect!' : 'Clear!', W/2, H/2 - 15 * s);
+        ctx.restore();
 
-        ctx.font = 'bold 36px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = isPerfect ? '#ffd700' : '#64b5f6';
-        ctx.fillText(isPerfect ? 'Perfect Clear!' : 'Level Clear!', W / 2, H / 2 - 30);
+        ctx.font = `300 ${16 * s | 0}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillText(`Chain: ${chainCount}  Score: ${score}`, W/2, H/2 + 22 * s);
 
-        ctx.font = '18px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText(`Chain: ${chainCount} / ${level.target}`, W / 2, H / 2 + 10);
+        ctx.globalAlpha = 1;
+    }
 
-        if (currentLevel < LEVELS.length - 1) {
-            ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+    function drawGameOver() {
+        const t = easeOutCubic(gameOverTimer);
+        const s = Math.max(1, Math.min(W, H) / 600);
+
+        // Dim overlay
+        ctx.fillStyle = `rgba(0, 0, 0, ${t * 0.55})`;
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Round reached
+        const scaleT = easeOutBack(Math.min(t * 1.5, 1));
+        ctx.save();
+        ctx.shadowColor = 'rgba(255, 140, 60, 0.35)';
+        ctx.shadowBlur = 30 * s;
+        ctx.font = `200 ${Math.round(48 * s * scaleT)}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fillText(`Round ${round}`, W/2, H/2 - 50 * s);
+        ctx.restore();
+
+        if (t > 0.3) {
+            const t2 = easeOutCubic((t - 0.3) / 0.7);
+            ctx.globalAlpha = t2;
+
+            ctx.font = `300 ${18 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255, 160, 80, 0.85)';
+            const params = getRoundParams(round);
+            ctx.fillText(`Chain: ${chainCount} / ${params.target}`, W/2, H/2);
+
+            ctx.font = `300 ${15 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            ctx.fillText('Tap for next level', W / 2, H / 2 + 50);
-        } else {
-            ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            ctx.fillText('All levels complete! Tap to restart', W / 2, H / 2 + 50);
+            ctx.fillText(`Score: ${score}`, W/2, H/2 + 30 * s);
+
+            if (round >= bestRound) {
+                ctx.font = `600 ${14 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
+                ctx.fillText('New Best!', W/2, H/2 + 58 * s);
+            }
+        }
+
+        if (t > 0.6) {
+            const t3 = (t - 0.6) / 0.4;
+            const promptAlpha = t3 * (0.3 + 0.1 * Math.sin(performance.now() * 0.003));
+            ctx.font = `300 ${14 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = `rgba(255,255,255,${promptAlpha})`;
+            ctx.fillText('Tap to play again', W/2, H/2 + 100 * s);
         }
 
         ctx.globalAlpha = 1;
     }
 
-    function drawFailure() {
-        if (textAlpha <= 0) return;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.globalAlpha = textAlpha;
-
-        const level = LEVELS[currentLevel];
-
-        ctx.font = 'bold 28px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255, 160, 80, 0.9)';
-        ctx.fillText(`Chain: ${chainCount} / ${level.target}`, W / 2, H / 2 - 20);
-
-        if (nearMissCount > 0) {
-            ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            ctx.fillText(`${nearMissCount} dot${nearMissCount > 1 ? 's were' : ' was'} close`, W / 2, H / 2 + 15);
-        }
-
-        ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.fillText('Tap to try again', W / 2, H / 2 + 50);
-
-        ctx.globalAlpha = 1;
-    }
-
-    function drawAllClear() {
-        if (textAlpha <= 0) return;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.globalAlpha = textAlpha;
-
-        ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = '#ffd700';
-        ctx.fillText('All Levels Complete!', W / 2, H / 2 - 30);
-
-        ctx.font = '18px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText(`Total Score: ${totalScore + score}`, W / 2, H / 2 + 10);
-
-        ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText('Tap to play again', W / 2, H / 2 + 50);
-
-        ctx.globalAlpha = 1;
-    }
-
-    // =========================================================================
+    // =====================================================================
     // GAME LOOP
-    // =========================================================================
+    // =====================================================================
     function loop() {
         update();
         draw();
         requestAnimationFrame(loop);
     }
 
-    // =========================================================================
+    // =====================================================================
     // INPUT
-    // =========================================================================
-    canvas.addEventListener('mousedown', e => {
+    // =====================================================================
+    canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
-        handleTap(e.clientX, e.clientY);
+        handlePointerDown(e.clientX, e.clientY);
     });
-    canvas.addEventListener('touchstart', e => {
+    canvas.addEventListener('pointerup', e => {
         e.preventDefault();
-        if (e.touches.length > 0) {
-            handleTap(e.touches[0].clientX, e.touches[0].clientY);
-        }
+        handlePointerUp();
     });
+    canvas.addEventListener('pointercancel', () => {
+        if (charging) { audio.stopCharge(); charging = false; }
+    });
+    // Prevent context menu
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    // =========================================================================
+    // =====================================================================
     // INIT
-    // =========================================================================
-    // Start screen shows dots drifting
-    generateDots(10);
+    // =====================================================================
+    initAmbient();
+    generateDots(10, 0.2, 0.5); // Start screen dots
     gameState = 'start';
-    lastFrameTime = performance.now();
+    lastFrame = performance.now();
     loop();
 
     </script>
