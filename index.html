@@ -222,15 +222,16 @@
         }
 
         class Explosion {
-            constructor(x, y, generation = 0) {
+            constructor(x, y, generation = 0, onDotCaught) {
                 this.x = x;
                 this.y = y;
                 this.generation = generation;
+                this.onDotCaught = onDotCaught;
                 this.createdAt = performance.now();
                 this.phase = 'grow'; // grow, hold, shrink, done
                 this.radius = 0;
                 this.maxRadius = Math.min(canvas.width, canvas.height) * EXPLOSION_RADIUS_PCT;
-                this.hasCheckedChain = false;
+                this.caughtDots = new Set(); // Track which dots we've already caught
             }
             
             update(now) {
@@ -247,6 +248,38 @@
                 }
                 
                 // Radius calculation
+                if (this.phase === 'grow') {
+                    const t = age / EXPLOSION_GROW_MS;
+                    this.radius = this.maxRadius * easeOutExpo(t);
+                } else if (this.phase === 'hold') {
+                    this.radius = this.maxRadius;
+                } else if (this.phase === 'shrink') {
+                    const t = (age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS;
+                    this.radius = this.maxRadius * (1 - easeInQuad(t));
+                }
+                
+                // During grow and hold phases, check for dots entering explosion zone EVERY FRAME
+                if (this.phase === 'grow' || this.phase === 'hold') {
+                    this.checkForDotsInRadius();
+                }
+                
+                return true;
+            }
+            
+            checkForDotsInRadius() {
+                dots.forEach(dot => {
+                    if (!dot.active || this.caughtDots.has(dot)) return;
+                    
+                    const dist = Math.hypot(dot.x - this.x, dot.y - this.y);
+                    if (dist <= this.radius) {
+                        // Dot entered explosion zone!
+                        this.caughtDots.add(dot);
+                        if (this.onDotCaught) {
+                            this.onDotCaught(dot, this.generation);
+                        }
+                    }
+                });
+            }
                 if (this.phase === 'grow') {
                     const t = age / EXPLOSION_GROW_MS;
                     this.radius = this.maxRadius * easeOutExpo(t);
@@ -370,19 +403,53 @@
             // Hit freeze
             freezeFrames = HIT_FREEZE_FRAMES;
             
-            // Create initial explosion
-            explosions.push(new Explosion(x, y, 0));
+            // Track which explosions are scheduled to prevent duplicates
+            const scheduledExplosions = new Set();
             
-            // Check for immediate dot hits
+            // Create initial explosion with callback
+            explosions.push(new Explosion(x, y, 0, (dot, generation) => {
+                // This callback fires when a dot enters the explosion radius
+                if (scheduledExplosions.has(dot)) return;
+                scheduledExplosions.add(dot);
+                
+                dot.active = false;
+                dot.generation = generation;
+                chainCount++;
+                
+                // Stagger the child explosion
+                const delay = CHAIN_STAGGER_MS + (Math.random() - 0.5) * 2 * CHAIN_JITTER_MS;
+                setTimeout(() => {
+                    if (gameState === 'ended') return;
+                    explosions.push(new Explosion(dot.x, dot.y, generation + 1, (childDot, childGen) => {
+                        if (scheduledExplosions.has(childDot)) return;
+                        scheduledExplosions.add(childDot);
+                        
+                        childDot.active = false;
+                        childDot.generation = childGen;
+                        chainCount++;
+                        
+                        // Continue the chain recursively with delay
+                        const childDelay = CHAIN_STAGGER_MS + (Math.random() - 0.5) * 2 * CHAIN_JITTER_MS;
+                        setTimeout(() => {
+                            if (gameState === 'ended') return;
+                            explosions.push(new Explosion(childDot.x, childDot.y, childGen + 1, explosions[explosions.length - 1]?.onDotCaught));
+                        }, childDelay);
+                        
+                        createParticles(childDot.x, childDot.y, childDot.getHue());
+                    }));
+                    createParticles(dot.x, dot.y, dot.getHue());
+                }, delay);
+                
+                createParticles(dot.x, dot.y, dot.getHue());
+            }));
+            
+            // Check for dots already in radius at start
             let hitDot = false;
             dots.forEach(dot => {
                 if (!dot.active) return;
                 if (Math.hypot(dot.x - x, dot.y - y) <= explosions[0].maxRadius) {
-                    dot.active = false;
-                    dot.generation = 0;
-                    chainCount++;
-                    scheduleExplosion(dot.x, dot.y, 1);
-                    createParticles(dot.x, dot.y, dot.getHue());
+                    explosions[0].caughtDots.add(dot);
+                    explosions[0].onDotCaught(dot, 0);
                     hitDot = true;
                 }
             });
@@ -391,31 +458,6 @@
             if (!hitDot) {
                 createParticles(x, y, 200);
             }
-        }
-
-        function scheduleExplosion(x, y, generation) {
-            const baseDelay = generation * CHAIN_STAGGER_MS;
-            const jitter = (Math.random() - 0.5) * 2 * CHAIN_JITTER_MS;
-            const delay = Math.max(generationTiming[generation - 1] || 0, baseDelay + jitter);
-            
-            generationTiming[generation] = delay + MIN_NOTE_SEPARATION_MS;
-            
-            setTimeout(() => {
-                if (gameState === 'ended') return;
-                explosions.push(new Explosion(x, y, generation));
-                
-                // Check chain reactions
-                dots.forEach(dot => {
-                    if (!dot.active) return;
-                    if (Math.hypot(dot.x - x, dot.y - y) <= explosions[explosions.length - 1].maxRadius) {
-                        dot.active = false;
-                        dot.generation = generation;
-                        chainCount++;
-                        scheduleExplosion(dot.x, dot.y, generation + 1);
-                        createParticles(dot.x, dot.y, dot.getHue());
-                    }
-                });
-            }, delay);
         }
 
         function checkLevelEnd() {
