@@ -104,7 +104,7 @@
     let score = 0;
     let bestRound = parseInt(localStorage.getItem('cr2_bestRound') || '0', 10);
     let bestScore = parseInt(localStorage.getItem('cr2_bestScore') || '0', 10);
-    let gameState = 'start'; // start, playing, resolving, roundclear, gameover
+    let gameState = 'start'; // start, playing, resolving, gameover
     let freezeFrames = 0;
     let bgPulse = 0;
     let shakeTrauma = 0;
@@ -114,9 +114,16 @@
     let chainLines = [];
     let pendingExplosions = [];
     let scheduledDetonations = new Set();
-    let roundTransition = 0; // 0-1, for fade between rounds
     let gameOverTimer = 0;
     let lastChainFreqs = [];
+    let totalScore = 0; // Cumulative across rounds
+
+    // Slow-mo
+    let slowMo = 1.0; // 1.0 = normal, 0.5 = half speed
+    let slowMoTarget = 1.0;
+
+    // Near-miss highlights
+    let nearMissDots = []; // [{dotIndex, timer}]
 
     // Charge state
     let charging = false;
@@ -644,6 +651,7 @@
             this.trail = [];
             this.bloomTimer = 0; // For detonation bloom effect
             this.chargeHighlight = 0; // When in charge radius
+            this.nearMiss = 0; // Pulsing red highlight for near-miss
         }
 
         getHue() { return 195 - (this.y / H) * 180; }
@@ -659,8 +667,8 @@
             // Fade in
             if (this.alpha < 1) this.alpha = Math.min(1, this.alpha + 0.025);
 
-            this.x += this.vx;
-            this.y += this.vy;
+            this.x += this.vx * slowMo;
+            this.y += this.vy * slowMo;
             this.pulsePhase += 0.05;
 
             // Bounce off edges
@@ -675,6 +683,8 @@
 
             // Charge highlight decay
             if (this.chargeHighlight > 0) this.chargeHighlight *= 0.85;
+            // Near-miss decay
+            if (this.nearMiss > 0) this.nearMiss = Math.max(0, this.nearMiss - 0.012);
         }
 
         draw(ctx) {
@@ -745,6 +755,21 @@
             ctx.fillStyle = coreGrad;
             ctx.fill();
 
+            // Near-miss red pulse
+            if (this.nearMiss > 0) {
+                const nmPulse = Math.sin(performance.now() * 0.012) * 0.3 + 0.7;
+                const nmR = DOT_GLOW_SIZE * 1.2;
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = this.nearMiss * nmPulse * 0.25;
+                const nmGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, nmR);
+                nmGrad.addColorStop(0, 'hsla(0, 90%, 60%, 0.6)');
+                nmGrad.addColorStop(0.5, 'hsla(0, 80%, 50%, 0.15)');
+                nmGrad.addColorStop(1, 'hsla(0, 70%, 40%, 0)');
+                ctx.fillStyle = nmGrad;
+                ctx.fillRect(this.x - nmR, this.y - nmR, nmR * 2, nmR * 2);
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
             ctx.globalAlpha = 1;
         }
     }
@@ -770,7 +795,12 @@
         }
 
         update(now) {
-            const age = now - this.createdAt;
+            // Slow-mo affects explosion timing via accumulated age
+            if (!this._virtualAge) this._virtualAge = 0;
+            const realDelta = now - (this._lastNow || this.createdAt);
+            this._lastNow = now;
+            this._virtualAge += realDelta * slowMo;
+            const age = this._virtualAge;
 
             // Flash fades quickly
             this.flashAlpha = Math.max(0, 1 - age / 80);
@@ -807,7 +837,7 @@
         draw(ctx) {
             if (this.phase === 'done') return;
             const r = Math.max(0.1, this.radius);
-            const age = performance.now() - this.createdAt;
+            const age = this._virtualAge || 0;
             let alpha = 1;
             if (this.phase === 'shrink') {
                 const t = (age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS;
@@ -919,6 +949,8 @@
         shakeTrauma = 0;
         bgPulse = 0;
         charging = false;
+        slowMo = 1.0;
+        slowMoTarget = 1.0;
         gameState = 'playing';
     }
 
@@ -948,6 +980,11 @@
         shakeTrauma = Math.min(1.0, shakeTrauma + SHAKE_TRAUMA_PER_DOT);
         bgPulse = Math.min(0.2, bgPulse + 0.025);
 
+        // Slow-mo on big chains (5+)
+        if (chainCount >= 5 && slowMo > 0.45) {
+            slowMoTarget = 0.4;
+        }
+
         // Schedule child explosion
         const delay = CASCADE_STAGGER_MS + (Math.random() - 0.5) * 2 * CASCADE_JITTER_MS;
         pendingExplosions.push({
@@ -968,19 +1005,14 @@
         if (gameState === 'start') {
             audio.init();
             round = 1;
+            totalScore = 0;
             startRound();
             return;
         }
 
         if (gameState === 'gameover') {
             round = 1;
-            startRound();
-            return;
-        }
-
-        if (gameState === 'roundclear') {
-            // Skip transition
-            round++;
+            totalScore = 0;
             startRound();
             return;
         }
@@ -1036,26 +1068,57 @@
 
         const params = getRoundParams(round);
         if (chainCount >= params.target) {
-            // Round cleared
-            gameState = 'roundclear';
-            roundTransition = 0;
-            audio.playRoundClear(lastChainFreqs);
-
-            // Save progress
+            // Round cleared — seamlessly advance
+            totalScore += score;
             if (round > bestRound) {
                 bestRound = round;
                 localStorage.setItem('cr2_bestRound', bestRound);
             }
-            const totalScore = score;
             if (totalScore > bestScore) {
                 bestScore = totalScore;
                 localStorage.setItem('cr2_bestScore', bestScore);
             }
+
+            // Brief "round up" floating text, then immediately start next round
+            spawnFloatingText(W/2, H/2, `Round ${round} Clear!`, 200);
+            audio.playRoundClear(lastChainFreqs);
+
+            round++;
+            // Start next round — keep particles/effects running for seamless feel
+            const nextParams = getRoundParams(round);
+            generateDots(nextParams.dots, nextParams.speedMin, nextParams.speedMax);
+            explosions = [];
+            scheduledDetonations = new Set();
+            pendingExplosions = [];
+            chainCount = 0;
+            score = 0;
+            lastChainFreqs = [];
+            charging = false;
+            gameState = 'playing';
         } else {
-            // Failed — run over
+            // Failed — mark near-miss dots, then game over
+            markNearMissDots();
             gameState = 'gameover';
             gameOverTimer = 0;
             audio.playGameOver();
+        }
+    }
+
+    function markNearMissDots() {
+        // Find all explosions' positions (use last known positions from detonated dots)
+        // Highlight active dots that were within 120% of any explosion radius
+        const nearMissRadius = baseRadius * 1.2;
+        for (const dot of dots) {
+            if (!dot.active) continue;
+            // Check against all detonated dot positions
+            for (let i = 0; i < dots.length; i++) {
+                const other = dots[i];
+                if (other.active || other === dot) continue;
+                if (Math.hypot(dot.x - other.x, dot.y - other.y) <= nearMissRadius) {
+                    dot.nearMiss = 1.0;
+                    break;
+                }
+            }
         }
     }
 
@@ -1124,14 +1187,14 @@
         // Background pulse decay
         if (bgPulse > 0.001) bgPulse *= 0.93; else bgPulse = 0;
 
-        // Round clear transition
-        if (gameState === 'roundclear') {
-            roundTransition = Math.min(1, roundTransition + 0.012);
-            // Auto-advance after 2 seconds
-            if (roundTransition >= 1) {
-                round++;
-                startRound();
-            }
+        // Slow-mo: lerp toward target, then recover
+        if (slowMo !== slowMoTarget) {
+            slowMo += (slowMoTarget - slowMo) * 0.15;
+            if (Math.abs(slowMo - slowMoTarget) < 0.01) slowMo = slowMoTarget;
+        }
+        // Recover from slow-mo when cascade settles
+        if (slowMoTarget < 1 && explosions.length === 0 && pendingExplosions.length === 0) {
+            slowMoTarget = 1.0;
         }
 
         // Game over timer
@@ -1291,7 +1354,7 @@
 
         // Chain count (during resolving)
         const infoY = 72 * s;
-        if (gameState === 'resolving' || gameState === 'roundclear') {
+        if (gameState === 'resolving') {
             const targetMet = chainCount >= params.target;
             ctx.font = `700 ${14 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = targetMet ? 'rgba(255, 220, 100, 0.8)' : 'rgba(255,255,255,0.5)';
@@ -1303,7 +1366,6 @@
         }
 
         // State overlays
-        if (gameState === 'roundclear') drawRoundClear();
         if (gameState === 'gameover') drawGameOver();
 
         // Best round (bottom)
@@ -1357,34 +1419,6 @@
         }
     }
 
-    function drawRoundClear() {
-        const t = easeOutCubic(Math.min(roundTransition * 2, 1));
-        const params = getRoundParams(round);
-        const isPerfect = chainCount >= params.dots;
-        const s = Math.max(1, Math.min(W, H) / 600);
-
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.globalAlpha = t;
-
-        // Brief celebratory text
-        ctx.save();
-        const glowColor = isPerfect ? 'rgba(255, 215, 0, 0.5)' : 'rgba(100, 180, 255, 0.4)';
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 30 * s;
-        const clearSize = Math.round(28 * s * (0.8 + 0.2 * easeOutBack(t)));
-        ctx.font = `600 ${clearSize}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = isPerfect ? '#ffd700' : '#88ccff';
-        ctx.fillText(isPerfect ? 'Perfect!' : 'Clear!', W/2, H/2 - 15 * s);
-        ctx.restore();
-
-        ctx.font = `300 ${16 * s | 0}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.fillText(`Chain: ${chainCount}  Score: ${score}`, W/2, H/2 + 22 * s);
-
-        ctx.globalAlpha = 1;
-    }
-
     function drawGameOver() {
         const t = easeOutCubic(gameOverTimer);
         const s = Math.max(1, Math.min(W, H) / 600);
@@ -1417,7 +1451,7 @@
 
             ctx.font = `300 ${15 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            ctx.fillText(`Score: ${score}`, W/2, H/2 + 30 * s);
+            ctx.fillText(`Total Score: ${totalScore + score}`, W/2, H/2 + 30 * s);
 
             if (round >= bestRound) {
                 ctx.font = `600 ${14 * s | 0}px Inter, system-ui, sans-serif`;
