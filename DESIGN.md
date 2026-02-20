@@ -158,4 +158,5 @@ From the Gemini conversation, refined by simulation data:
 - `research/prior-art.md` — Boomshine, Rez, Lumines, game feel research
 - `research/tech-notes.md` — Canvas 2D, Web Audio, performance patterns
 - `research/experience.md` — Player experience narrative, cross-agent critique
+- `research/progression-loss.md` — **Loss aversion, restart mechanics, session arc research + brainstormed solutions**
 - `~/clawd/research/game-simulation-framework.md` — Monte Carlo methodology research
