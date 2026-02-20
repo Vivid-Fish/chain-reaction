@@ -178,6 +178,9 @@
     let replayLog = [];             // [{t, type, data}, ...]
     let replayStartTime = 0;
 
+    // UI buttons (computed in draw, hit-tested in input)
+    let uiButtons = [];             // [{id, x, y, w, h}]
+
     // Music system
     const MUSIC_PATTERN = [
         [5,1.0],[7,0.7],[8,0.9],[10,0.6],
@@ -1643,12 +1646,50 @@
         ctx.fillText(`${BUILD_VERSION} · ${BUILD_DATE}`, W - 8 * s, H - 6 * s);
     }
 
+    // Reusable pill button drawer — returns hit rect
+    function drawPill(cx, cy, label, active, hue) {
+        const s = Math.max(1, Math.min(W, H) / 600);
+        const fontSize = Math.round(12 * s);
+        ctx.font = `400 ${fontSize}px Inter, system-ui, sans-serif`;
+        const textW = ctx.measureText(label).width;
+        const pw = textW + 28 * s;
+        const ph = 32 * s;
+        const px = cx - pw / 2;
+        const py = cy - ph / 2;
+        const radius = ph / 2;
+
+        // Background pill
+        ctx.beginPath();
+        ctx.roundRect(px, py, pw, ph, radius);
+        if (active) {
+            ctx.fillStyle = `hsla(${hue}, 50%, 45%, 0.35)`;
+            ctx.fill();
+            ctx.strokeStyle = `hsla(${hue}, 50%, 65%, 0.5)`;
+        } else {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        }
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Label
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = active ? `hsla(${hue}, 60%, 80%, 0.9)` : 'rgba(255, 255, 255, 0.5)';
+        ctx.fillText(label, cx, cy);
+
+        return { x: px, y: py, w: pw, h: ph };
+    }
+
     function drawStartScreen() {
+        uiButtons = [];
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const titleSize = Math.min(52, W * 0.10);
         const subSize = Math.min(16, W * 0.038);
+        const s = Math.max(1, Math.min(W, H) / 600);
 
         ctx.save();
         ctx.shadowColor = 'rgba(120, 180, 255, 0.4)';
@@ -1668,9 +1709,8 @@
         ctx.fillText('Tap to start a chain reaction.', W/2, H/2 + subSize * 1.2);
 
         const promptAlpha = 0.2 + 0.12 * Math.sin(performance.now() * 0.003);
-        const pa2 = promptAlpha + 0.1;
         ctx.font = `400 ${Math.min(14, subSize * 0.85)}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = `rgba(255,255,255,${pa2})`;
+        ctx.fillStyle = `rgba(255,255,255,${promptAlpha + 0.1})`;
         ctx.fillText('Tap anywhere to begin', W/2, H/2 + subSize * 3.5);
 
         if (bestRound > 0) {
@@ -1679,12 +1719,10 @@
             ctx.fillText(`Best: Round ${bestRound}`, W/2, H/2 + subSize * 6);
         }
 
-        // Keyboard hints (desktop only)
-        if (W > 600) {
-            ctx.font = `200 ${Math.min(11, subSize * 0.65)}px Inter, system-ui, sans-serif`;
-            ctx.fillStyle = 'rgba(255,255,255,0.12)';
-            ctx.fillText('W: watch bot  ·  R: save replay', W/2, H/2 + subSize * 8);
-        }
+        // Bottom buttons — Watch Bot toggle
+        const btnY = H - 50 * s;
+        const watchRect = drawPill(W / 2, btnY, spectatorMode ? 'Bot: ON' : 'Watch Bot', spectatorMode, 55);
+        uiButtons.push({ id: 'watch', ...watchRect });
     }
 
     function drawGameOver() {
@@ -1740,6 +1778,16 @@
             ctx.font = `300 ${14 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = `rgba(255,255,255,${pa})`;
             ctx.fillText('Tap to try again', W/2, H/2 + 100 * s);
+
+            // Bottom buttons on game over
+            const btnY = H - 50 * s;
+            const gap = 10 * s;
+            const watchRect = drawPill(W / 2 - 60 * s, btnY, spectatorMode ? 'Bot: ON' : 'Watch Bot', spectatorMode, 55);
+            uiButtons.push({ id: 'watch', ...watchRect });
+            if (replayLog.length > 0) {
+                const replayRect = drawPill(W / 2 + 60 * s, btnY, 'Save Replay', false, 200);
+                uiButtons.push({ id: 'replay', ...replayRect });
+            }
         }
 
         ctx.globalAlpha = 1;
@@ -1811,11 +1859,10 @@
     }
 
     function drawBotOverlay() {
-        if (!spectatorMode) return;
         const s = Math.max(1, Math.min(W, H) / 600);
 
-        // Bot target crosshair
-        if (botTarget && gameState === 'playing') {
+        // Bot target crosshair (only when spectating)
+        if (spectatorMode && botTarget && gameState === 'playing') {
             const pulse = Math.sin(performance.now() * 0.008) * 0.3 + 0.7;
             ctx.save();
             ctx.globalCompositeOperation = 'lighter';
@@ -1823,7 +1870,6 @@
             ctx.strokeStyle = 'rgba(255, 255, 100, 1)';
             ctx.lineWidth = 1.5;
 
-            // Crosshair
             const cr = 15 * s;
             ctx.beginPath();
             ctx.moveTo(botTarget.x - cr, botTarget.y);
@@ -1834,7 +1880,6 @@
             ctx.lineTo(botTarget.x, botTarget.y + cr);
             ctx.stroke();
 
-            // Circle showing effective radius
             ctx.globalAlpha = 0.15 * pulse;
             ctx.beginPath();
             ctx.arc(botTarget.x, botTarget.y, explosionRadius * (1 + mercyBonus), 0, Math.PI * 2);
@@ -1844,12 +1889,38 @@
             ctx.restore();
         }
 
-        // "WATCHING" label
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.font = `600 ${10 * s | 0}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(255, 255, 100, 0.3)';
-        ctx.fillText('BOT', 8 * s, 8 * s);
+        // Small bot toggle pill — top-left during play, always visible
+        if (gameState === 'playing' || gameState === 'resolving') {
+            const bx = 8 * s;
+            const by = 8 * s;
+            const bw = spectatorMode ? 52 * s : 36 * s;
+            const bh = 22 * s;
+            const br = bh / 2;
+
+            ctx.beginPath();
+            ctx.roundRect(bx, by, bw, bh, br);
+            ctx.fillStyle = spectatorMode ? 'rgba(255, 255, 100, 0.12)' : 'rgba(255, 255, 255, 0.04)';
+            ctx.fill();
+            ctx.strokeStyle = spectatorMode ? 'rgba(255, 255, 100, 0.25)' : 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `600 ${8 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = spectatorMode ? 'rgba(255, 255, 100, 0.5)' : 'rgba(255, 255, 255, 0.15)';
+            ctx.fillText(spectatorMode ? 'BOT' : 'BOT', bx + bw / 2, by + bh / 2);
+
+            // Small dot indicator
+            if (spectatorMode) {
+                ctx.beginPath();
+                ctx.arc(bx + bw - 8 * s, by + bh / 2, 3 * s, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(100, 255, 100, 0.6)';
+                ctx.fill();
+            }
+
+            uiButtons.push({ id: 'watch', x: bx, y: by, w: bw, h: bh });
+        }
     }
 
     // =====================================================================
@@ -1880,6 +1951,7 @@
     // =====================================================================
     function loop() {
         const now = performance.now();
+        uiButtons = []; // clear each frame — buttons register themselves in draw
         updateBot(now);
         update();
         draw();
@@ -1890,13 +1962,37 @@
     // =====================================================================
     // INPUT
     // =====================================================================
+    function hitTestButtons(x, y) {
+        for (const btn of uiButtons) {
+            if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+                return btn.id;
+            }
+        }
+        return null;
+    }
+
     canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
-        if (!spectatorMode) handleTap(e.clientX, e.clientY);
+        const x = e.clientX, y = e.clientY;
+
+        // Check UI buttons first
+        const hit = hitTestButtons(x, y);
+        if (hit === 'watch') {
+            spectatorMode = !spectatorMode;
+            if (spectatorMode) { botTarget = null; botLastScan = 0; }
+            return;
+        }
+        if (hit === 'replay') {
+            downloadReplay();
+            return;
+        }
+
+        // Normal game input
+        if (!spectatorMode) handleTap(x, y);
     });
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    // Keyboard shortcuts
+    // Keyboard shortcuts (desktop fallback)
     document.addEventListener('keydown', e => {
         if (e.key === 'w' || e.key === 'W') {
             spectatorMode = !spectatorMode;
