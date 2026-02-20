@@ -96,6 +96,18 @@ With gravity + volatile types at R5:
 
 Key insight: Gravity dots help DHR but also make clusters too stable (high F3, high chaos retention). May need to reduce gravity pull force or add volatile dots as destabilizers. The tension between gravity (stabilize) and volatile (destabilize) is exactly the design intent.
 
+### v8 Results (cascade momentum, 2026-02-20)
+
+| Metric | v7 (no cascade) | v8 (cascade) | Sweet Spot | Notes |
+|--------|-----------------|-------------|------------|-------|
+| SCR | 3.61 | 3.68 | 2-5x | Slightly better |
+| **DHR** | **0.21** | **0.32** | **0.30-0.55** | **FIXED — in sweet spot for first time** |
+| F3 | 54% | 34% | 30-60% | Tighter base means fewer auto-clusters |
+| R50 | 80px | 75px | 30-80px | More precise tap required |
+| Chaos | 88% | 82% | 40-85% | Faster dots break up stale clusters |
+
+**5/5 at R5 (500 runs).** First time all metrics in sweet spot simultaneously.
+
 **Mechanic variants tested** (in simulation only, not in game):
 - Gravity dots (pull neighbors) — didn't improve metrics alone
 - Volatile dots (1.5x explosion radius) — slightly higher max chains
@@ -132,6 +144,8 @@ From the Gemini conversation, refined by simulation data:
 | v5.1 | 2026-02-20 | Radius tuned to 0.11 via sweep data, build info in UI |
 | v6 | 2026-02-20 | Dot types: gravity (purple, pulls), volatile (orange, 1.5x radius). Property transmission. |
 | v7 | 2026-02-20 | Setback progression (-2 rounds), mercy (+5%/fail), spectator bot mode (?watch or W key), replay recording (R key). |
+| v7.1 | 2026-02-20 | Mobile touch UI: pill buttons for bot/replay (no more keyboard-only). |
+| v8 | 2026-02-20 | **Cascade Momentum**: tighter base radius (0.10), +8% radius/gen, +200ms hold/gen, faster dots (0.7-1.4). First 5/5 metric config. DHR fixed: 0.21→0.31. |
 
 ## Playtest Feedback Log
 
@@ -145,13 +159,40 @@ From the Gemini conversation, refined by simulation data:
 - "game seems fine" — issues resolved, no new complaints
 - Radius change to 0.11 noticed as positive (tighter, more intentional)
 
+## v8 Cascade Momentum — Experiment Results
+
+Tested 4 candidate mechanics against baseline (30+ experiments, 300-500 runs each):
+
+| Mechanic | DHR Impact | Why |
+|----------|-----------|-----|
+| Afterglow (lingering embers) | 0.21 (no change) | Dots don't pass through ember zones |
+| Resonance (excited near-miss dots) | 0.23 (+10%) | Faster dots help slightly, but not enough |
+| Elastic collisions (dot bouncing) | 0.21 (no change) | Bouncing doesn't direct dots into explosions |
+| **Cascade momentum** | **0.31 (+48%)** | Bigger + longer late-chain explosions catch drifters |
+
+Key insight: **longer hold time per generation > bigger radius per generation**. Bigger radius inflates chaos and R50 (too forgiving). Longer hold gives dots more TIME to drift in without covering the whole screen.
+
+Winning config found via focused sweep of cascade variants:
+- Base radius: 0.10 (was 0.11) — tighter tap requires precision
+- +8% radius per chain generation — visual crescendo
+- +200ms hold per chain generation — late explosions linger, catching drifters
+- Faster dots (0.7-1.4 base) — dynamic board, more drift opportunities
+- No artificial pull forces — pure physics scaling
+
+Cascade scaling on phone viewport (base ~40px):
+| Gen | Radius | Hold Time | Feel |
+|-----|--------|-----------|------|
+| 0 (tap) | 40px | 1.0s | Tight, precise |
+| 2 | 46px | 1.4s | Noticeably bigger |
+| 4 | 53px | 1.8s | Dramatic |
+| 6 | 59px (+48%) | 2.2s | Sustained sweep |
+
 ## Next Steps (Pending)
 
-1. **Fix DHR** — the one metric still out of sweet spot. Likely needs mechanics, not just parameter tuning.
-2. **Implement dot types in actual game** — start with Standard + Gravity + Volatile (they exist in sim, not in game).
-3. **Validate with simulation** — run sweep with dot types in game-equivalent config.
-4. **Playtest dot types** — does property transmission feel intuitive without explanation?
-5. **Structured spawning** — "Salad not Soup": spawn dot types in clusters/veins (gravity clusters, volatile veins) so players can read the board.
+1. **Playtest v8** — does cascade momentum feel good? Is the crescendo visible/exciting?
+2. **Structured spawning** — "Salad not Soup": spawn dot types in clusters/veins so players can read the board.
+3. **Tune R7+ chaos** — chaos retention at R7 is ~94% (above 85% sweet spot). May need per-round cascade scaling.
+4. **Prism dot type** — doubles explosion expansion speed. Designed but not implemented.
 
 ## Reference Docs
 - `SPEC.md` — Original game spec (vision, rules, audio, visuals, progression)

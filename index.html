@@ -36,7 +36,7 @@
     // =====================================================================
 
     // Build info
-    const BUILD_VERSION = 'v7';
+    const BUILD_VERSION = 'v8';
     const BUILD_DATE = '2026-02-20';
 
     // Progression — setback + mercy
@@ -51,8 +51,12 @@
         volatile: { label: 'volatile', radiusMult: 1.5, speedMult: 1.3 },
     };
 
-    // Explosion radius — generous! Fun moments should be frequent
-    const EXPLOSION_RADIUS_PCT = 0.11;
+    // Cascade momentum — each chain generation grows bigger + lingers longer
+    const CASCADE_RADIUS_GROWTH = 0.08;    // +8% explosion radius per generation
+    const CASCADE_HOLD_GROWTH_MS = 200;    // +200ms hold duration per generation
+
+    // Explosion radius — tighter base, cascade compensates
+    const EXPLOSION_RADIUS_PCT = 0.10;
     const EXPLOSION_RADIUS_MIN_PX = 35;
 
     // Explosion lifecycle (ms)
@@ -214,8 +218,8 @@
         const dots = Math.min(60, Math.floor(10 + r * 2.5));
         const pct = Math.min(0.80, 0.05 + (r - 1) * 0.028);
         const target = Math.max(1, Math.ceil(dots * pct));
-        const speedMin = 0.6 + Math.min(0.4, (r - 1) * 0.03);
-        const speedMax = 1.2 + Math.min(0.8, (r - 1) * 0.05);
+        const speedMin = 0.7 + Math.min(0.4, (r - 1) * 0.03);
+        const speedMax = 1.4 + Math.min(0.8, (r - 1) * 0.05);
         // Dot types introduced gradually: R1-2 all standard, R3+ gravity, R5+ volatile
         let typeWeights;
         if (r <= 2) {
@@ -909,7 +913,13 @@
             this.dotType = dotType || 'standard';
             // Volatile explosions have bigger radius (property transmission!)
             const typeDef = DOT_TYPES[this.dotType] || DOT_TYPES.standard;
-            this.explosionRadius = radius * typeDef.radiusMult;
+            let baseRadius = radius * typeDef.radiusMult;
+            // Cascade momentum: each generation grows bigger + holds longer
+            if (generation > 0) {
+                baseRadius *= (1 + CASCADE_RADIUS_GROWTH * generation);
+            }
+            this.explosionRadius = baseRadius;
+            this.holdMs = EXPLOSION_HOLD_MS + (generation > 0 ? CASCADE_HOLD_GROWTH_MS * generation : 0);
             this.onCaught = onCaught;
             this.createdAt = performance.now();
             this.phase = 'grow';
@@ -935,14 +945,15 @@
             this.flashAlpha = Math.max(0, 1 - age / 80);
             this.shockwaveRadius = Math.min(this.explosionRadius * 1.6, age * 0.8);
 
+            const holdMs = this.holdMs;
             if (this.phase === 'grow') {
                 if (age >= EXPLOSION_GROW_MS) this.phase = 'hold';
                 this.radius = this.explosionRadius * easeOutExpo(Math.min(age / EXPLOSION_GROW_MS, 1));
             } else if (this.phase === 'hold') {
-                if (age >= EXPLOSION_GROW_MS + EXPLOSION_HOLD_MS) this.phase = 'shrink';
+                if (age >= EXPLOSION_GROW_MS + holdMs) this.phase = 'shrink';
                 this.radius = this.explosionRadius;
             } else if (this.phase === 'shrink') {
-                const t = (age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS;
+                const t = (age - EXPLOSION_GROW_MS - holdMs) / EXPLOSION_SHRINK_MS;
                 if (t >= 1) { this.phase = 'done'; return false; }
                 this.radius = this.explosionRadius * (1 - easeInQuad(t));
             }
@@ -981,7 +992,7 @@
             const age = this._virtualAge || 0;
             let alpha = 1;
             if (this.phase === 'shrink') {
-                const t = (age - EXPLOSION_GROW_MS - EXPLOSION_HOLD_MS) / EXPLOSION_SHRINK_MS;
+                const t = (age - EXPLOSION_GROW_MS - this.holdMs) / EXPLOSION_SHRINK_MS;
                 alpha = 1 - easeInQuad(Math.min(t, 1));
             }
 

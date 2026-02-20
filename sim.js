@@ -33,13 +33,15 @@ const easeInQuad = t => t * t;
 
 // --- Default Config (mirrors index.html v6) ---
 const DEFAULT_CONFIG = {
-    EXPLOSION_RADIUS_PCT: 0.11,
+    EXPLOSION_RADIUS_PCT: 0.10,
     EXPLOSION_RADIUS_MIN_PX: 35,
     EXPLOSION_GROW_MS: 200,
     EXPLOSION_HOLD_MS: 1000,
     EXPLOSION_SHRINK_MS: 500,
     CASCADE_STAGGER_MS: 80,
     CASCADE_JITTER_MS: 25,
+    CASCADE_RADIUS_GROWTH: 0.08,    // +8% per generation
+    CASCADE_HOLD_GROWTH_MS: 200,    // +200ms hold per generation
     MIN_DOT_DISTANCE: 25,
     SCREEN_MARGIN: 16,
     MULT_THRESHOLDS: [
@@ -53,8 +55,8 @@ function getRoundParams(r, config) {
     const dots = Math.min(60, Math.floor(10 + r * 2.5));
     const pct = Math.min(0.80, 0.05 + (r - 1) * 0.028);
     const target = Math.max(1, Math.ceil(dots * pct));
-    const speedMin = (config.speedMin || 0.6) + Math.min(0.4, (r - 1) * 0.03);
-    const speedMax = (config.speedMax || 1.2) + Math.min(0.8, (r - 1) * 0.05);
+    const speedMin = (config.speedMin || 0.7) + Math.min(0.4, (r - 1) * 0.03);
+    const speedMax = (config.speedMax || 1.4) + Math.min(0.8, (r - 1) * 0.05);
     return { dots, target, pct, speedMin, speedMax };
 }
 
@@ -181,10 +183,18 @@ class Simulation {
 
     _createExplosion(x, y, generation, dotType) {
         const radiusMult = dotType === 'volatile' ? 1.5 : 1.0;
+        let maxRadius = this.explosionRadius * radiusMult;
+        let holdMs = this.cfg.EXPLOSION_HOLD_MS;
+        // Cascade momentum: each generation grows bigger + holds longer
+        if (generation > 0) {
+            maxRadius *= (1 + this.cfg.CASCADE_RADIUS_GROWTH * generation);
+            holdMs += this.cfg.CASCADE_HOLD_GROWTH_MS * generation;
+        }
         return {
             x, y, generation,
             dotType: dotType || 'standard',
-            maxRadius: this.explosionRadius * radiusMult,
+            maxRadius,
+            holdMs,
             radius: 0,
             phase: 'grow',
             age: 0,
@@ -240,14 +250,15 @@ class Simulation {
             const elapsed = dt * this.slowMo;
             e.age += elapsed;
 
+            const holdMs = e.holdMs || cfg.EXPLOSION_HOLD_MS;
             if (e.phase === 'grow') {
                 if (e.age >= cfg.EXPLOSION_GROW_MS) e.phase = 'hold';
                 e.radius = e.maxRadius * easeOutExpo(Math.min(e.age / cfg.EXPLOSION_GROW_MS, 1));
             } else if (e.phase === 'hold') {
-                if (e.age >= cfg.EXPLOSION_GROW_MS + cfg.EXPLOSION_HOLD_MS) e.phase = 'shrink';
+                if (e.age >= cfg.EXPLOSION_GROW_MS + holdMs) e.phase = 'shrink';
                 e.radius = e.maxRadius;
             } else if (e.phase === 'shrink') {
-                const t = (e.age - cfg.EXPLOSION_GROW_MS - cfg.EXPLOSION_HOLD_MS) / cfg.EXPLOSION_SHRINK_MS;
+                const t = (e.age - cfg.EXPLOSION_GROW_MS - holdMs) / cfg.EXPLOSION_SHRINK_MS;
                 if (t >= 1) return false; // Remove
                 e.radius = e.maxRadius * (1 - easeInQuad(t));
             }
