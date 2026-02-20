@@ -36,8 +36,15 @@
     // =====================================================================
 
     // Build info
-    const BUILD_VERSION = 'v5.1';
+    const BUILD_VERSION = 'v6';
     const BUILD_DATE = '2026-02-20';
+
+    // Dot types — physics modifiers, not scripted combos
+    const DOT_TYPES = {
+        standard: { label: 'standard', radiusMult: 1.0, speedMult: 1.0 },
+        gravity:  { label: 'gravity',  radiusMult: 1.0, speedMult: 0.7, pullRange: 2.5, pullForce: 0.012 },
+        volatile: { label: 'volatile', radiusMult: 1.5, speedMult: 1.3 },
+    };
 
     // Explosion radius — generous! Fun moments should be frequent
     const EXPLOSION_RADIUS_PCT = 0.11;
@@ -183,7 +190,19 @@
         const target = Math.max(1, Math.ceil(dots * pct));
         const speedMin = 0.6 + Math.min(0.4, (r - 1) * 0.03);
         const speedMax = 1.2 + Math.min(0.8, (r - 1) * 0.05);
-        return { dots, target, pct, speedMin, speedMax };
+        // Dot types introduced gradually: R1-2 all standard, R3+ gravity, R5+ volatile
+        let typeWeights;
+        if (r <= 2) {
+            typeWeights = { standard: 1.0 };
+        } else if (r <= 4) {
+            const gw = Math.min(0.25, (r - 2) * 0.12);
+            typeWeights = { standard: 1 - gw, gravity: gw };
+        } else {
+            const gw = Math.min(0.25, 0.12 + (r - 4) * 0.03);
+            const vw = Math.min(0.20, (r - 4) * 0.08);
+            typeWeights = { standard: Math.max(0.5, 1 - gw - vw), gravity: gw, volatile: vw };
+        }
+        return { dots, target, pct, speedMin, speedMax, typeWeights };
     }
 
     function getMultiplier(chain) {
@@ -681,10 +700,12 @@
     // DOT
     // =====================================================================
     class Dot {
-        constructor(x, y, speedMin, speedMax) {
+        constructor(x, y, speedMin, speedMax, type) {
+            this.type = type || 'standard';
+            const typeDef = DOT_TYPES[this.type];
             this.x = x; this.y = y;
             const a = Math.random() * Math.PI * 2;
-            const spd = speedMin + Math.random() * (speedMax - speedMin);
+            const spd = (speedMin + Math.random() * (speedMax - speedMin)) * typeDef.speedMult;
             this.vx = Math.cos(a) * spd;
             this.vy = Math.sin(a) * spd;
             this.active = true;
@@ -696,7 +717,12 @@
             this._neighbors = 0;
         }
 
-        getHue() { return 195 - (this.y / H) * 180; }
+        getHue() {
+            // Type-based hue: standard = position-based, gravity = purple, volatile = orange-red
+            if (this.type === 'gravity') return 270;
+            if (this.type === 'volatile') return 15;
+            return 195 - (this.y / H) * 180;
+        }
 
         update() {
             if (!this.active && this.bloomTimer <= 0) return;
@@ -706,6 +732,21 @@
             this.x += this.vx * slowMo;
             this.y += this.vy * slowMo;
             this.pulsePhase += 0.05;
+
+            // Gravity dots pull nearby dots toward themselves
+            if (this.type === 'gravity' && this.active) {
+                const td = DOT_TYPES.gravity;
+                const pullR = explosionRadius * td.pullRange;
+                for (const o of dots) {
+                    if (o === this || !o.active) continue;
+                    const dist = Math.hypot(o.x - this.x, o.y - this.y);
+                    if (dist < pullR && dist > 5) {
+                        const f = td.pullForce * slowMo / (dist / explosionRadius);
+                        o.vx += (this.x - o.x) / dist * f;
+                        o.vy += (this.y - o.y) / dist * f;
+                    }
+                }
+            }
 
             if (this.x < SCREEN_MARGIN) { this.vx = Math.abs(this.vx); this.x = SCREEN_MARGIN; }
             if (this.x > W - SCREEN_MARGIN) { this.vx = -Math.abs(this.vx); this.x = W - SCREEN_MARGIN; }
@@ -779,6 +820,41 @@
             ctx.fillStyle = cg;
             ctx.fill();
 
+            // Gravity dot: inward spiral lines (shows it pulls things in)
+            if (this.type === 'gravity') {
+                ctx.globalCompositeOperation = 'lighter';
+                const spiralT = performance.now() * 0.002;
+                const pullR = DOT_GLOW_SIZE * 1.8;
+                for (let i = 0; i < 3; i++) {
+                    const angle = spiralT + i * (Math.PI * 2 / 3);
+                    const outerR = pullR * (0.6 + 0.4 * Math.sin(spiralT * 1.5 + i));
+                    const innerR = r * 1.5;
+                    ctx.globalAlpha = a * 0.2;
+                    ctx.strokeStyle = 'hsla(270, 60%, 75%, 1)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + Math.cos(angle) * outerR, this.y + Math.sin(angle) * outerR);
+                    ctx.lineTo(this.x + Math.cos(angle + 0.3) * innerR, this.y + Math.sin(angle + 0.3) * innerR);
+                    ctx.stroke();
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
+            // Volatile dot: jittery outer sparks
+            if (this.type === 'volatile') {
+                ctx.globalCompositeOperation = 'lighter';
+                const sparkT = performance.now() * 0.004;
+                for (let i = 0; i < 4; i++) {
+                    const sa = sparkT + i * (Math.PI / 2) + Math.sin(sparkT * 3 + i) * 0.5;
+                    const sr = r * (1.5 + 0.8 * Math.sin(sparkT * 5 + i * 2));
+                    const ss = 1.5;
+                    ctx.globalAlpha = a * (0.3 + 0.2 * Math.sin(sparkT * 6 + i));
+                    ctx.fillStyle = 'hsla(15, 100%, 70%, 1)';
+                    ctx.fillRect(this.x + Math.cos(sa) * sr - ss/2, this.y + Math.sin(sa) * sr - ss/2, ss, ss);
+                }
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
             // Near-miss red pulse
             if (this.nearMiss > 0) {
                 const nmP = Math.sin(performance.now() * 0.012) * 0.3 + 0.7;
@@ -801,16 +877,22 @@
     // EXPLOSION
     // =====================================================================
     class Explosion {
-        constructor(x, y, generation, radius, onCaught, parentX, parentY) {
+        constructor(x, y, generation, radius, onCaught, parentX, parentY, dotType) {
             this.x = x; this.y = y;
             this.generation = generation;
-            this.explosionRadius = radius;
+            this.dotType = dotType || 'standard';
+            // Volatile explosions have bigger radius (property transmission!)
+            const typeDef = DOT_TYPES[this.dotType] || DOT_TYPES.standard;
+            this.explosionRadius = radius * typeDef.radiusMult;
             this.onCaught = onCaught;
             this.createdAt = performance.now();
             this.phase = 'grow';
             this.radius = 0;
             this.caught = new Set();
-            this.hue = 195 - (y / H) * 180;
+            // Gravity explosions = purple, volatile = orange, standard = position-based
+            this.hue = this.dotType === 'gravity' ? 270
+                     : this.dotType === 'volatile' ? 15
+                     : 195 - (y / H) * 180;
             this.parentX = parentX;
             this.parentY = parentY;
             this.shockwaveRadius = 0;
@@ -840,6 +922,21 @@
             }
 
             if (this.phase === 'grow' || this.phase === 'hold') {
+                // Gravity-type explosions pull nearby dots inward (property transmission)
+                if (this.dotType === 'gravity') {
+                    const pullR = this.explosionRadius * 2.5;
+                    for (let i = 0; i < dots.length; i++) {
+                        const dot = dots[i];
+                        if (!dot.active || this.caught.has(i)) continue;
+                        const dist = Math.hypot(dot.x - this.x, dot.y - this.y);
+                        if (dist < pullR && dist > 5) {
+                            const f = 0.025 * slowMo / (dist / this.explosionRadius);
+                            dot.vx += (this.x - dot.x) / dist * f;
+                            dot.vy += (this.y - dot.y) / dist * f;
+                        }
+                    }
+                }
+
                 for (let i = 0; i < dots.length; i++) {
                     const dot = dots[i];
                     if (!dot.active || this.caught.has(i)) continue;
@@ -976,10 +1073,21 @@
     let dots = [];
     let explosions = [];
 
-    function generateDots(count, speedMin, speedMax) {
+    function pickDotType(typeWeights) {
+        const r = Math.random();
+        let sum = 0;
+        for (const [type, weight] of Object.entries(typeWeights)) {
+            sum += weight;
+            if (r <= sum) return type;
+        }
+        return 'standard';
+    }
+
+    function generateDots(count, speedMin, speedMax, typeWeights) {
         dots = [];
         let attempts = 0;
         const topMargin = SCREEN_MARGIN + 50;
+        const tw = typeWeights || { standard: 1.0 };
         while (dots.length < count && attempts < 5000) {
             const x = SCREEN_MARGIN + Math.random() * (W - SCREEN_MARGIN * 2);
             const y = topMargin + Math.random() * (H - topMargin - SCREEN_MARGIN);
@@ -987,14 +1095,14 @@
             for (const d of dots) {
                 if (Math.hypot(d.x - x, d.y - y) < MIN_DOT_DISTANCE) { valid = false; break; }
             }
-            if (valid) dots.push(new Dot(x, y, speedMin, speedMax));
+            if (valid) dots.push(new Dot(x, y, speedMin, speedMax, pickDotType(tw)));
             attempts++;
         }
     }
 
     function startRound() {
         const params = getRoundParams(round);
-        generateDots(params.dots, params.speedMin, params.speedMax);
+        generateDots(params.dots, params.speedMin, params.speedMax, params.typeWeights);
         explosions = [];
         scheduledDetonations = new Set();
         pendingExplosions = [];
@@ -1068,13 +1176,14 @@
             }
         }
 
-        // Schedule child explosion
+        // Schedule child explosion — inherits dot type (property transmission)
         const delay = CASCADE_STAGGER_MS + (Math.random() - 0.5) * 2 * CASCADE_JITTER_MS;
         pendingExplosions.push({
             x: dot.x, y: dot.y,
             generation: generation + 1,
             time: performance.now() + delay,
             parentX: dot.x, parentY: dot.y,
+            dotType: dot.type,
         });
     }
 
@@ -1143,7 +1252,7 @@
 
             round++;
             const nextParams = getRoundParams(round);
-            generateDots(nextParams.dots, nextParams.speedMin, nextParams.speedMax);
+            generateDots(nextParams.dots, nextParams.speedMin, nextParams.speedMax, nextParams.typeWeights);
             explosions = [];
             scheduledDetonations = new Set();
             pendingExplosions = [];
@@ -1222,7 +1331,7 @@
         for (let i = pendingExplosions.length - 1; i >= 0; i--) {
             if (now >= pendingExplosions[i].time) {
                 const p = pendingExplosions[i];
-                explosions.push(new Explosion(p.x, p.y, p.generation, explosionRadius, handleDotCaught, p.parentX, p.parentY));
+                explosions.push(new Explosion(p.x, p.y, p.generation, explosionRadius, handleDotCaught, p.parentX, p.parentY, p.dotType));
                 pendingExplosions.splice(i, 1);
             }
         }
