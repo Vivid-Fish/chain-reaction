@@ -66,10 +66,11 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 
 ## Epic: Supernova / Endless Mode (P2)
 
-### T-009: Research Tetris Effect-style endless mode [ ]
+### T-009: Research Tetris Effect-style endless mode [x]
 - Priority: P2
-- Notes: Deep research needed before deciding if separate mode or replacement. Study Tetris Effect Zone mechanic, field-never-resets design. Don't clone — draw inspiration.
-- Research: `research/endless-mode.md` (pending)
+- Completed: 2026-02-21
+- Notes: Deep research complete — 7 reference games analyzed (Tetris Effect, Rez Infinite, Lumines, Beat Saber, Geometry Wars, Super Hexagon, Audiosurf). Proposal: "Breath Mode" with continuous spawning, density-driven epochs, multiplier investment, Tide mechanic, Overflow Bloom ending. Full simulation plan and implementation sequence.
+- Research: `research/endless-mode.md`
 
 ### T-010: Implement Multi-Tap Supernova [ ]
 - Priority: P2
@@ -79,10 +80,11 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 
 ## Epic: App Store / Distribution (P3)
 
-### T-011: Gap analysis for app store shipping [ ]
+### T-011: Gap analysis for app store shipping [x]
 - Priority: P3
-- Notes: PWA first, native mobile on roadmap. Research what's needed for iOS/Android store submission. Manifest, icons, offline support, etc.
-- Research: `research/app-store.md` (pending)
+- Completed: 2026-02-21
+- Notes: Full gap analysis complete. Two-track approach: Android via TWA/Bubblewrap ($25, 1-2 days), iOS via Capacitor ($99/yr, 3-5 days, needs Mac). Key gaps: manifest.json, service worker, app icons, DPR-aware rendering for iOS. Apple Guideline 4.7 likely N/A since Capacitor embeds code in binary. Ship free first, tip jar IAP later.
+- Research: `research/app-store.md`
 
 ---
 
