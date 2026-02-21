@@ -27,7 +27,7 @@
 // CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v12';
+const BUILD_VERSION = 'v12.1';
 const BUILD_DATE = '2026-02-21';
 
 // Dot types — physics modifiers
@@ -74,21 +74,24 @@ const SHAKE_DECAY = 0.90;
 const SHAKE_TRAUMA_PER_DOT = 0.06;
 
 // Multiplier thresholds — percentage of round's total dots (matches celebration scaling)
+// Calibrated via bot playtest: oracle bot median clear ~20%, p90 ~35%.
 const MULT_THRESHOLDS = [
-    { pct: 0.00, mult: 1 }, { pct: 0.20, mult: 2 },
-    { pct: 0.40, mult: 3 }, { pct: 0.60, mult: 4 },
-    { pct: 0.80, mult: 5 }, { pct: 0.95, mult: 8 },
+    { pct: 0.00, mult: 1 }, { pct: 0.10, mult: 2 },
+    { pct: 0.20, mult: 3 }, { pct: 0.35, mult: 4 },
+    { pct: 0.50, mult: 5 }, { pct: 0.75, mult: 8 },
 ];
 
 // Celebration milestones — percentage of round's total dots, not absolute counts.
-// This ensures celebrations scale with difficulty: clearing 80% of 45 dots at R14
-// is genuinely impressive; clearing 5 of 45 (11%) is not celebration-worthy.
+// Calibrated via full-game bot simulation (playtest-v12.js):
+//   Oracle bot: median clear ~20%, p75 ~25%, p90 ~35%, max ~43%
+//   Greedy bot: median clear ~12%, p90 ~30%
+// Thresholds set so NICE! fires at p75 level, GODLIKE! is near-impossible.
 const CELEBRATIONS = [
-    { pct: 0.40, text: 'NICE!', hue: 50, size: 1.0 },
-    { pct: 0.60, text: 'AMAZING!', hue: 35, size: 1.3 },
-    { pct: 0.75, text: 'INCREDIBLE!', hue: 15, size: 1.6 },
-    { pct: 0.85, text: 'LEGENDARY!', hue: 300, size: 2.0 },
-    { pct: 0.95, text: 'GODLIKE!', hue: 280, size: 2.5 },
+    { pct: 0.25, text: 'NICE!', hue: 50, size: 1.0 },
+    { pct: 0.40, text: 'AMAZING!', hue: 35, size: 1.3 },
+    { pct: 0.55, text: 'INCREDIBLE!', hue: 15, size: 1.6 },
+    { pct: 0.70, text: 'LEGENDARY!', hue: 300, size: 2.0 },
+    { pct: 0.85, text: 'GODLIKE!', hue: 280, size: 2.5 },
 ];
 
 // =====================================================================
@@ -977,8 +980,8 @@ function detonateDot(dot, dotIndex, generation, parentX, parentY) {
 
     spawnFloatingText(dot.x, dot.y - 15, `+${points}`, dot.getHue());
     emitParticles(dot.x, dot.y, dot.getHue(), generation);
-    // Extra particles when chain clears 30%+ of the field
-    if (roundTotalDots > 0 && chainCount / roundTotalDots >= 0.30) {
+    // Extra particles when chain clears 20%+ of the field
+    if (roundTotalDots > 0 && chainCount / roundTotalDots >= 0.20) {
         emitParticles(dot.x, dot.y, dot.getHue() + 20, Math.max(0, generation - 2));
     }
 
@@ -991,9 +994,9 @@ function detonateDot(dot, dotIndex, generation, parentX, parentY) {
 
     // Fever intensity scales with percentage of field cleared, not absolute count
     const feverPct = roundTotalDots > 0 ? chainCount / roundTotalDots : 0;
-    if (feverPct >= 0.60) feverIntensity = Math.min(1.0, feverIntensity + 0.15);
-    else if (feverPct >= 0.40) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
-    else if (feverPct >= 0.20) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
+    if (feverPct >= 0.45) feverIntensity = Math.min(1.0, feverIntensity + 0.15);
+    else if (feverPct >= 0.25) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
+    else if (feverPct >= 0.12) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
 
     // Celebrations fire when chain crosses a percentage of the round's total dots.
     // This gates celebrations on relative performance, not absolute chain length.

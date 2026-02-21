@@ -49,9 +49,9 @@ const DEFAULT_CONFIG = {
     MIN_DOT_DISTANCE: 25,
     SCREEN_MARGIN: 16,
     MULT_THRESHOLDS: [
-        { pct: 0.00, mult: 1 }, { pct: 0.20, mult: 2 },
-        { pct: 0.40, mult: 3 }, { pct: 0.60, mult: 4 },
-        { pct: 0.80, mult: 5 }, { pct: 0.95, mult: 8 },
+        { pct: 0.00, mult: 1 }, { pct: 0.10, mult: 2 },
+        { pct: 0.20, mult: 3 }, { pct: 0.35, mult: 4 },
+        { pct: 0.50, mult: 5 }, { pct: 0.75, mult: 8 },
     ],
 };
 

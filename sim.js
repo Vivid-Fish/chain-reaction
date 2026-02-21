@@ -47,9 +47,9 @@ const DEFAULT_CONFIG = {
     SCREEN_MARGIN: 16,
     // Multiplier thresholds — percentage of round's total dots (matches browser engine)
     MULT_THRESHOLDS: [
-        { pct: 0.00, mult: 1 }, { pct: 0.20, mult: 2 },
-        { pct: 0.40, mult: 3 }, { pct: 0.60, mult: 4 },
-        { pct: 0.80, mult: 5 }, { pct: 0.95, mult: 8 },
+        { pct: 0.00, mult: 1 }, { pct: 0.10, mult: 2 },
+        { pct: 0.20, mult: 3 }, { pct: 0.35, mult: 4 },
+        { pct: 0.50, mult: 5 }, { pct: 0.75, mult: 8 },
     ],
 };
 
@@ -957,24 +957,34 @@ function printResult(obj) {
 }
 
 // =========================================================================
-// MAIN
+// EXPORTS (for require() by other scripts)
 // =========================================================================
 
-const opts = parseArgs();
-const [W, H] = opts.viewport.split('x').map(Number);
-const config = { ...DEFAULT_CONFIG, ...opts.config };
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { Simulation, DEFAULT_CONFIG, getRoundParams, getMultiplier, Bots, Metrics, createRNG };
+}
 
-if (opts.compare) {
-    console.log('\n  A/B COMPARISON\n');
-    console.log('  Config A:', JSON.stringify(opts.compare[0]));
-    const resultA = runDashboard(W, H, { ...config, ...opts.compare[0] }, opts.runs, opts.round);
-    console.log('\n  Config B:', JSON.stringify(opts.compare[1]));
-    const resultB = runDashboard(W, H, { ...config, ...opts.compare[1] }, opts.runs, opts.round);
-} else if (opts.metric !== 'all') {
-    const fn = Metrics[opts.metric.replace(/-([a-z])/g, (_, c) => c.toUpperCase())];
-    if (!fn) { console.error(`Unknown metric: ${opts.metric}`); process.exit(1); }
-    const result = fn(W, H, config, opts.runs, opts.round);
-    printResult(result);
-} else {
-    runDashboard(W, H, config, opts.runs, opts.round);
+// =========================================================================
+// MAIN (only when run directly)
+// =========================================================================
+
+if (require.main === module) {
+    const opts = parseArgs();
+    const [W, H] = opts.viewport.split('x').map(Number);
+    const config = { ...DEFAULT_CONFIG, ...opts.config };
+
+    if (opts.compare) {
+        console.log('\n  A/B COMPARISON\n');
+        console.log('  Config A:', JSON.stringify(opts.compare[0]));
+        const resultA = runDashboard(W, H, { ...config, ...opts.compare[0] }, opts.runs, opts.round);
+        console.log('\n  Config B:', JSON.stringify(opts.compare[1]));
+        const resultB = runDashboard(W, H, { ...config, ...opts.compare[1] }, opts.runs, opts.round);
+    } else if (opts.metric !== 'all') {
+        const fn = Metrics[opts.metric.replace(/-([a-z])/g, (_, c) => c.toUpperCase())];
+        if (!fn) { console.error(`Unknown metric: ${opts.metric}`); process.exit(1); }
+        const result = fn(W, H, config, opts.runs, opts.round);
+        printResult(result);
+    } else {
+        runDashboard(W, H, config, opts.runs, opts.round);
+    }
 }
