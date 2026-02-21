@@ -19,6 +19,7 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 - Notes: Root cause: percolation threshold crossed at high rounds. CASCADE_RADIUS_GROWTH (+32% at gen 4) + 800ms extra hold time + gravity/volatile dots compounded the problem.
 - Research: `research/difficulty-analysis.md`
 - Fix (v11): CASCADE_RADIUS_GROWTH=0, CASCADE_HOLD_GROWTH_MS 200→80, faster dot speeds, gentle per-round radius decay (max 0.85). Random bot R20 clear rate: 87%→0%. Greedy bot curve now properly decreases.
+- Fix (v12): Celebrations + multipliers gated on % of field cleared, not absolute chain counts. Old: LEGENDARY at 20 dots regardless of round size. New: LEGENDARY at 85% of round's total dots. Informed by CHI 2024 success-dependent feedback research.
 
 ### T-002: Build headless simulation that matches browser gameplay 1:1 [ ]
 - Priority: P0
