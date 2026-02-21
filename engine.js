@@ -175,6 +175,12 @@ let beatPulse = 0;
 let slowMo = 1.0;
 let slowMoTarget = 1.0;
 
+// Settings overrides (set by host page settings panel)
+let bgOverride = null;       // [r, g, b] or null for default
+let shakeEnabled = true;     // false disables screen shake
+let shakeMultiplier = 1.0;   // 0.4 for GENTLE, 1.0 for FULL
+let particleMultiplier = 1.0; // 0.3 for REDUCED
+
 // =====================================================================
 // RESIZE
 // =====================================================================
@@ -324,10 +330,11 @@ const particles = {
 
 function emitParticles(x, y, hue, gen) {
     const depth = Math.min(8, gen);
-    const burstN = 8 + depth * 2;
-    const driftN = 4 + depth;
-    const sparkN = 2 + Math.min(8, depth * 2);
-    const emberN = 2 + Math.min(4, Math.floor(depth / 2));
+    const pm = particleMultiplier;
+    const burstN = Math.round((8 + depth * 2) * pm);
+    const driftN = Math.round((4 + depth) * pm);
+    const sparkN = Math.round((2 + Math.min(8, depth * 2)) * pm);
+    const emberN = Math.round((2 + Math.min(4, Math.floor(depth / 2))) * pm);
 
     for (let i = 0; i < burstN; i++) {
         const a = (Math.PI * 2 * i) / burstN + (Math.random() - 0.5) * 0.5;
@@ -1062,12 +1069,12 @@ function engineUpdatePhysics() {
     explosions = explosions.filter(e => e.update(now));
 
     // Screen shake
-    if (shakeTrauma > 0.001) {
-        const s = shakeTrauma * shakeTrauma;
+    if (shakeEnabled && shakeTrauma > 0.001) {
+        const s = shakeTrauma * shakeTrauma * shakeMultiplier;
         shakeX = SHAKE_MAX_OFFSET * s * (Math.random() * 2 - 1);
         shakeY = SHAKE_MAX_OFFSET * s * (Math.random() * 2 - 1);
         shakeTrauma *= SHAKE_DECAY;
-    } else { shakeX = 0; shakeY = 0; shakeTrauma = 0; }
+    } else { shakeX = 0; shakeY = 0; if (!shakeEnabled) shakeTrauma = 0; }
 
     if (bgPulse > 0.001) bgPulse *= 0.93; else bgPulse = 0;
     if (multiplierPulse > 0) multiplierPulse = Math.max(0, multiplierPulse - 0.04);
@@ -1077,14 +1084,17 @@ function engineUpdatePhysics() {
 
 // Shared background + scene draw (everything except HUD)
 function engineDrawScene(ctx, gameState, supernovaActive) {
-    ctx.fillStyle = '#020210';
+    const bgR = bgOverride ? bgOverride[0] : 2;
+    const bgG = bgOverride ? bgOverride[1] : 2;
+    const bgB = bgOverride ? bgOverride[2] : 16;
+    ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
     ctx.fillRect(0, 0, W, H);
 
     const bp = bgPulse + beatPulse;
     const bgGrad = ctx.createRadialGradient(W/2, H * 0.55, 0, W/2, H * 0.55, Math.max(W, H) * 0.7);
-    bgGrad.addColorStop(0, `rgba(${12 + bp * 80|0}, ${8 + bp * 40|0}, ${25 + bp * 100|0}, 1)`);
-    bgGrad.addColorStop(0.5, `rgba(${5 + bp * 40|0}, ${4 + bp * 20|0}, ${18 + bp * 50|0}, 1)`);
-    bgGrad.addColorStop(1, 'rgba(2, 2, 12, 1)');
+    bgGrad.addColorStop(0, `rgba(${bgR + 10 + bp * 80|0}, ${bgG + 6 + bp * 40|0}, ${bgB + 9 + bp * 100|0}, 1)`);
+    bgGrad.addColorStop(0.5, `rgba(${bgR + 3 + bp * 40|0}, ${bgG + 2 + bp * 20|0}, ${bgB + 2 + bp * 50|0}, 1)`);
+    bgGrad.addColorStop(1, `rgba(${bgR}, ${bgG}, ${Math.max(bgB - 4, 0)}, 1)`);
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, W, H);
 
@@ -1142,6 +1152,79 @@ function engineDrawScene(ctx, gameState, supernovaActive) {
     drawFloatingTexts(ctx);
 
     ctx.restore();
+}
+
+// =====================================================================
+// CONTINUOUS PLAY (shared engine support)
+// =====================================================================
+
+const CONTINUOUS_TIERS = {
+    CALM:          { spawnRate: 0.5, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
+    FLOW:          { spawnRate: 3.2, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
+    SURGE:         { spawnRate: 5.0, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
+    TRANSCENDENCE: { spawnRate: 2.5, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
+};
+
+/** Pick dot type from weights (e.g. {standard:0.7, gravity:0.2, volatile:0.1}) */
+function pickWeightedType(typeWeights) {
+    const r = Math.random();
+    let sum = 0;
+    for (const [type, weight] of Object.entries(typeWeights)) {
+        sum += weight;
+        if (r <= sum) return type;
+    }
+    return 'standard';
+}
+
+/** Spawn a single dot at a random screen edge with inward velocity. Returns the Dot. */
+function spawnEdgeDot(tier) {
+    const type = pickWeightedType(tier.dotTypes);
+    const typeDef = DOT_TYPES[type] || DOT_TYPES.standard;
+    const speed = (tier.speedMin + Math.random() * (tier.speedMax - tier.speedMin)) * typeDef.speedMult;
+
+    // Pick random edge: 0=top, 1=right, 2=bottom, 3=left
+    const edge = Math.floor(Math.random() * 4);
+    const spread = Math.PI * 0.4; // ±0.4 rad from inward normal
+    let x, y, vx, vy;
+
+    switch (edge) {
+        case 0: // top edge
+            x = SCREEN_MARGIN + Math.random() * (W - SCREEN_MARGIN * 2);
+            y = SCREEN_MARGIN;
+            { const a = Math.PI / 2 + (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
+            break;
+        case 1: // right edge
+            x = W - SCREEN_MARGIN;
+            y = SCREEN_MARGIN + Math.random() * (H - SCREEN_MARGIN * 2);
+            { const a = Math.PI + (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
+            break;
+        case 2: // bottom edge
+            x = SCREEN_MARGIN + Math.random() * (W - SCREEN_MARGIN * 2);
+            y = H - SCREEN_MARGIN;
+            { const a = -Math.PI / 2 + (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
+            break;
+        default: // left edge
+            x = SCREEN_MARGIN;
+            y = SCREEN_MARGIN + Math.random() * (H - SCREEN_MARGIN * 2);
+            { const a = (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
+            break;
+    }
+
+    const dot = new Dot(x, y, vx, vy, type);
+    dots.push(dot);
+    return dot;
+}
+
+/** Count currently active (non-detonated) dots */
+function countActiveDots() {
+    let c = 0;
+    for (const d of dots) if (d.active) c++;
+    return c;
+}
+
+/** Current density as fraction of tier's maxDots */
+function getDensity(tier) {
+    return countActiveDots() / tier.maxDots;
 }
 
 // Reset round state (shared between game and replay)

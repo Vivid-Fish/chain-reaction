@@ -56,12 +56,24 @@ async function initDB() {
         CREATE INDEX IF NOT EXISTS sessions_score_idx ON sessions(total_score DESC);
         CREATE INDEX IF NOT EXISTS sessions_round_idx ON sessions(peak_round DESC);
     `);
+    // Continuous mode columns (safe to re-run — IF NOT EXISTS handled by ALTER)
+    const contCols = [
+        ['game_mode', "TEXT NOT NULL DEFAULT 'rounds'"],
+        ['continuous_tier', 'TEXT'],
+        ['duration_ms', 'BIGINT'],
+        ['final_density', 'FLOAT'],
+        ['mean_density', 'FLOAT'],
+        ['total_taps', 'INT'],
+    ];
+    for (const [col, def] of contCols) {
+        await pool.query(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ${col} ${def}`).catch(() => {});
+    }
+    await pool.query(`CREATE INDEX IF NOT EXISTS sessions_mode_score_idx ON sessions(game_mode, total_score DESC)`).catch(() => {});
     console.log('DB schema initialized');
 }
 
-// Leaderboard cache (30s)
-let leaderboardCache = null;
-let leaderboardCacheTime = 0;
+// Leaderboard cache (30s, keyed by mode_tier)
+const leaderboardCaches = {};
 const CACHE_TTL = 30000;
 
 // Read JSON body
@@ -109,17 +121,21 @@ function serveStatic(res, filePath) {
 // API handlers
 async function handlePostSession(req, res) {
     const body = await readBody(req);
-    const { device_id, player_name, peak_round, total_score, is_bot, viewport_w, viewport_h, build_ver, events } = body;
-    if (!device_id || peak_round == null || total_score == null) {
+    const { device_id, player_name, peak_round, total_score, is_bot, viewport_w, viewport_h, build_ver, events,
+            game_mode, continuous_tier, duration_ms, final_density, mean_density, total_taps } = body;
+    if (!device_id || total_score == null) {
         return json(res, { error: 'Missing required fields' }, 400);
     }
+    const mode = game_mode || 'rounds';
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const { rows } = await client.query(
-            `INSERT INTO sessions (device_id, player_name, peak_round, total_score, is_bot, viewport_w, viewport_h, build_ver)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-            [device_id, player_name || null, peak_round, total_score, !!is_bot, viewport_w || null, viewport_h || null, build_ver || null]
+            `INSERT INTO sessions (device_id, player_name, peak_round, total_score, is_bot, viewport_w, viewport_h, build_ver,
+                                   game_mode, continuous_tier, duration_ms, final_density, mean_density, total_taps)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+            [device_id, player_name || null, peak_round || 0, total_score, !!is_bot, viewport_w || null, viewport_h || null, build_ver || null,
+             mode, continuous_tier || null, duration_ms || null, final_density || null, mean_density || null, total_taps || null]
         );
         const sessionId = rows[0].id;
         if (events && events.length > 0) {
@@ -129,7 +145,7 @@ async function handlePostSession(req, res) {
             );
         }
         await client.query('COMMIT');
-        leaderboardCache = null; // invalidate
+        Object.keys(leaderboardCaches).forEach(k => delete leaderboardCaches[k]); // invalidate
         json(res, { id: sessionId });
     } catch (e) {
         await client.query('ROLLBACK');
@@ -140,22 +156,44 @@ async function handlePostSession(req, res) {
 }
 
 async function handleGetLeaderboard(req, res) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const mode = url.searchParams.get('mode') || 'rounds';
+    const tier = url.searchParams.get('tier') || null;
+
+    const cacheKey = `${mode}_${tier || 'all'}`;
     const now = Date.now();
-    if (leaderboardCache && now - leaderboardCacheTime < CACHE_TTL) {
-        return json(res, leaderboardCache);
+    const cached = leaderboardCaches[cacheKey];
+    if (cached && now - cached.time < CACHE_TTL) {
+        return json(res, cached.data);
     }
-    const [byScore, byRound] = await Promise.all([
-        pool.query(`SELECT id, player_name, peak_round, total_score, is_bot, device_id, created_at
-                     FROM sessions ORDER BY total_score DESC LIMIT 10`),
-        pool.query(`SELECT id, player_name, peak_round, total_score, is_bot, device_id, created_at
-                     FROM sessions ORDER BY peak_round DESC, total_score DESC LIMIT 10`),
-    ]);
-    leaderboardCache = {
-        byScore: byScore.rows,
-        byRound: byRound.rows,
-    };
-    leaderboardCacheTime = now;
-    json(res, leaderboardCache);
+
+    let result;
+    if (mode === 'continuous') {
+        const whereParts = [`game_mode = 'continuous'`];
+        const params = [];
+        if (tier) {
+            params.push(tier);
+            whereParts.push(`continuous_tier = $${params.length}`);
+        }
+        const where = whereParts.join(' AND ');
+        const { rows } = await pool.query(
+            `SELECT id, player_name, total_score, is_bot, device_id, created_at,
+                    continuous_tier, duration_ms, mean_density, total_taps
+             FROM sessions WHERE ${where} ORDER BY total_score DESC LIMIT 10`, params
+        );
+        result = { mode: 'continuous', tier, byScore: rows };
+    } else {
+        const [byScore, byRound] = await Promise.all([
+            pool.query(`SELECT id, player_name, peak_round, total_score, is_bot, device_id, created_at
+                         FROM sessions WHERE game_mode = 'rounds' ORDER BY total_score DESC LIMIT 10`),
+            pool.query(`SELECT id, player_name, peak_round, total_score, is_bot, device_id, created_at
+                         FROM sessions WHERE game_mode = 'rounds' ORDER BY peak_round DESC, total_score DESC LIMIT 10`),
+        ]);
+        result = { mode: 'rounds', byScore: byScore.rows, byRound: byRound.rows };
+    }
+
+    leaderboardCaches[cacheKey] = { data: result, time: now };
+    json(res, result);
 }
 
 async function handleGetReplay(req, res, sessionId) {
@@ -201,7 +239,7 @@ async function handleDeleteCheckpoint(res, deviceId) {
 async function handleDeleteSession(res, sessionId) {
     const { rowCount } = await pool.query(`DELETE FROM sessions WHERE id = $1`, [sessionId]);
     if (rowCount === 0) return json(res, { error: 'Session not found' }, 404);
-    leaderboardCache = null; // invalidate
+    Object.keys(leaderboardCaches).forEach(k => delete leaderboardCaches[k]); // invalidate
     json(res, { ok: true });
 }
 
