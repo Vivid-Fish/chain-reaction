@@ -1,6 +1,6 @@
 # TASKS.md — Active Work Tracker
 
-Tasks organized by project/epic. Review at session start. Update as you go.
+Tasks organized by epic. Review at session start. Update as you go.
 
 ## Format
 - `[ ]` Todo | `[-]` In Progress | `[x]` Done | `[!]` Blocked
@@ -10,31 +10,136 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 
 ---
 
-## Epic: Gameplay & Difficulty (P0)
+## Epic: Continuous Play (P0)
 
-### T-001: Root cause analysis — game gets too easy at higher rounds [x]
+### T-012: Design continuous play mode [x]
+- Priority: P0
+- Completed: 2026-02-21
+- Notes: 5 approaches brainstormed (Breathing Field, Tide Pool, Ecosystem, Pressure Cooker, Composer). Recommendation: Pressure Cooker + Composer. Full design in `research/continuous-play.md`. Prior research in `research/endless-mode.md`.
+
+### T-013: Build ContinuousSimulation engine [x]
 - Priority: P0
 - Started: 2026-02-21
 - Completed: 2026-02-21
-- Notes: Root cause: percolation threshold crossed at high rounds. CASCADE_RADIUS_GROWTH (+32% at gen 4) + 800ms extra hold time + gravity/volatile dots compounded the problem.
+- Notes: `continuous-sim.js` created. ContinuousSimulation extends Simulation with edge spawning, tap cooldown, density tracking, overflow detection. ContinuousBots adapt all 4 bot types for temporal decisions (when + where to tap). `runContinuous()` helper runs bot sessions.
+- Files: `continuous-sim.js`
+
+### T-014: Calibrate difficulty tiers [x]
+- Priority: P0
+- Started: 2026-02-21
+- Completed: 2026-02-21
+- Depends: (needs: T-013)
+- Notes: `calibrate-continuous.js` binary-searches spawn rate per bot. 4 tiers calibrated. Key insight: at high maxDots, cascade percolation creates self-regulating equilibrium (any bot survives). TRANSCENDENCE uses low maxDots (60) for tighter overflow threshold. Final: CALM 0.5/s, FLOW 3.2/s, SURGE 5.0/s, TRANSCENDENCE 2.5/s@60cap.
+- Files: `calibrate-continuous.js`
+
+### T-015: Difficulty regression test [x]
+- Priority: P0
+- Started: 2026-02-21
+- Completed: 2026-02-21
+- Depends: (needs: T-014)
+- Notes: `difficulty-regression.js` validates 12 tests (4 tiers × 3 tests). All pass in fast (20s) and full modes. Tests: steady-state (bot survives), margin (2x rate overwhelms), lower-bot-struggles (weaker bot fails). Uses density-based criteria alongside overflow for robustness.
+- Files: `difficulty-regression.js`
+
+### T-016: Implement continuous play in browser [ ]
+- Priority: P0
+- Depends: (needs: T-015)
+- Notes: Port ContinuousSimulation to engine.js. Add mode selector UI. Edge spawning, tap cooldown indicator, density meter, overflow bloom ending animation.
+
+### T-017: Epoch transitions (visual/audio) [ ]
+- Priority: P1
+- Depends: (needs: T-016)
+- Notes: 5 epochs (Dawn → Gathering → Flow → Surge → Transcendence) with smooth crossfade. Background color shifts, particle density scaling, stem layer transitions. See `research/continuous-play.md` §Composer.
+
+### T-018: Continuous play audio coupling [ ]
+- Priority: P1
+- Depends: (needs: T-017)
+- Notes: BPM tracking tied to dot speed, stem layering per epoch, density-to-harmonic-richness mapping. Build on existing generative audio system. Reference: `research/generative-audio.md`.
+
+### T-019: Overflow Bloom ending animation [ ]
+- Priority: P2
+- Depends: (needs: T-016)
+- Notes: When density exceeds Dcrit for 10s, all dots detonate center-outward. Every scale note plays, resolves to sustained chord. Screen goes white → session summary. Death as spectacle, not punishment.
+
+### T-020: Continuous play session persistence [ ]
+- Priority: P2
+- Depends: (needs: T-016)
+- Notes: localStorage high scores (total score, longest chain, highest epoch, duration). Daily seed mode (deterministic PRNG from date). Leaderboard potential.
+
+---
+
+## Epic: Difficulty Calibration (P0)
+
+### T-001: Root cause analysis — game gets too easy at higher rounds [x]
+- Priority: P0
+- Completed: 2026-02-21
+- Notes: Root cause: percolation threshold crossed. Fix (v11): CASCADE_RADIUS_GROWTH=0, CASCADE_HOLD_GROWTH_MS 200→80, faster dots, per-round radius decay. Fix (v12): % field cleared thresholds. Fix (v12.1): Recalibrated celebration thresholds via bot playtest.
 - Research: `research/difficulty-analysis.md`
-- Fix (v11): CASCADE_RADIUS_GROWTH=0, CASCADE_HOLD_GROWTH_MS 200→80, faster dot speeds, gentle per-round radius decay (max 0.85). Random bot R20 clear rate: 87%→0%. Greedy bot curve now properly decreases.
-- Fix (v12): Celebrations + multipliers gated on % of field cleared, not absolute chain counts. Old: LEGENDARY at 20 dots regardless of round size. New: LEGENDARY at 85% of round's total dots. Informed by CHI 2024 success-dependent feedback research.
-- Fix (v12.1): Bot playtest revealed v12 thresholds too high — oracle bot never triggered AMAZING!+. Recalibrated: NICE! 40%→25%, AMAZING! 60%→40%, INCREDIBLE! 75%→55%, LEGENDARY! 85%→70%, GODLIKE! 95%→85%. Multipliers also lowered. Playtest tool: `playtest-v12.js`. sim.js now exports via module.exports for require().
 
 ### T-002: Build headless simulation that matches browser gameplay 1:1 [ ]
-- Priority: P0
-- Depends: (needs: T-001)
-- Notes: sim.js exists but may not match browser physics exactly. Goal: run full games in Node.js with bot profiles measuring SCR, chain distribution, clear rates per round.
+- Priority: P1
+- Notes: sim.js exists but may not match browser physics exactly. Goal: run full games in Node.js matching frame-by-frame behavior. Key diffs to audit: floating-point determinism, wall-bounce edge cases, dot generation overflow.
 
 ### T-003: Create bot player profiles for playtesting [ ]
 - Priority: P1
 - Depends: (needs: T-002)
-- Notes: Random bot, cluster-seeking bot, optimal bot, "bad player" bot. Measure player experience gap vs Peggle/Candy Crush.
+- Notes: Extend bot ladder with "bad player" bot (random with 500ms reaction delay). Measure experience gap vs Peggle/Candy Crush. Existing bots: random, greedy, humanSim, oracle.
+
+---
+
+## Epic: Gameplay Features (P1)
+
+### T-010: Implement Multi-Tap Supernova [ ]
+- Priority: P1
+- Notes: From supernova-experiment.js sweep: Multi-Tap scored +11 (winner). 3 taps instead of 1, breaks the ONE-TAP RULE. Charge meter (3 consecutive clears or 2 with high chain ratio), audio/visual shift (low-pass filter sweep), tap counter ("2 taps remaining"). See DESIGN.md "Supernova" section.
+
+### T-021: Musical audio upgrade [ ]
+- Priority: P1
+- Notes: Gap #1 from gap analysis. Beat quantization (16th-note grid, Rez technique), position-to-pitch mapping (Y axis = scale degree), stem layering across rounds, chain = melodic phrase. Reference: `research/generative-audio.md`.
+
+### T-022: Near-miss feedback [ ]
+- Priority: P2
+- Notes: Gap #3 from gap analysis. Ghost tap position showing "best possible" spot. "47/50 — so close!" text. Slow-mo on chain break point. Frame failure as achievement. Reference: `research/near-miss-feedback.md`.
+
+### T-023: Structured spawning ("Salad not Soup") [ ]
+- Priority: P2
+- Notes: Dot types in clusters/veins rather than uniform random. Gravity dots in small groups, volatile dots scattered. Creates readable field patterns. Applies to both round mode and continuous mode.
+
+### T-024: Meta-persistence [ ]
+- Priority: P2
+- Notes: Gap #5 from gap analysis. localStorage high scores, daily challenge (fixed seed), personal best chain display. Ship free first, no unlockable upgrades (pure skill expression).
+
+---
+
+## Epic: Visual & UI (P1)
 
 ### T-004: Fix celebration text running off screen [ ]
 - Priority: P1
-- Notes: LEGENDARY, GODLIKE text extends past canvas bounds on smaller screens. Need to cap font size or wrap.
+- Notes: LEGENDARY, GODLIKE text extends past canvas bounds on smaller screens. Need to cap font size or wrap. Reproducible on 320px wide viewports.
+
+### T-025: Replay navigation improvements [ ]
+- Priority: P2
+- Notes: Replay viewer needs scrub bar, speed controls, round jump buttons. Current: play-only, no navigation.
+
+### T-026: Leaderboard UI (tappable entries) [ ]
+- Priority: P3
+- Notes: High score list should show tap-to-replay links. Requires replay persistence + score tracking.
+
+---
+
+## Epic: Replay System (P2)
+
+### T-007: Fix replay viewer engine.js path [x]
+- Priority: P0
+- Completed: 2026-02-21
+- Notes: Fixed `<script src="engine.js">` to absolute path `/engine.js`.
+
+### T-008: Old replays missing round_start events between rounds [ ]
+- Priority: P2
+- Notes: Sessions recorded before v10 lack round_start events between clear and next tap. Replay shows round 1 only. Could add graceful fallback (infer round from tap index) or re-record.
+
+### T-027: Replay DELETE endpoint [ ]
+- Priority: P3
+- Notes: Server has no endpoint to delete old replays. Need DELETE /replay/:id with admin auth or session ownership check.
 
 ---
 
@@ -42,41 +147,16 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 
 ### T-005: Clean code research and overhaul [x]
 - Priority: P1
-- Started: 2026-02-21
 - Completed: 2026-02-21
-- Notes: Research complete — see `research/clean-code.md`. Applied: architecture TOC headers, JSDoc typedefs, intent comments on non-obvious algorithms, code style conventions in CLAUDE.md. Did NOT: split files, add build tools, add TypeScript.
+- Notes: Research complete — `research/clean-code.md`. Applied: TOC headers, JSDoc typedefs, intent comments, code style in CLAUDE.md.
 
 ### T-006: Create CLAUDE.md / AGENTS.md for chain-reaction repo [x]
 - Priority: P1
 - Completed: 2026-02-21
-- Notes: CLAUDE.md created with architecture, conventions, testing, deployment, task workflow, design philosophy, code style guide.
 
----
-
-## Epic: Replay & Navigation (P2)
-
-### T-007: Fix replay viewer engine.js path [x]
-- Priority: P0
-- Completed: 2026-02-21
-- Notes: `<script src="engine.js">` resolved to `/replay/engine.js` on replay pages. Fixed to absolute path `/engine.js`.
-
-### T-008: Old replays missing round_start events between rounds [ ]
-- Priority: P2
-- Notes: Sessions recorded before v10 don't have round_start events between clear and next tap. Replay shows round 1 only for these. Could add graceful fallback or re-record.
-
----
-
-## Epic: Supernova / Endless Mode (P2)
-
-### T-009: Research Tetris Effect-style endless mode [x]
-- Priority: P2
-- Completed: 2026-02-21
-- Notes: Deep research complete — 7 reference games analyzed (Tetris Effect, Rez Infinite, Lumines, Beat Saber, Geometry Wars, Super Hexagon, Audiosurf). Proposal: "Breath Mode" with continuous spawning, density-driven epochs, multiplier investment, Tide mechanic, Overflow Bloom ending. Full simulation plan and implementation sequence.
-- Research: `research/endless-mode.md`
-
-### T-010: Implement Multi-Tap Supernova [ ]
-- Priority: P2
-- Notes: From supernova-experiment.js sweep: Multi-Tap scored +11 (winner). 3 taps instead of 1, breaks the ONE-TAP RULE. Charge meter, audio/visual shift. See DESIGN.md "Supernova" section.
+### T-028: State consolidation rename (deferred) [ ]
+- Priority: P3
+- Notes: 160+ refs use inconsistent state naming. Rename to unified convention. Deferred because it touches every file and is purely cosmetic. Track but don't prioritize.
 
 ---
 
@@ -85,8 +165,40 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 ### T-011: Gap analysis for app store shipping [x]
 - Priority: P3
 - Completed: 2026-02-21
-- Notes: Full gap analysis complete. Two-track approach: Android via TWA/Bubblewrap ($25, 1-2 days), iOS via Capacitor ($99/yr, 3-5 days, needs Mac). Key gaps: manifest.json, service worker, app icons, DPR-aware rendering for iOS. Apple Guideline 4.7 likely N/A since Capacitor embeds code in binary. Ship free first, tip jar IAP later.
-- Research: `research/app-store.md`
+- Notes: Two-track: Android TWA ($25), iOS Capacitor ($99/yr). See `research/app-store.md`.
+
+### T-029: manifest.json + service worker for PWA [ ]
+- Priority: P3
+- Notes: Required for TWA wrapping and iOS "Add to Home Screen." Need: icons (192px, 512px), manifest.json, offline-capable service worker.
+
+### T-030: DPR-aware canvas rendering for iOS [ ]
+- Priority: P3
+- Notes: iOS devices have 2x/3x DPR. Canvas needs to render at physical resolution for crisp visuals. Currently renders at CSS pixels only.
+
+---
+
+## Epic: Research (Completed)
+
+### T-009: Research Tetris Effect-style endless mode [x]
+- Priority: P2
+- Completed: 2026-02-21
+- Research: `research/endless-mode.md`
+
+---
+
+## Simulation Tools Reference
+
+| File | Purpose |
+|------|---------|
+| `sim.js` | Headless simulation engine. Seeded PRNG, bot ladder, 6-metric dashboard. |
+| `continuous-sim.js` | Continuous play simulation. Edge spawning, tap cooldown, overflow detection. |
+| `calibrate-continuous.js` | Binary-search calibration per bot for difficulty tiers. |
+| `difficulty-regression.js` | Regression test: steady-state + margin + lower-bot-fails per tier. |
+| `sweep.js` | Parallel parameter sweep via worker threads. |
+| `progression-test.js` | Round-based R1-R15 progression test. |
+| `supernova-experiment.js` | Tests 7 Supernova variants at R5/R8/R12. |
+| `playtest-v12.js` | Celebration threshold validation. |
+| `capture-screenshots.js` | Playwright visual verification. |
 
 ---
 

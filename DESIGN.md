@@ -48,6 +48,9 @@ In any 10-second window, how many "God Moments" exist? Too few = frustrating. To
 | File | Purpose |
 |------|---------|
 | `sim.js` | Headless simulation engine. Seeded PRNG, bot ladder, 6-metric dashboard. |
+| `continuous-sim.js` | Continuous play simulation. Edge spawning, tap cooldown, overflow detection, 4 continuous bots. |
+| `calibrate-continuous.js` | Binary-search calibration per bot for continuous difficulty tiers. |
+| `difficulty-regression.js` | Regression test: 12 tests validating difficulty tier invariants (steady-state + margin + lower-bot). |
 | `sweep.js` | Parallel parameter sweep via worker threads. Tests configs + mechanic variants. |
 | `capture-screenshots.js` | Playwright visual verification (phone + desktop viewports). |
 
@@ -315,11 +318,12 @@ Multi-Tap breaks the ONE-TAP RULE — the fundamental constraint of the game. Th
 
 ## Next Steps (Pending)
 
-1. **Implement Multi-Tap Supernova** — charge meter, 3-tap round, audio/visual shift.
-2. **Musical audio upgrade** — beat quantization, position-to-pitch mapping, stem layering across rounds.
-3. **Near-miss feedback** — ghost tap, "X/Y — so close!", slow-mo on chain break.
-4. **Structured spawning** — "Salad not Soup": dot types in clusters/veins.
-5. **Meta-persistence** — localStorage high scores, daily challenge (fixed seed).
+1. **Continuous play mode (browser)** — port ContinuousSimulation to engine.js, mode selector UI, epoch transitions, overflow bloom. Simulation harness validated (12/12 tests pass). See `research/continuous-play.md`.
+2. **Implement Multi-Tap Supernova** — charge meter, 3-tap round, audio/visual shift.
+3. **Musical audio upgrade** — beat quantization, position-to-pitch mapping, stem layering across rounds.
+4. **Near-miss feedback** — ghost tap, "X/Y — so close!", slow-mo on chain break.
+5. **Structured spawning** — "Salad not Soup": dot types in clusters/veins.
+6. **Meta-persistence** — localStorage high scores, daily challenge (fixed seed).
 
 ## Reference Docs
 - `SPEC.md` — Original game spec (vision, rules, audio, visuals, progression)
