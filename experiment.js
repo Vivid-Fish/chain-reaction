@@ -876,6 +876,11 @@ const EXPERIMENTS = {
         label: 'v8.1 SHIPPED — cascade +8%r +200ms hold, cap=4, speed 0.7-1.4',
         config: { cascade: true, EXPLOSION_RADIUS_PCT: 0.10, cascadeRadiusGrowth: 0.08, cascadeDurationGrowth: 200, cascadeGenCap: 4, cascadePullAtDepth: 99, speedMin: 0.7, speedMax: 1.4 },
     },
+    // v9 — beat quantization + supernova + near-miss (physics unchanged from v8.1)
+    v9: {
+        label: 'v9 SHIPPED — v8.1 physics + beat quantization + multi-tap supernova + near-miss text',
+        config: { cascade: true, EXPLOSION_RADIUS_PCT: 0.10, cascadeRadiusGrowth: 0.08, cascadeDurationGrowth: 200, cascadeGenCap: 4, cascadePullAtDepth: 99, speedMin: 0.7, speedMax: 1.4 },
+    },
     // Combos
     afterglow_resonance: {
         label: 'AFTERGLOW + RESONANCE — Embers catch excited dots',

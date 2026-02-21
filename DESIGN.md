@@ -147,6 +147,7 @@ From the Gemini conversation, refined by simulation data:
 | v7.1 | 2026-02-20 | Mobile touch UI: pill buttons for bot/replay (no more keyboard-only). |
 | v8 | 2026-02-20 | **Cascade Momentum**: tighter base radius (0.10), +8% radius/gen, +200ms hold/gen, faster dots (0.7-1.4). First 5/5 metric config. DHR fixed: 0.21→0.31. |
 | v8.1 | 2026-02-20 | **Cascade Gen Cap**: cap=4 limits unchecked positive feedback. Fixes R14+ field wipes (47%→5% wipe rate). Meadows-inspired progression test. |
+| v9 | 2026-02-20 | **Musical Audio + Supernova + Near-Miss**: Beat quantization (16th-note grid, Rez technique). Multi-Tap Supernova (3 clears → 3-tap round, low-pass filter sweep, golden glow). Near-miss feedback text ("X more dots — So close!"). |
 
 ## Playtest Feedback Log
 

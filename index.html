@@ -36,7 +36,7 @@
     // =====================================================================
 
     // Build info
-    const BUILD_VERSION = 'v8.1';
+    const BUILD_VERSION = 'v9';
     const BUILD_DATE = '2026-02-20';
 
     // Progression — setback + mercy
@@ -55,6 +55,10 @@
     const CASCADE_RADIUS_GROWTH = 0.08;    // +8% explosion radius per generation
     const CASCADE_HOLD_GROWTH_MS = 200;    // +200ms hold duration per generation
     const CASCADE_GEN_CAP = 4;             // max generation for cascade scaling (negative feedback loop)
+
+    // Supernova (multi-tap reward round)
+    const SUPERNOVA_CHARGE_NEEDED = 3;  // consecutive clears to charge
+    const SUPERNOVA_TAPS = 3;           // taps granted during supernova round
 
     // Explosion radius — tighter base, cascade compensates
     const EXPLOSION_RADIUS_PCT = 0.10;
@@ -88,6 +92,7 @@
 
     // Audio
     const MAX_VOICES = 48;
+    const SIXTEENTH_NOTE_SEC = (60 / 80) / 4; // 0.1875s at 80 BPM — beat grid quantum
 
     // Hit freeze
     const HIT_FREEZE_FRAMES = 3;
@@ -169,6 +174,11 @@
     let consecutiveFails = 0;       // how many times failed current round
     let mercyBonus = 0;             // current mercy radius multiplier (0 to MERCY_RADIUS_CAP)
     let peakRound = 0;              // highest round reached this session
+
+    // Supernova state
+    let supernovaCharge = 0;        // 0 to SUPERNOVA_CHARGE_NEEDED
+    let supernovaActive = false;    // true during supernova round
+    let supernovaTapsRemaining = 0; // taps left in supernova round
 
     // Spectator mode (bot autoplay)
     const urlParams = new URLSearchParams(window.location.search);
@@ -280,11 +290,21 @@
             }, 0);
 
             this.initialized = true;
+            this.gridOrigin = this.ctx.currentTime;
         },
 
         // Ascending scale — chain position determines pitch
+        // Beat-quantized: snaps to nearest 16th-note grid (Rez technique)
         playChainNote(chainIndex, generation) {
             if (!this.initialized) return;
+
+            // Beat quantization: snap to nearest 16th-note boundary
+            const now = this.ctx.currentTime;
+            const elapsed = now - this.gridOrigin;
+            const gridPos = Math.round(elapsed / SIXTEENTH_NOTE_SEC);
+            let at = this.gridOrigin + gridPos * SIXTEENTH_NOTE_SEC;
+            if (at < now) at += SIXTEENTH_NOTE_SEC;
+
             const noteIdx = Math.min(chainIndex, SCALE_NOTES.length - 1);
             const baseFreq = SCALE_NOTES[noteIdx];
             const detune = (Math.random() - 0.5) * 12;
@@ -302,22 +322,18 @@
                 vol = Math.max(0.08, 0.22 * chainBoost - generation * 0.005);
             }
 
-            // Main voice — triangle for warmth
-            this._voicePlay(freq, 'triangle', vol, attack, decay, susLvl, susTime, release);
-            // Attack transient — short sine pop for punch
-            this._voicePlay(freq, 'sine', vol * 0.5, 0.001, 0.01, 0, 0, 0.03);
+            // All voices scheduled at same quantized time
+            this._voicePlay(freq, 'triangle', vol, attack, decay, susLvl, susTime, release, at);
+            this._voicePlay(freq, 'sine', vol * 0.5, 0.001, 0.01, 0, 0, 0.03, at);
 
-            // Shimmer octave up (builds brightness as chain grows)
             if (chainIndex >= 2) {
-                this._voicePlay(freq * 2, 'sine', vol * 0.12, 0.003, 0.03, 0.15, 0.03, 0.4);
+                this._voicePlay(freq * 2, 'sine', vol * 0.12, 0.003, 0.03, 0.15, 0.03, 0.4, at);
             }
-            // Sub bass for grounding
             if (chainIndex < 4) {
-                this._voicePlay(freq * 0.5, 'sine', vol * 0.1, 0.01, 0.06, 0.2, 0.06, 0.5);
+                this._voicePlay(freq * 0.5, 'sine', vol * 0.1, 0.01, 0.06, 0.2, 0.06, 0.5, at);
             }
-            // Fifth harmony for richness at high chains
             if (chainIndex >= 6) {
-                this._voicePlay(freq * 1.5, 'sine', vol * 0.08, 0.005, 0.04, 0.12, 0.04, 0.4);
+                this._voicePlay(freq * 1.5, 'sine', vol * 0.08, 0.005, 0.04, 0.12, 0.04, 0.4, at);
             }
         },
 
@@ -398,7 +414,7 @@
             });
         },
 
-        _voicePlay(freq, type, vol, attack, decay, susLvl, susTime, release) {
+        _voicePlay(freq, type, vol, attack, decay, susLvl, susTime, release, at) {
             while (this.voices.length >= MAX_VOICES) {
                 const old = this.voices.shift();
                 try {
@@ -407,7 +423,7 @@
                     old.osc.stop(this.ctx.currentTime + 0.01);
                 } catch(e) {}
             }
-            const c = this.ctx; const now = c.currentTime;
+            const c = this.ctx; const now = at !== undefined ? at : c.currentTime;
             const osc = c.createOscillator();
             osc.type = type;
             osc.frequency.setValueAtTime(freq, now);
@@ -459,6 +475,39 @@
             input.connect(dryG); dryG.connect(output);
             input.connect(conv); conv.connect(wetG); wetG.connect(output);
             return { input, output };
+        },
+
+        // Supernova audio: low-pass filter sweep (Tetris Effect Zone technique)
+        activateSupernova() {
+            if (!this.initialized) return;
+            const c = this.ctx;
+            const now = c.currentTime;
+            this._snFilter = c.createBiquadFilter();
+            this._snFilter.type = 'lowpass';
+            this._snFilter.frequency.setValueAtTime(20000, now);
+            this._snFilter.frequency.exponentialRampToValueAtTime(800, now + 0.5);
+            this._snFilter.Q.value = 1.5;
+            // Insert: masterGain → filter → compressor
+            this.masterGain.disconnect();
+            this.masterGain.connect(this._snFilter);
+            this._snFilter.connect(this.compressor);
+        },
+
+        deactivateSupernova() {
+            if (!this.initialized || !this._snFilter) return;
+            const c = this.ctx;
+            const now = c.currentTime;
+            this._snFilter.frequency.setValueAtTime(this._snFilter.frequency.value, now);
+            this._snFilter.frequency.exponentialRampToValueAtTime(20000, now + 0.3);
+            const filter = this._snFilter;
+            this._snFilter = null;
+            setTimeout(() => {
+                try {
+                    this.masterGain.disconnect();
+                    this.masterGain.connect(this.compressor);
+                    filter.disconnect();
+                } catch(e) {}
+            }, 400);
         }
     };
 
@@ -1232,7 +1281,6 @@
         detonateDot(dot, dotIndex, generation, expX, expY);
     }
 
-    // Simple tap — no charge mechanic
     function handleTap(x, y) {
         if (gameState === 'start') {
             audio.init();
@@ -1240,6 +1288,9 @@
             totalScore = 0;
             consecutiveFails = 0;
             mercyBonus = 0;
+            supernovaCharge = 0;
+            supernovaActive = false;
+            supernovaTapsRemaining = 0;
             peakRound = 1;
             replayLog = [];
             replayStartTime = performance.now();
@@ -1248,13 +1299,30 @@
         }
 
         if (gameState === 'gameover') {
-            // Setback: go back SETBACK_ROUNDS, not to R1
             round = Math.max(1, round - SETBACK_ROUNDS);
-            totalScore = Math.max(0, totalScore - score); // remove failed round score
-            // Mercy: consecutive fails on same frontier increase radius
+            totalScore = Math.max(0, totalScore - score);
             consecutiveFails++;
             mercyBonus = Math.min(MERCY_RADIUS_CAP, consecutiveFails * MERCY_RADIUS_BONUS);
             startRound();
+            return;
+        }
+
+        // Supernova: allow additional taps during chain resolution
+        if (gameState === 'resolving' && supernovaActive && supernovaTapsRemaining > 0) {
+            audio.playTap();
+            supernovaTapsRemaining--;
+            freezeFrames = HIT_FREEZE_FRAMES;
+            replayLog.push({ t: performance.now() - replayStartTime, type: 'tap', data: { x, y, round, chainCount, supernova: true } });
+            const effectiveRadius = explosionRadius * (1 + mercyBonus);
+            const exp = new Explosion(x, y, 0, effectiveRadius, handleDotCaught);
+            explosions.push(exp);
+            let hitAny = false;
+            for (const dot of dots) {
+                if (dot.active && Math.hypot(dot.x - x, dot.y - y) <= explosionRadius) {
+                    hitAny = true; break;
+                }
+            }
+            if (!hitAny) audio.playMiss();
             return;
         }
 
@@ -1263,13 +1331,12 @@
         audio.init();
         audio.playTap();
 
-        // Log tap for replay
         replayLog.push({ t: performance.now() - replayStartTime, type: 'tap', data: { x, y, round, chainCount } });
 
         gameState = 'resolving';
         freezeFrames = HIT_FREEZE_FRAMES;
+        if (supernovaActive) supernovaTapsRemaining--;
 
-        // Apply mercy bonus to explosion radius
         const effectiveRadius = explosionRadius * (1 + mercyBonus);
         const exp = new Explosion(x, y, 0, effectiveRadius, handleDotCaught);
         explosions.push(exp);
@@ -1286,6 +1353,12 @@
     function checkRoundEnd() {
         if (explosions.length > 0 || pendingExplosions.length > 0) return;
 
+        // Supernova: if taps remain, let player continue
+        if (supernovaActive && supernovaTapsRemaining > 0) {
+            gameState = 'playing';
+            return;
+        }
+
         const params = getRoundParams(round);
         if (chainCount >= params.target) {
             totalScore += score;
@@ -1301,6 +1374,14 @@
             // Clear = reset mercy (you proved you can do it)
             consecutiveFails = 0;
             mercyBonus = 0;
+
+            // Supernova: end active supernova or charge toward next
+            if (supernovaActive) {
+                supernovaActive = false;
+                audio.deactivateSupernova();
+            } else {
+                supernovaCharge++;
+            }
 
             // Log round clear for replay
             replayLog.push({ t: performance.now() - replayStartTime, type: 'clear', data: { round, chainCount, score, target: params.target } });
@@ -1325,12 +1406,27 @@
             feverIntensity = 0;
             lastCelebration = -1;
             gameState = 'playing';
+
+            // Activate supernova for next round if fully charged
+            if (supernovaCharge >= SUPERNOVA_CHARGE_NEEDED) {
+                supernovaActive = true;
+                supernovaTapsRemaining = SUPERNOVA_TAPS;
+                supernovaCharge = 0;
+                audio.activateSupernova();
+                spawnCelebration('SUPERNOVA!', 45, 2.2);
+                screenFlash = 0.5;
+            }
         } else {
+            // Failed — reset supernova charge
+            supernovaCharge = 0;
+            if (supernovaActive) {
+                supernovaActive = false;
+                audio.deactivateSupernova();
+            }
             markNearMissDots();
             gameState = 'gameover';
             gameOverTimer = 0;
             audio.playGameOver();
-            // Log failure for replay
             const frustration = params.target > 0 ? chainCount / params.target : 0;
             replayLog.push({ t: performance.now() - replayStartTime, type: 'fail', data: { round, chainCount, target: params.target, frustration: +frustration.toFixed(2) } });
         }
@@ -1468,6 +1564,20 @@
             fg.addColorStop(0, `hsla(${fh}, 80%, 50%, 1)`);
             fg.addColorStop(1, `hsla(${fh + 30}, 60%, 30%, 0)`);
             ctx.fillStyle = fg;
+            ctx.fillRect(0, 0, W, H);
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+        }
+
+        // Supernova ambient glow (golden pulse during supernova round)
+        if (supernovaActive) {
+            ctx.globalCompositeOperation = 'lighter';
+            const snPulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.004);
+            ctx.globalAlpha = 0.03 + snPulse * 0.02;
+            const sg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.5);
+            sg.addColorStop(0, 'hsla(45, 80%, 60%, 1)');
+            sg.addColorStop(1, 'hsla(30, 60%, 40%, 0)');
+            ctx.fillStyle = sg;
             ctx.fillRect(0, 0, W, H);
             ctx.globalAlpha = 1;
             ctx.globalCompositeOperation = 'source-over';
@@ -1629,15 +1739,56 @@
                 ctx.fillText(`x${currentMultiplier}`, W/2, infoY + 22 * s);
                 ctx.restore();
             }
+
+            // Supernova taps remaining (during resolving)
+            if (supernovaActive) {
+                const tapY = infoY + (currentMultiplier > 1 ? 48 : 22) * s;
+                ctx.font = `600 ${13 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.save();
+                ctx.shadowColor = 'rgba(255, 200, 60, 0.4)';
+                ctx.shadowBlur = 8;
+                ctx.fillStyle = 'rgba(255, 200, 60, 0.85)';
+                if (supernovaTapsRemaining > 0) {
+                    ctx.fillText(`${supernovaTapsRemaining} tap${supernovaTapsRemaining !== 1 ? 's' : ''} left`, W/2, tapY);
+                }
+                ctx.restore();
+            }
         } else if (gameState === 'playing') {
             ctx.font = `400 ${13 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.fillText(`Target: ${params.target}`, W/2, infoY);
-            // Mercy indicator (subtle)
-            if (mercyBonus > 0) {
+
+            // Supernova indicator during playing
+            if (supernovaActive) {
+                ctx.font = `600 ${13 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.save();
+                ctx.shadowColor = 'rgba(255, 200, 60, 0.4)';
+                ctx.shadowBlur = 8;
+                ctx.fillStyle = 'rgba(255, 200, 60, 0.85)';
+                ctx.fillText(`SUPERNOVA — ${supernovaTapsRemaining} taps`, W/2, infoY + 18 * s);
+                ctx.restore();
+            } else if (mercyBonus > 0) {
+                // Mercy indicator (subtle)
                 ctx.font = `300 ${10 * s | 0}px Inter, system-ui, sans-serif`;
                 ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
                 ctx.fillText(`+${Math.round(mercyBonus * 100)}% reach`, W/2, infoY + 18 * s);
+            }
+        }
+
+        // Supernova charge meter (small segments below round info)
+        if (!supernovaActive && supernovaCharge > 0 && (gameState === 'playing' || gameState === 'resolving')) {
+            const meterY = 68 * s;
+            const segW = 8 * s;
+            const segH = 3 * s;
+            const gap = 3 * s;
+            const totalW = SUPERNOVA_CHARGE_NEEDED * segW + (SUPERNOVA_CHARGE_NEEDED - 1) * gap;
+            const mx = W / 2 - totalW / 2;
+            for (let i = 0; i < SUPERNOVA_CHARGE_NEEDED; i++) {
+                const filled = i < supernovaCharge;
+                ctx.fillStyle = filled ? 'rgba(255, 200, 60, 0.6)' : 'rgba(255, 255, 255, 0.08)';
+                ctx.beginPath();
+                ctx.roundRect(mx + i * (segW + gap), meterY, segW, segH, segH / 2);
+                ctx.fill();
             }
         }
 
@@ -1766,9 +1917,20 @@
             const params = getRoundParams(round);
             ctx.fillText(`Chain: ${chainCount} / ${params.target}`, W/2, H/2);
 
+            // Near-miss encouragement (goal-gradient framing)
+            if (chainCount < params.target && params.target > 0) {
+                const ratio = chainCount / params.target;
+                if (ratio >= 0.6) {
+                    const needed = params.target - chainCount;
+                    ctx.font = `400 ${12 * s | 0}px Inter, system-ui, sans-serif`;
+                    ctx.fillStyle = 'rgba(255, 210, 120, 0.65)';
+                    ctx.fillText(`${needed} more ${needed === 1 ? 'dot' : 'dots'} to clear — So close!`, W/2, H/2 + 16 * s);
+                }
+            }
+
             ctx.font = `300 ${15 * s | 0}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            ctx.fillText(`Total Score: ${totalScore + score}`, W/2, H/2 + 30 * s);
+            ctx.fillText(`Total Score: ${totalScore + score}`, W/2, H/2 + 34 * s);
 
             if (round >= bestRound) {
                 ctx.font = `600 ${14 * s | 0}px Inter, system-ui, sans-serif`;
