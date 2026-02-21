@@ -219,14 +219,120 @@ The cap *improves* DHR (0.347→0.361) because capped explosions don't trivially
 ### Lesson
 Don't test one slice of a dynamic system and assume the whole system works. Progression creates runaway positive feedback — must test the full curve. The simulation harness was necessary but insufficient; the progression test is the real validator.
 
+## Gap Analysis: Chain Reaction vs. Paid Games (2026-02-20)
+
+### Reference Games
+Tetris Effect, Doodle Jump, Rocket League, Boomshine (+ Boomshine Plus), Fruit Ninja, Cut the Rope, 2048, Flappy Bird, Threes, Peggle, Geometry Wars, Resogun, Bayonetta, Bejeweled Blitz, Super Meat Boy, Celeste.
+
+### Where We Stand
+- **Skill ceiling**: SCR 3.52x (oracle/random). We are NOT Boomshine (luck-dominant). Cascade momentum + dot types create genuine skill expression.
+- **Determinism**: Seeded PRNG, pure physics. Player can develop intuition (Rocket League principle).
+- **Session length**: 30s-2min per round. Natural pick-up-put-down pattern (Doodle Jump principle).
+
+### The 8 Gaps (Ranked by Leverage)
+
+| # | Gap | Leverage | Status |
+|---|-----|----------|--------|
+| 1 | **Musical audio** — chains should BE the music, not trigger sound effects | Very High | Current: pentatonic ascending notes. Need: beat quantization, stem layering, position-to-pitch, chain=melodic phrase |
+| 2 | **Session arc** — emotional peaks and valleys across rounds | Very High | Current: flat. Need: audio layers build across rounds, visual environment shifts, reward mechanic for peak moments |
+| 3 | **Near-miss feedback** — show WHY you failed and HOW CLOSE you were | Medium | Current: none. Need: ghost tap position, "47/50 — so close!", slow-mo on chain break point |
+| 4 | **Skill ceiling visibility** — show what expert play looks like | Medium | Current: score only. Need: optimal tap ghost, personal best chain display, "best possible: 14, you got: 7" |
+| 5 | **Meta-progression** — reason to return tomorrow | High | Current: nothing persists. Need: local storage scores, daily challenge (fixed seed), unlockable dot types, collection tracking |
+| 6 | **Zone/Supernova mechanic** — break your own rules as reward | High | **Simulated — Multi-Tap wins** (see below) |
+| 7 | **Social currency** — shareable moments | Low-Med | Current: none. Need: share button after big chains, leaderboards |
+| 8 | **Determinism** (protect) | Critical | Already good. Don't add randomness to explosions. |
+
+### Key Insights from Research
+
+**Tetris Effect**: Player actions should produce *music*, not sound effects. Every rotation/drop triggers a note quantized to the beat, harmonically locked to the current key. The player unconsciously composes a melody. The Zone mechanic (gravity stops, lines stack) is earned through line clears and breaks the fundamental rules of Tetris.
+
+**Every Extend Extra** (closest prior art to chain-reaction music): Ascending pitch per chain link. Beat-synchronized detonation (bigger explosion if you tap on the beat). Chains literally build a melodic arpeggio.
+
+**Doodle Jump**: <1 second restart. Failure feels correctable because you saw the platform you missed. Continuous implicit difficulty ramp — no level breaks.
+
+**Rocket League**: Same tools at every skill level. Emergent complexity from simple rules interacting multiplicatively. 120Hz deterministic physics means every outcome feels like your fault or your achievement.
+
+**Boomshine Plus (cautionary tale)**: Miller added 6 dot types, 105 levels, hard mode to the original. 3 Steam reviews. Adding content to a luck-dominant core doesn't work. The depth must come from the mechanic itself, not layers bolted on.
+
+**Peggle Extreme Fever**: Disproportionate celebration. Slow-mo zoom on final peg. Ode to Joy. The response is wildly out of proportion to the input — that gap creates the feeling of grandeur.
+
+**Near-miss psychology**: Near-misses activate the same reward systems as actual wins. The effect is strongest when (a) the player has agency, (b) feedback is immediate, and (c) the near-miss is visually obvious. Frame failure as achievement: "47/50!" not "you failed by 3."
+
+### The Boomshine Test
+> "When a skilled player and a new player each play 10 rounds, does the skilled player reliably win?"
+> - Boomshine: barely. Our game: **yes** (SCR 3.52x). This is the foundation everything else builds on.
+
+## Supernova Mechanic — Experiment Results (2026-02-20)
+
+### Design Requirements (from prior art)
+1. **Earned, not given** (Bayonetta Witch Time: frame-perfect dodge triggers it)
+2. **Rule inversion, not "more power"** (Tetris Effect Zone: gravity stops — changes HOW the game works)
+3. **Preserved agency** (Peggle scoring holes: player still makes decisions during celebration)
+4. **Dramatic contrast** (Bejeweled Blazing Speed: AoE mode feels fundamentally different)
+5. **Audio submersion** (Tetris Effect: low-pass filter sweep on activation, music shifts)
+
+### Variants Tested (300 runs × 3 rounds each, greedy bot, phone viewport)
+
+| Variant | Description | R5 Δclear | R8 Δclear | R12 Δclear | R12 wipe | Score |
+|---------|-------------|-----------|-----------|------------|----------|-------|
+| **Multi-Tap (3 taps)** | Break the one-tap rule | **+60%** | **+57%** | **+40%** | **18%** | **+11** |
+| Time-Freeze | Dots freeze (oracle mode) | +38% | +22% | -5% | 0% | +5 |
+| Volatile Burst | All dots become volatile | +22% | +22% | +27% | 35% | +5 |
+| Mega-Radius (2x) | Double explosion size | +17% | +1% | -2% | 3% | +2 |
+| Gravity Well | Pull dots inward 500ms | +11% | +11% | +5% | 4% | +2 |
+| Chain-Starter (3 free) | Auto-catch 3 nearest | +19% | +2% | +3% | 4% | +2 |
+| Uncapped Cascade | Remove gen cap | +0% | +1% | +3% | 45% | -1 |
+
+### Winner: Multi-Tap (+11)
+
+Multi-Tap breaks the ONE-TAP RULE — the fundamental constraint of the game. This is exactly the Tetris Effect Zone pattern: the super mode breaks the core rule (gravity → no gravity; one tap → three taps).
+
+**Why it works:**
+- **Rule inversion**: The entire game is designed around one tap. Three taps is a fundamentally different experience.
+- **Agency preserved**: 3 taps = 3 decisions. Player must choose where to place each. A smart player chains them (tap 1 catches dots near tap 2's zone). A naive player just taps randomly and still gets a boost.
+- **Wipe rate controlled**: 18% at R12 (not trivially easy — player still works for it).
+- **Dramatic at all difficulties**: +60% at R5 (easy rounds become guaranteed), +40% at R12 (hard rounds become beatable).
+
+**Why others lost:**
+- Time-Freeze: *Degrades* at R12 (-5%). Frozen dots cluster less than moving ones. Also 292 seconds per oracle search — fun concept but static boards are less interesting.
+- Volatile Burst: 35% wipe at R12. "Watch everything explode" — no agency.
+- Uncapped Cascade: 45% wipe at R12. Confirms our cascade cap was correct.
+- Mega-Radius/Gravity Well/Chain-Starter: Marginal improvements. Just "more power," not rule inversion.
+
+### Proposed Implementation
+- **Charge**: Meter fills through consecutive round clears (3 clears = full charge, or 2 clears with high chain/target ratio)
+- **Activation**: Tap the meter icon (preserved agency — player chooses when)
+- **Effect**: 3 taps instead of 1 for one round. Each tap creates a normal explosion + cascade chain.
+- **Audio shift**: Low-pass filter sweep on activation (Tetris Effect pattern). New musical layer during Multi-Tap round. Filter lifts when round ends.
+- **Visual shift**: Color palette shifts (warmer/brighter). Particle density increases. Tap counter shows "2 taps remaining."
+- **After Supernova**: Meter resets. Normal play resumes. The contrast between Supernova and normal makes normal feel tighter and more focused.
+
+### Tools Built
+| File | Purpose |
+|------|---------|
+| `supernova-experiment.js` | Tests 7 Supernova variants at R5/R8/R12. Measures contrast (clear rate delta, wipe rate). Scores variants on dramatic-but-earned scale. |
+
 ## Next Steps (Pending)
 
-1. **Playtest v8.1** — does the cascade cap feel natural? Is the crescendo still exciting?
-2. **Structured spawning** — "Salad not Soup": spawn dot types in clusters/veins so players can read the board.
-3. **Prism dot type** — doubles explosion expansion speed. Designed but not implemented.
-4. **R1 warm-up design** — 98% clear rate is trivially easy. Consider: fewer dots, tighter radius, or skip-to-R2 option.
+1. **Implement Multi-Tap Supernova** — charge meter, 3-tap round, audio/visual shift.
+2. **Musical audio upgrade** — beat quantization, position-to-pitch mapping, stem layering across rounds.
+3. **Near-miss feedback** — ghost tap, "X/Y — so close!", slow-mo on chain break.
+4. **Structured spawning** — "Salad not Soup": dot types in clusters/veins.
+5. **Meta-persistence** — localStorage high scores, daily challenge (fixed seed).
 
 ## Reference Docs
+- `SPEC.md` — Original game spec (vision, rules, audio, visuals, progression)
+- `research/validation.md` — Juice priorities, test suite, quality gates
+- `research/prior-art.md` — Boomshine, Rez, Lumines, game feel research
+- `research/tech-notes.md` — Canvas 2D, Web Audio, performance patterns
+- `research/experience.md` — Player experience narrative, cross-agent critique
+- `research/progression-loss.md` — Loss aversion, restart mechanics, session arc research
+- `research/gap-analysis.md` — **Full gap analysis: Chain Reaction vs paid games**
+- `research/supernova-prior-art.md` — **Zone/flow-state mechanics across 15+ games**
+- `research/generative-audio.md` — **Rez, Lumines, Every Extend, Patatap, Electroplankton audio architecture**
+- `research/near-miss-feedback.md` — **Post-failure UX: Peggle, Angry Birds, Super Meat Boy, Celeste**
+- `research/leverage-points-meadows.pdf` — Donella Meadows, Places to Intervene in a System
+- `~/clawd/research/game-simulation-framework.md` — Monte Carlo methodology research
 - `SPEC.md` — Original game spec (vision, rules, audio, visuals, progression)
 - `research/validation.md` — Juice priorities, test suite, quality gates
 - `research/prior-art.md` — Boomshine, Rez, Lumines, game feel research
