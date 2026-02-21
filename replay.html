@@ -67,6 +67,8 @@
     function processEvent(ev) {
         if (ev.type === 'round_start') {
             currentRound = ev.data.round;
+            roundRadiusScale = getRoundRadiusScale(currentRound);
+            recalcExplosionRadius();
             dots = ev.data.dots.map(d => new Dot(d.x, d.y, d.vx, d.vy, d.type));
             engineResetRound();
             replayGameState = 'playing';

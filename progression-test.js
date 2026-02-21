@@ -42,8 +42,8 @@ const DEFAULT_CONFIG = {
     EXPLOSION_SHRINK_MS: 500,
     CASCADE_STAGGER_MS: 80,
     CASCADE_JITTER_MS: 25,
-    CASCADE_RADIUS_GROWTH: 0.08,
-    CASCADE_HOLD_GROWTH_MS: 200,
+    CASCADE_RADIUS_GROWTH: 0,
+    CASCADE_HOLD_GROWTH_MS: 80,
     CASCADE_GEN_CAP: Infinity,        // max generation for cascade growth
     CASCADE_DIMINISH: false,          // diminishing returns on cascade
     MIN_DOT_DISTANCE: 25,
@@ -59,8 +59,8 @@ function getRoundParams(r, config) {
     const dots = Math.min(60, Math.floor(10 + r * 2.5));
     const pct = Math.min(0.80, 0.05 + (r - 1) * 0.028);
     const target = Math.max(1, Math.ceil(dots * pct));
-    const speedMin = (config.speedMin || 0.7) + Math.min(0.4, (r - 1) * 0.03);
-    const speedMax = (config.speedMax || 1.4) + Math.min(0.8, (r - 1) * 0.05);
+    const speedMin = (config.speedMin || 0.7) + Math.min(0.6, (r - 1) * 0.04);
+    const speedMax = (config.speedMax || 1.4) + Math.min(1.2, (r - 1) * 0.07);
     let typeWeights;
     if (r <= 2) {
         typeWeights = { standard: 1.0 };
@@ -139,6 +139,11 @@ class Simulation {
     }
 
     setupRound(round) {
+        // Per-round radius decay (matches engine.js getRoundRadiusScale)
+        const radiusScale = Math.max(0.85, 1.0 - (round - 1) * 0.01);
+        const refDim = Math.min(this.W, this.H, 800);
+        this.explosionRadius = Math.max(this.cfg.EXPLOSION_RADIUS_MIN_PX, refDim * this.cfg.EXPLOSION_RADIUS_PCT) * radiusScale;
+
         const params = getRoundParams(round, this.cfg);
         this.generateDots(params.dots, params.speedMin, params.speedMax, params.typeWeights);
         this.explosions = [];

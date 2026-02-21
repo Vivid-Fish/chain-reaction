@@ -9,7 +9,7 @@
 // CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v10';
+const BUILD_VERSION = 'v11';
 const BUILD_DATE = '2026-02-21';
 
 // Dot types — physics modifiers
@@ -20,8 +20,8 @@ const DOT_TYPES = {
 };
 
 // Cascade momentum
-const CASCADE_RADIUS_GROWTH = 0.08;
-const CASCADE_HOLD_GROWTH_MS = 200;
+const CASCADE_RADIUS_GROWTH = 0;
+const CASCADE_HOLD_GROWTH_MS = 80;
 const CASCADE_GEN_CAP = 4;
 const CASCADE_STAGGER_MS = 80;
 const CASCADE_JITTER_MS = 25;
@@ -85,6 +85,7 @@ const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
 // and referenced by engine classes/functions.
 let W, H, refDim;
 let explosionRadius;
+let roundRadiusScale = 1.0;
 
 // Game/replay state — the host page manages these arrays,
 // but engine code reads them for physics (gravity pull, connections, etc.)
@@ -114,12 +115,21 @@ let slowMoTarget = 1.0;
 // =====================================================================
 // RESIZE
 // =====================================================================
+// Per-round radius decay — gentle counterpressure against dot density increase
+function getRoundRadiusScale(round) {
+    return Math.max(0.85, 1.0 - (round - 1) * 0.01);
+}
+
+function recalcExplosionRadius() {
+    explosionRadius = Math.max(EXPLOSION_RADIUS_MIN_PX, refDim * EXPLOSION_RADIUS_PCT) * roundRadiusScale;
+}
+
 function engineResize(canvas) {
     W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
     refDim = Math.min(W, H, 800);
     const screenMin = Math.min(W, H);
-    explosionRadius = Math.max(EXPLOSION_RADIUS_MIN_PX, refDim * EXPLOSION_RADIUS_PCT);
+    recalcExplosionRadius();
     DOT_RADIUS = Math.max(6, screenMin * 0.014);
     DOT_GLOW_SIZE = Math.max(28, screenMin * 0.06);
 }

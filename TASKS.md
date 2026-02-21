@@ -12,11 +12,13 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 
 ## Epic: Gameplay & Difficulty (P0)
 
-### T-001: Root cause analysis — game gets too easy at higher rounds [-]
+### T-001: Root cause analysis — game gets too easy at higher rounds [x]
 - Priority: P0
 - Started: 2026-02-21
-- Notes: User reported "tap anywhere and clear almost every dot, getting legendary, godlike." Need to understand why difficulty curve inverts. Research agent running — percolation theory, coverage density, CHI '24 juicy feedback study.
-- Research: `research/difficulty-analysis.md` (pending)
+- Completed: 2026-02-21
+- Notes: Root cause: percolation threshold crossed at high rounds. CASCADE_RADIUS_GROWTH (+32% at gen 4) + 800ms extra hold time + gravity/volatile dots compounded the problem.
+- Research: `research/difficulty-analysis.md`
+- Fix (v11): CASCADE_RADIUS_GROWTH=0, CASCADE_HOLD_GROWTH_MS 200→80, faster dot speeds, gentle per-round radius decay (max 0.85). Random bot R20 clear rate: 87%→0%. Greedy bot curve now properly decreases.
 
 ### T-002: Build headless simulation that matches browser gameplay 1:1 [ ]
 - Priority: P0
