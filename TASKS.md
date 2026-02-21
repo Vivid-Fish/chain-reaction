@@ -38,16 +38,16 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 
 ## Epic: Code Quality (P1)
 
-### T-005: Clean code research and overhaul [-]
+### T-005: Clean code research and overhaul [x]
 - Priority: P1
 - Started: 2026-02-21
-- Notes: Research agent running — AI-friendly code design (Thoughtworks Radar), token efficiency, AGENTS.md best practices, ES modules for vanilla JS. Full overhaul after research completes.
-- Research: `research/clean-code.md` (pending)
+- Completed: 2026-02-21
+- Notes: Research complete — see `research/clean-code.md`. Applied: architecture TOC headers, JSDoc typedefs, intent comments on non-obvious algorithms, code style conventions in CLAUDE.md. Did NOT: split files, add build tools, add TypeScript.
 
-### T-006: Create CLAUDE.md / AGENTS.md for chain-reaction repo [ ]
+### T-006: Create CLAUDE.md / AGENTS.md for chain-reaction repo [x]
 - Priority: P1
-- Depends: (needs: T-005)
-- Notes: Project-specific agent instructions. File paths, code conventions, testing commands, architecture overview.
+- Completed: 2026-02-21
+- Notes: CLAUDE.md created with architecture, conventions, testing, deployment, task workflow, design philosophy, code style guide.
 
 ---
 

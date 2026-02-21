@@ -3,6 +3,24 @@
 // =========================================================================
 // CHAIN REACTION — Shared Engine
 // Used by both index.html (game) and replay.html (viewer)
+//
+// Architecture (line ranges):
+//   Constants .............. ~12-69    All tunables, grouped by system
+//   Easing ................ ~73-79    Animation curves
+//   Shared State .......... ~83-113   Mutable state set by host page
+//   Resize / Radius ....... ~118-135  Screen dimensions + explosion radius
+//   Utility ............... ~139-178  getMultiplier(), drawPill()
+//   Particle Pool ......... ~182-299  SoA pool with spawn/update/draw/clear
+//   Ambient Background .... ~303-349  Twinkling star field
+//   Floating Text ......... ~353-414  Score popups + celebration banners
+//   Chain Lines ........... ~418-442  Visual links between cascade hits
+//   Dot class ............. ~447-614  Physics, rendering (trails, gravity spirals, volatile sparks)
+//   Explosion class ....... ~619-810  Lifecycle (grow/hold/shrink), cascade catch logic
+//   Connections ........... ~815-882  Soft auras + lines between chainable dots
+//   Core Simulation ....... ~886-952  detonateDot(), handleDotCaught() — cascade mechanics
+//   Shared Update ......... ~957-998  engineUpdatePhysics() — tick all systems
+//   Scene Rendering ....... ~1001-1067 engineDrawScene() — background + composite draw
+//   Round Reset ........... ~1070-1084 engineResetRound() — clear state between rounds
 // =========================================================================
 
 // =====================================================================
@@ -19,10 +37,13 @@ const DOT_TYPES = {
     volatile: { label: 'volatile', radiusMult: 1.5, speedMult: 1.3 },
 };
 
-// Cascade momentum
+// Cascade momentum — controls how chain reactions escalate with depth.
+// RADIUS_GROWTH=0 (v11): fixed explosion size at all depths prevents
+// percolation blowout at high dot densities. See research/difficulty-analysis.md.
 const CASCADE_RADIUS_GROWTH = 0;
 const CASCADE_HOLD_GROWTH_MS = 80;
 const CASCADE_GEN_CAP = 4;
+// Stagger + jitter create visual "wave" effect (simultaneous detonations look flat)
 const CASCADE_STAGGER_MS = 80;
 const CASCADE_JITTER_MS = 25;
 
@@ -77,6 +98,42 @@ const easeOutQuad = t => 1 - (1 - t) * (1 - t);
 const easeOutBack = t => 1 + 2.70158 * Math.pow(t - 1, 3) + 1.70158 * Math.pow(t - 1, 2);
 const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
 const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
+
+// =====================================================================
+// TYPES (JSDoc — no build step, provides IDE hints + agent context)
+// =====================================================================
+/**
+ * @typedef {Object} DotTypeDef
+ * @property {string} label
+ * @property {number} radiusMult - Explosion radius multiplier (volatile = 1.5x)
+ * @property {number} speedMult - Movement speed multiplier
+ * @property {number} [pullRange] - Gravity pull range as multiple of explosion radius
+ * @property {number} [pullForce] - Gravity pull force per tick
+ */
+
+/**
+ * @typedef {Object} FloatingText
+ * @property {number} x
+ * @property {number} y
+ * @property {string} text
+ * @property {number} hue
+ * @property {number} age - Frames since spawn
+ * @property {number} maxAge - Frames until removal
+ * @property {number} [scale] - Size multiplier (celebrations)
+ * @property {boolean} [celebration] - Large centered text vs small score popup
+ */
+
+/**
+ * @typedef {Object} PendingExplosion
+ * @property {number} x
+ * @property {number} y
+ * @property {number} generation - Cascade depth (0 = player tap, 1+ = chain)
+ * @property {number} time - performance.now() timestamp to spawn
+ * @property {number} parentX - Origin of the chain (for chain lines)
+ * @property {number} parentY
+ * @property {string} dotType - Key from DOT_TYPES
+ * @property {number} jitter - Random timing offset applied
+ */
 
 // =====================================================================
 // SHARED STATE (set by host page)
@@ -178,7 +235,8 @@ function drawPill(ctx, cx, cy, label, active, hue) {
 }
 
 // =====================================================================
-// PARTICLE POOL
+// PARTICLE POOL — Structure of Arrays for cache-friendly iteration.
+// Pool-based: dead particles are swap-removed (no allocation/GC pressure).
 // =====================================================================
 const particles = {
     x: new Float32Array(PARTICLE_POOL_SIZE),
@@ -442,7 +500,9 @@ function drawChainLines(ctx) {
 }
 
 // =====================================================================
-// DOT — unified constructor takes (x, y, vx, vy, type)
+// DOT — unified constructor takes (x, y, vx, vy, type).
+// Random velocity is generated in generateDots() (index.html), NOT here.
+// This lets replay.html inject recorded velocities using the same class.
 // =====================================================================
 class Dot {
     constructor(x, y, vx, vy, type) {
@@ -643,6 +703,8 @@ class Explosion {
         this.flashAlpha = 1;
     }
 
+    // Virtual age tracks time adjusted for slow-motion, so explosions
+    // expand/hold/shrink at perceived speed regardless of slowMo factor.
     update(now) {
         if (!this._virtualAge) this._virtualAge = 0;
         const realDelta = now - (this._lastNow || this.createdAt);

@@ -25,7 +25,25 @@
     'use strict';
 
     // =========================================================================
-    // CHAIN REACTION — Game (uses shared engine.js)
+    // CHAIN REACTION — Game Client (uses shared engine.js)
+    //
+    // Architecture (line ranges):
+    //   Game Constants ....... ~35-60    Setback, mercy, supernova, bot config
+    //   Game State ........... ~63-108   Round, score, flags, leaderboard cache
+    //   API Helpers .......... ~111-172  Session save, checkpoint, leaderboard fetch
+    //   Music System ......... ~174-185  Background music via audio engine
+    //   Resize ............... ~187-191  Delegates to engine.js
+    //   Round Formula ........ ~194-214  getRoundParams(r) — dots, target, speeds, types
+    //   Audio Engine ......... ~217-449  Web Audio API synthesis (all sounds)
+    //   Dot Generation ....... ~462-497  Scatter dots with random velocities
+    //   Game State Mgmt ...... ~500-683  startRound, handleTap, checkRoundEnd
+    //   Update ............... ~685-730  Game loop tick (physics + round checks)
+    //   Draw ................. ~732-1017 All rendering (HUD, screens, game over)
+    //   Spectator Bot ........ ~1019-1110 Auto-play with greedy strategy
+    //   Replay Download ...... ~1113-1130 Export replay as JSON
+    //   Game Loop ............ ~1133-1143 requestAnimationFrame driver
+    //   Input ................ ~1146-1216 Pointer + keyboard handlers
+    //   Init ................. ~1218-1229 Boot sequence
     // =========================================================================
 
     const canvas = document.getElementById('game');

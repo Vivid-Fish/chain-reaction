@@ -18,6 +18,19 @@ Browser-based chain reaction game. One tap triggers cascading explosions. Canvas
 - Engine globals are shared via `<script>` tag ordering — engine.js first, then page script
 - Replay paths: use **absolute** paths for script src (e.g., `/engine.js` not `engine.js`) because replay pages are served under `/replay/`
 - Build version: update `BUILD_VERSION` in engine.js and bump on significant changes
+- Difficulty params: `getRoundRadiusScale(round)` in engine.js controls per-round explosion radius decay
+
+## Code Style
+- Vanilla JS, `'use strict'`, no frameworks, no build tools, no transpilation
+- Functional style: pure functions preferred, minimize shared mutable state
+- Semicolons always; single quotes for strings; 4-space indentation
+- Section headers: `// ============ SECTION NAME ============` in every file
+- Architecture comment at top of each file with line-range index
+- Constants: UPPER_SNAKE_CASE, grouped at top of file
+- Functions: camelCase, verb-first (createDot, updateExplosions, drawScene)
+- JSDoc `@typedef` for key data structures (Dot, Explosion, PendingExplosion, etc.)
+- Intent comments on non-obvious algorithms (explain WHY, not WHAT)
+- No TypeScript, no ES modules — JSDoc provides type hints without tooling
 
 ## Testing
 ```bash
