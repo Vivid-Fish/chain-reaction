@@ -198,6 +198,13 @@ async function handleDeleteCheckpoint(res, deviceId) {
     json(res, { ok: true });
 }
 
+async function handleDeleteSession(res, sessionId) {
+    const { rowCount } = await pool.query(`DELETE FROM sessions WHERE id = $1`, [sessionId]);
+    if (rowCount === 0) return json(res, { error: 'Session not found' }, 404);
+    leaderboardCache = null; // invalidate
+    json(res, { ok: true });
+}
+
 // Router
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -222,6 +229,10 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'GET' && pathname.startsWith('/api/replay/')) {
             const id = pathname.split('/')[3];
             return await handleGetReplay(req, res, id);
+        }
+        if (req.method === 'DELETE' && pathname.startsWith('/api/session/')) {
+            const id = pathname.split('/')[3];
+            return await handleDeleteSession(res, id);
         }
         if (req.method === 'POST' && pathname === '/api/checkpoint') {
             return await handlePostCheckpoint(req, res);
