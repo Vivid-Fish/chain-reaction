@@ -83,7 +83,14 @@ Instead of cap at 60, cap at 35-40. But this feels anti-climactic.
 
 ## Recommended Approach
 
-Combine Fix 1 (radius decay) + Fix 2 (remove cascade growth) + Fix 3 (faster speeds). This preserves the chaotic chain feel while preventing the percolation blowout. Test with bot simulations at each round to verify coverage stays below threshold.
+Combine Fix 2 (remove cascade growth) + Fix 3 (faster speeds) + gentle radius decay. Aggressive radius decay over-corrects — at 390px viewport, explosion radius is only 39px, and steep decay drops it below MIN_DOT_DISTANCE (25px), killing cascading entirely.
+
+## v11 Implementation (applied)
+
+- `CASCADE_RADIUS_GROWTH`: 0.08 → 0
+- `CASCADE_HOLD_GROWTH_MS`: 200 → 80
+- Speed scaling: speedMin cap 0.6 (was 0.4), speedMax cap 1.2 (was 0.8)
+- Gentle radius decay: `max(0.85, 1.0 - (r-1) * 0.01)` — 15% max reduction at floor
 
 ## Simulation Proof: Random Bot Clear Rates (with dot motion)
 
@@ -113,3 +120,19 @@ The existing sim.js and sweep tools didn't catch this because:
 
 ### Fix for validation:
 Add a "random bot" that taps at completely random positions. If random bot clear rate exceeds 30% at any round > 5, difficulty curve is broken. This is the simplest canary metric.
+
+## v11 Results (300 trials, 390x844 viewport)
+
+| Round | Dots | Target | Random Caught | Random Clear | Greedy Caught | Greedy Clear |
+|-------|------|--------|--------------|--------------|---------------|--------------|
+| 1 | 12 | 1 | 0.4 | 30% | 1.2 | 66% |
+| 5 | 22 | 4 | 1.2 | 8% | 2.4 | 26% |
+| 10 | 35 | 11 | 2.7 | 3% | 4.4 | 6% |
+| 13 | 42 | 17 | 4.0 | 0% | 6.1 | 1% |
+| 15 | 47 | 21 | 5.5 | 2% | 8.0 | 2% |
+| 17 | 52 | 26 | 7.2 | 0% | 10.4 | 2% |
+| 20 | 60 | 35 | 10.3 | 0% | 13.6 | 0% |
+
+**Key improvement**: Greedy bot clear rate now monotonically decreases (66% → 0%) instead of the v10 pattern where it stayed flat (25-32%) or increased. Random bot at R20 catches 10/60 instead of 48/60.
+
+**Note**: These simulations don't model gravity/volatile dot types or mercy bonus, so actual gameplay will be somewhat more forgiving than these numbers suggest.
