@@ -20,6 +20,7 @@ Tasks organized by project/epic. Review at session start. Update as you go.
 - Research: `research/difficulty-analysis.md`
 - Fix (v11): CASCADE_RADIUS_GROWTH=0, CASCADE_HOLD_GROWTH_MS 200→80, faster dot speeds, gentle per-round radius decay (max 0.85). Random bot R20 clear rate: 87%→0%. Greedy bot curve now properly decreases.
 - Fix (v12): Celebrations + multipliers gated on % of field cleared, not absolute chain counts. Old: LEGENDARY at 20 dots regardless of round size. New: LEGENDARY at 85% of round's total dots. Informed by CHI 2024 success-dependent feedback research.
+- Fix (v12.1): Bot playtest revealed v12 thresholds too high — oracle bot never triggered AMAZING!+. Recalibrated: NICE! 40%→25%, AMAZING! 60%→40%, INCREDIBLE! 75%→55%, LEGENDARY! 85%→70%, GODLIKE! 95%→85%. Multipliers also lowered. Playtest tool: `playtest-v12.js`. sim.js now exports via module.exports for require().
 
 ### T-002: Build headless simulation that matches browser gameplay 1:1 [ ]
 - Priority: P0
