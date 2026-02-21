@@ -45,10 +45,11 @@ const DEFAULT_CONFIG = {
     CASCADE_GEN_CAP: 4,            // max generation for cascade scaling
     MIN_DOT_DISTANCE: 25,
     SCREEN_MARGIN: 16,
+    // Multiplier thresholds — percentage of round's total dots (matches browser engine)
     MULT_THRESHOLDS: [
-        { chain: 0, mult: 1 }, { chain: 5, mult: 2 },
-        { chain: 10, mult: 3 }, { chain: 15, mult: 4 },
-        { chain: 20, mult: 5 }, { chain: 30, mult: 8 },
+        { pct: 0.00, mult: 1 }, { pct: 0.20, mult: 2 },
+        { pct: 0.40, mult: 3 }, { pct: 0.60, mult: 4 },
+        { pct: 0.80, mult: 5 }, { pct: 0.95, mult: 8 },
     ],
 };
 
@@ -61,9 +62,12 @@ function getRoundParams(r, config) {
     return { dots, target, pct, speedMin, speedMax };
 }
 
-function getMultiplier(chain, thresholds) {
+function getMultiplier(chain, thresholds, totalDots) {
     let m = 1;
-    for (const t of thresholds) { if (chain >= t.chain) m = t.mult; }
+    for (const t of thresholds) {
+        const threshold = Math.ceil(t.pct * totalDots);
+        if (chain >= threshold) m = t.mult;
+    }
     return m;
 }
 
@@ -167,6 +171,7 @@ class Simulation {
             }
         }
         this.generateDots(params.dots, params.speedMin, params.speedMax, typeWeights);
+        this.totalDots = this.dots.length;  // For percentage-based multiplier thresholds
         this.explosions = [];
         this.pendingExplosions = [];
         this.scheduledDetonations = new Set();
@@ -321,7 +326,7 @@ class Simulation {
         this.chainCount++;
 
         // Score
-        const newMult = getMultiplier(this.chainCount, this.cfg.MULT_THRESHOLDS);
+        const newMult = getMultiplier(this.chainCount, this.cfg.MULT_THRESHOLDS, this.totalDots);
         if (newMult > this.currentMultiplier) this.currentMultiplier = newMult;
         const basePoints = 10 * (generation + 1);
         this.score += basePoints * this.currentMultiplier;

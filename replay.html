@@ -70,6 +70,7 @@
             roundRadiusScale = getRoundRadiusScale(currentRound);
             recalcExplosionRadius();
             dots = ev.data.dots.map(d => new Dot(d.x, d.y, d.vx, d.vy, d.type));
+            roundTotalDots = dots.length;
             engineResetRound();
             replayGameState = 'playing';
         } else if (ev.type === 'tap') {

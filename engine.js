@@ -27,7 +27,7 @@
 // CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v11';
+const BUILD_VERSION = 'v12';
 const BUILD_DATE = '2026-02-21';
 
 // Dot types — physics modifiers
@@ -73,20 +73,22 @@ const SHAKE_MAX_OFFSET = 14;
 const SHAKE_DECAY = 0.90;
 const SHAKE_TRAUMA_PER_DOT = 0.06;
 
-// Multiplier thresholds
+// Multiplier thresholds — percentage of round's total dots (matches celebration scaling)
 const MULT_THRESHOLDS = [
-    { chain: 0, mult: 1 }, { chain: 5, mult: 2 },
-    { chain: 10, mult: 3 }, { chain: 15, mult: 4 },
-    { chain: 20, mult: 5 }, { chain: 30, mult: 8 },
+    { pct: 0.00, mult: 1 }, { pct: 0.20, mult: 2 },
+    { pct: 0.40, mult: 3 }, { pct: 0.60, mult: 4 },
+    { pct: 0.80, mult: 5 }, { pct: 0.95, mult: 8 },
 ];
 
-// Celebration milestones
+// Celebration milestones — percentage of round's total dots, not absolute counts.
+// This ensures celebrations scale with difficulty: clearing 80% of 45 dots at R14
+// is genuinely impressive; clearing 5 of 45 (11%) is not celebration-worthy.
 const CELEBRATIONS = [
-    { chain: 5, text: 'NICE!', hue: 50, size: 1.0 },
-    { chain: 10, text: 'AMAZING!', hue: 35, size: 1.3 },
-    { chain: 15, text: 'INCREDIBLE!', hue: 15, size: 1.6 },
-    { chain: 20, text: 'LEGENDARY!', hue: 300, size: 2.0 },
-    { chain: 30, text: 'GODLIKE!', hue: 280, size: 2.5 },
+    { pct: 0.40, text: 'NICE!', hue: 50, size: 1.0 },
+    { pct: 0.60, text: 'AMAZING!', hue: 35, size: 1.3 },
+    { pct: 0.75, text: 'INCREDIBLE!', hue: 15, size: 1.6 },
+    { pct: 0.85, text: 'LEGENDARY!', hue: 300, size: 2.0 },
+    { pct: 0.95, text: 'GODLIKE!', hue: 280, size: 2.5 },
 ];
 
 // =====================================================================
@@ -157,6 +159,7 @@ let currentMultiplier = 1;
 let multiplierPulse = 0;
 let feverIntensity = 0;
 let lastCelebration = -1;
+let roundTotalDots = 0;  // Set by host page at round start — used for relative celebrations
 
 let floatingTexts = [];
 let chainLines = [];
@@ -196,7 +199,10 @@ function engineResize(canvas) {
 // =====================================================================
 function getMultiplier(chain) {
     let m = 1;
-    for (const t of MULT_THRESHOLDS) { if (chain >= t.chain) m = t.mult; }
+    for (const t of MULT_THRESHOLDS) {
+        const threshold = Math.ceil(t.pct * roundTotalDots);
+        if (chain >= threshold) m = t.mult;
+    }
     return m;
 }
 
@@ -971,7 +977,8 @@ function detonateDot(dot, dotIndex, generation, parentX, parentY) {
 
     spawnFloatingText(dot.x, dot.y - 15, `+${points}`, dot.getHue());
     emitParticles(dot.x, dot.y, dot.getHue(), generation);
-    if (chainCount >= 8) {
+    // Extra particles when chain clears 30%+ of the field
+    if (roundTotalDots > 0 && chainCount / roundTotalDots >= 0.30) {
         emitParticles(dot.x, dot.y, dot.getHue() + 20, Math.max(0, generation - 2));
     }
 
@@ -982,13 +989,19 @@ function detonateDot(dot, dotIndex, generation, parentX, parentY) {
     shakeTrauma = Math.min(1.0, shakeTrauma + SHAKE_TRAUMA_PER_DOT);
     bgPulse = Math.min(0.3, bgPulse + 0.03);
 
-    if (chainCount >= 15) feverIntensity = Math.min(1.0, feverIntensity + 0.15);
-    else if (chainCount >= 10) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
-    else if (chainCount >= 5) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
+    // Fever intensity scales with percentage of field cleared, not absolute count
+    const feverPct = roundTotalDots > 0 ? chainCount / roundTotalDots : 0;
+    if (feverPct >= 0.60) feverIntensity = Math.min(1.0, feverIntensity + 0.15);
+    else if (feverPct >= 0.40) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
+    else if (feverPct >= 0.20) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
 
+    // Celebrations fire when chain crosses a percentage of the round's total dots.
+    // This gates celebrations on relative performance, not absolute chain length.
+    const clearPct = roundTotalDots > 0 ? chainCount / roundTotalDots : 0;
     for (const cel of CELEBRATIONS) {
-        if (chainCount === cel.chain && lastCelebration < cel.chain) {
-            lastCelebration = cel.chain;
+        const threshold = Math.ceil(cel.pct * roundTotalDots);
+        if (chainCount >= threshold && lastCelebration < threshold && roundTotalDots > 0) {
+            lastCelebration = threshold;
             spawnCelebration(cel.text, cel.hue, cel.size);
             if (onDetonateAudio) onDetonateAudio('celebration', CELEBRATIONS.indexOf(cel));
             break;
@@ -1142,4 +1155,5 @@ function engineResetRound() {
     multiplierPulse = 0;
     feverIntensity = 0;
     lastCelebration = -1;
+    // roundTotalDots is NOT reset here — it's set by host page after generateDots()
 }

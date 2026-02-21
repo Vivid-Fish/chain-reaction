@@ -80,28 +80,29 @@
     // =====================================================================
     // GAME STATE
     // =====================================================================
+    // Shape: { round, bestRound, bestScore, gameState, freezeFrames,
+    //          gameOverTimer, lastChainFreqs, totalScore }
     let round = 0;
     let bestRound = parseInt(localStorage.getItem('cr3_bestRound') || '0', 10);
     let bestScore = parseInt(localStorage.getItem('cr3_bestScore') || '0', 10);
-    let gameState = 'start';
+    let gameState = 'start';  // 'start' | 'playing' | 'resolving' | 'watching' | 'gameover'
     let freezeFrames = 0;
     let gameOverTimer = 0;
     let lastChainFreqs = [];
     let totalScore = 0;
 
-    // Slow-mo (game-specific — engine has slowMo/slowMoTarget)
-
-    // Progression state
+    // Progression: { consecutiveFails, mercyBonus, peakRound }
     let consecutiveFails = 0;
     let mercyBonus = 0;
     let peakRound = 0;
 
-    // Supernova state
+    // Supernova: { charge, active, tapsRemaining }
     let supernovaCharge = 0;
     let supernovaActive = false;
     let supernovaTapsRemaining = 0;
 
     // Spectator mode (bot autoplay)
+    // Shape: { enabled, target, thinkTimer, scanInterval, lastScan, reactionDelay }
     const urlParams = new URLSearchParams(window.location.search);
     let spectatorMode = urlParams.has('watch');
     let botTarget = null;
@@ -522,6 +523,7 @@
         recalcExplosionRadius();
         const params = getRoundParams(round);
         generateDots(params.dots, params.speedMin, params.speedMax, params.typeWeights);
+        roundTotalDots = dots.length;  // Tell engine how many dots this round has (for relative celebrations)
         replayLog.push({ t: performance.now() - replayStartTime, type: 'round_start', data: {
             round,
             dots: dots.map(d => ({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, type: d.type })),
@@ -649,6 +651,7 @@
             API.saveCheckpoint();
             const nextParams = getRoundParams(round);
             generateDots(nextParams.dots, nextParams.speedMin, nextParams.speedMax, nextParams.typeWeights);
+            roundTotalDots = dots.length;  // Update for relative celebrations
 
             // Record round_start for the new round (fixes replay multi-round bug)
             replayLog.push({ t: performance.now() - replayStartTime, type: 'round_start', data: {
