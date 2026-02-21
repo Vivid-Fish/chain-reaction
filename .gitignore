@@ -1,3 +1,4 @@
 node_modules/
 screenshots/
 balance-report.json
+.env

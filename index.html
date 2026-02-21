@@ -196,6 +196,76 @@
     // UI buttons (computed in draw, hit-tested in input)
     let uiButtons = [];             // [{id, x, y, w, h}]
 
+    // Persistence — device ID, player name, checkpoint, leaderboard
+    let deviceId = localStorage.getItem('cr_device_id');
+    if (!deviceId) { deviceId = crypto.randomUUID(); localStorage.setItem('cr_device_id', deviceId); }
+    let playerName = localStorage.getItem('cr_player_name') || null;
+    let resumeCheckpoint = null;
+    let leaderboard = null;
+    let lastSessionId = null;
+
+    // API helpers — fire-and-forget where possible
+    const API = {
+        async saveSession(events) {
+            try {
+                const res = await fetch('/api/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        device_id: deviceId,
+                        player_name: playerName,
+                        peak_round: peakRound,
+                        total_score: totalScore + score,
+                        is_bot: spectatorMode,
+                        viewport_w: W,
+                        viewport_h: H,
+                        build_ver: BUILD_VERSION,
+                        events,
+                    }),
+                    keepalive: true,
+                });
+                const data = await res.json();
+                if (data.id) lastSessionId = data.id;
+                return data;
+            } catch (e) { console.warn('saveSession failed:', e); }
+        },
+        saveCheckpoint() {
+            fetch('/api/checkpoint', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    device_id: deviceId,
+                    round, total_score: totalScore,
+                    consecutive_fails: consecutiveFails,
+                    mercy_bonus: mercyBonus,
+                    supernova_charge: supernovaCharge,
+                }),
+                keepalive: true,
+            }).catch(() => {});
+        },
+        clearCheckpoint() {
+            fetch(`/api/checkpoint/${encodeURIComponent(deviceId)}`, {
+                method: 'DELETE', keepalive: true,
+            }).catch(() => {});
+        },
+        async fetchLeaderboard() {
+            try {
+                const res = await fetch('/api/leaderboard');
+                leaderboard = await res.json();
+            } catch (e) { console.warn('fetchLeaderboard failed:', e); }
+        },
+        async fetchCheckpoint() {
+            try {
+                const res = await fetch(`/api/checkpoint/${encodeURIComponent(deviceId)}`);
+                const data = await res.json();
+                resumeCheckpoint = data;
+            } catch (e) { console.warn('fetchCheckpoint failed:', e); }
+        },
+    };
+
+    // Load leaderboard + checkpoint on page load
+    Promise.all([API.fetchLeaderboard(), API.fetchCheckpoint()]).catch(() => {});
+
     // Music system
     const MUSIC_PATTERN = [
         [5,1.0],[7,0.7],[8,0.9],[10,0.6],
@@ -1191,6 +1261,11 @@
     function startRound() {
         const params = getRoundParams(round);
         generateDots(params.dots, params.speedMin, params.speedMax, params.typeWeights);
+        // Record round start with dot positions for replay
+        replayLog.push({ t: performance.now() - replayStartTime, type: 'round_start', data: {
+            round,
+            dots: dots.map(d => ({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, type: d.type })),
+        }});
         explosions = [];
         scheduledDetonations = new Set();
         pendingExplosions = [];
@@ -1265,13 +1340,15 @@
         }
 
         // Schedule child explosion — inherits dot type (property transmission)
-        const delay = CASCADE_STAGGER_MS + (Math.random() - 0.5) * 2 * CASCADE_JITTER_MS;
+        const jitter = (Math.random() - 0.5) * 2 * CASCADE_JITTER_MS;
+        const delay = CASCADE_STAGGER_MS + jitter;
         pendingExplosions.push({
             x: dot.x, y: dot.y,
             generation: generation + 1,
             time: performance.now() + delay,
             parentX: dot.x, parentY: dot.y,
             dotType: dot.type,
+            jitter, // recorded for replay determinism
         });
     }
 
@@ -1292,8 +1369,10 @@
             supernovaActive = false;
             supernovaTapsRemaining = 0;
             peakRound = 1;
+            lastSessionId = null;
             replayLog = [];
             replayStartTime = performance.now();
+            API.clearCheckpoint();
             startRound();
             return;
         }
@@ -1393,6 +1472,8 @@
 
             round++;
             if (round > peakRound) peakRound = round;
+            // Checkpoint for resume
+            API.saveCheckpoint();
             const nextParams = getRoundParams(round);
             generateDots(nextParams.dots, nextParams.speedMin, nextParams.speedMax, nextParams.typeWeights);
             explosions = [];
@@ -1429,6 +1510,8 @@
             audio.playGameOver();
             const frustration = params.target > 0 ? chainCount / params.target : 0;
             replayLog.push({ t: performance.now() - replayStartTime, type: 'fail', data: { round, chainCount, target: params.target, frustration: +frustration.toFixed(2) } });
+            // Save session + replay to DB
+            API.saveSession([...replayLog]);
         }
     }
 
@@ -1855,32 +1938,65 @@
         const subSize = Math.min(16, W * 0.038);
         const s = Math.max(1, Math.min(W, H) / 600);
 
+        // Title block shifted up to make room for leaderboard
+        const titleY = H * 0.22;
+
         ctx.save();
         ctx.shadowColor = 'rgba(120, 180, 255, 0.4)';
         ctx.shadowBlur = 40;
         ctx.font = `300 ${titleSize}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = 'rgba(255,255,255,0.98)';
         ctx.letterSpacing = `${Math.max(1, titleSize * 0.06)}px`;
-        ctx.fillText('CHAIN REACTION', W/2, H/2 - titleSize * 0.8);
+        ctx.fillText('CHAIN REACTION', W/2, titleY);
         ctx.shadowBlur = 60;
         ctx.shadowColor = 'rgba(100, 160, 255, 0.2)';
-        ctx.fillText('CHAIN REACTION', W/2, H/2 - titleSize * 0.8);
+        ctx.fillText('CHAIN REACTION', W/2, titleY);
         ctx.letterSpacing = '0px';
         ctx.restore();
 
         ctx.font = `400 ${subSize}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.fillText('Tap to start a chain reaction.', W/2, H/2 + subSize * 1.2);
+        ctx.fillText('Tap to start a chain reaction.', W/2, titleY + titleSize * 0.8);
+
+        // Resume button (if checkpoint exists)
+        let resumeBtnBottom = titleY + titleSize * 0.8 + subSize * 2;
+        if (resumeCheckpoint && resumeCheckpoint.round > 1) {
+            const resumeRect = drawPill(W/2, resumeBtnBottom, `Resume Round ${resumeCheckpoint.round}`, true, 120);
+            uiButtons.push({ id: 'resume', ...resumeRect });
+            resumeBtnBottom += 36 * s;
+        }
 
         const promptAlpha = 0.2 + 0.12 * Math.sin(performance.now() * 0.003);
         ctx.font = `400 ${Math.min(14, subSize * 0.85)}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = `rgba(255,255,255,${promptAlpha + 0.1})`;
-        ctx.fillText('Tap anywhere to begin', W/2, H/2 + subSize * 3.5);
+        ctx.fillText(resumeCheckpoint && resumeCheckpoint.round > 1 ? 'Tap anywhere for new game' : 'Tap anywhere to begin', W/2, resumeBtnBottom);
 
         if (bestRound > 0) {
             ctx.font = `200 ${Math.min(13, subSize * 0.8)}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = 'rgba(255,255,255,0.2)';
-            ctx.fillText(`Best: Round ${bestRound}`, W/2, H/2 + subSize * 6);
+            ctx.fillText(`Best: Round ${bestRound}`, W/2, resumeBtnBottom + subSize * 2);
+        }
+
+        // Leaderboard — top 5 by score
+        if (leaderboard && leaderboard.byScore && leaderboard.byScore.length > 0) {
+            const lbY = H * 0.56;
+            const rowH = 18 * s;
+            ctx.font = `600 ${11 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.letterSpacing = '2px';
+            ctx.fillStyle = 'rgba(255,255,255,0.35)';
+            ctx.fillText('LEADERBOARD', W/2, lbY);
+            ctx.letterSpacing = '0px';
+
+            const entries = leaderboard.byScore.slice(0, 5);
+            for (let i = 0; i < entries.length; i++) {
+                const e = entries[i];
+                const ey = lbY + (i + 1) * rowH + 6 * s;
+                const isMe = e.device_id === deviceId;
+                ctx.font = `${isMe ? 600 : 300} ${10 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = isMe ? 'rgba(255, 215, 0, 0.7)' : 'rgba(255,255,255,0.3)';
+                const name = e.player_name || (e.is_bot ? 'Bot' : 'Anon');
+                ctx.fillText(`${i + 1}. ${name} — R${e.peak_round} — ${Number(e.total_score).toLocaleString()}`, W/2, ey);
+            }
         }
 
         // Bottom buttons — Watch Bot toggle
@@ -1956,12 +2072,16 @@
 
             // Bottom buttons on game over
             const btnY = H - 50 * s;
-            const gap = 10 * s;
-            const watchRect = drawPill(W / 2 - 60 * s, btnY, spectatorMode ? 'Bot: ON' : 'Watch Bot', spectatorMode, 55);
+            const nameLabel = playerName ? `Name: ${playerName}` : 'Set Name';
+            const nameRect = drawPill(W / 2 - 90 * s, btnY, nameLabel, !!playerName, 180);
+            uiButtons.push({ id: 'setname', ...nameRect });
+
+            const watchRect = drawPill(W / 2, btnY, spectatorMode ? 'Bot: ON' : 'Watch Bot', spectatorMode, 55);
             uiButtons.push({ id: 'watch', ...watchRect });
-            if (replayLog.length > 0) {
-                const replayRect = drawPill(W / 2 + 60 * s, btnY, 'Save Replay', false, 200);
-                uiButtons.push({ id: 'replay', ...replayRect });
+
+            if (lastSessionId) {
+                const replayRect = drawPill(W / 2 + 90 * s, btnY, 'Watch Replay', false, 200);
+                uiButtons.push({ id: 'viewreplay', ...replayRect });
             }
         }
 
@@ -2159,6 +2279,35 @@
         }
         if (hit === 'replay') {
             downloadReplay();
+            return;
+        }
+        if (hit === 'resume' && resumeCheckpoint) {
+            audio.init();
+            round = resumeCheckpoint.round;
+            totalScore = Number(resumeCheckpoint.total_score) || 0;
+            consecutiveFails = resumeCheckpoint.consecutive_fails || 0;
+            mercyBonus = resumeCheckpoint.mercy_bonus || 0;
+            supernovaCharge = resumeCheckpoint.supernova_charge || 0;
+            supernovaActive = false;
+            supernovaTapsRemaining = 0;
+            peakRound = round;
+            lastSessionId = null;
+            replayLog = [];
+            replayStartTime = performance.now();
+            startRound();
+            return;
+        }
+        if (hit === 'setname') {
+            const name = prompt('Enter your name:', playerName || '');
+            if (name !== null) {
+                playerName = name.trim().slice(0, 20) || null;
+                if (playerName) localStorage.setItem('cr_player_name', playerName);
+                else localStorage.removeItem('cr_player_name');
+            }
+            return;
+        }
+        if (hit === 'viewreplay' && lastSessionId) {
+            window.open(`/replay/${lastSessionId}`, '_blank');
             return;
         }
 
