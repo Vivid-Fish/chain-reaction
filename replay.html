@@ -20,12 +20,13 @@
 </head>
 <body>
     <canvas id="game"></canvas>
-    <script src="/engine.js"></script>
+    <script src="game-core.js"></script>
+    <script src="engine.js"></script>
     <script>
     'use strict';
 
     // =========================================================================
-    // CHAIN REACTION — Replay Viewer (uses shared engine.js)
+    // CHAIN REACTION — Replay Viewer (uses game-core.js + engine.js)
     // =========================================================================
 
     const canvas = document.getElementById('game');
@@ -35,7 +36,7 @@
     // REPLAY STATE
     // =====================================================================
     let replayData = null;
-    let events = [];
+    let replayEvents = [];
     let eventIdx = 0;
     let replayTime = 0;
     let totalDuration = 0;
@@ -51,13 +52,19 @@
     let loading = true;
     let errorMsg = null;
 
-    // UI buttons for canvas-drawn controls
     let uiButtons = [];
 
+    // Game instance for physics
+    const game = new Game(400, 700, {}, Math.random);
+
     // =====================================================================
-    // RESIZE (delegates to engine)
+    // RESIZE
     // =====================================================================
-    function resize() { engineResize(canvas); }
+    function resize() {
+        engineResize(canvas);
+        game.W = W;
+        game.H = H;
+    }
     window.addEventListener('resize', resize);
     resize();
 
@@ -67,24 +74,25 @@
     function processEvent(ev) {
         if (ev.type === 'round_start') {
             currentRound = ev.data.round;
-            roundRadiusScale = getRoundRadiusScale(currentRound);
-            recalcExplosionRadius();
-            dots = ev.data.dots.map(d => new Dot(d.x, d.y, d.vx, d.vy, d.type));
-            roundTotalDots = dots.length;
-            engineResetRound();
+            game.setupRound(ev.data.round);
+            // Replace generated dots with recorded positions
+            game.dots = ev.data.dots.map(d => ({
+                x: d.x, y: d.y, vx: d.vx, vy: d.vy,
+                active: true, type: d.type || 'standard', bloomTimer: 0,
+            }));
+            game.totalDots = game.dots.length;
+            engineResetVisuals();
             replayGameState = 'playing';
         } else if (ev.type === 'tap') {
-            const x = ev.data.x, y = ev.data.y;
-            const exp = new Explosion(x, y, 0, explosionRadius, handleDotCaught);
-            explosions.push(exp);
-            spawnFloatingText(x, y + 20, 'TAP', 200);
+            game.tap(ev.data.x, ev.data.y);
+            spawnFloatingText(ev.data.x, ev.data.y + 20, 'TAP', 200);
             replayGameState = 'resolving';
         } else if (ev.type === 'clear') {
-            totalScore += score;
+            totalScore += game.score;
             spawnCelebration(`Round ${ev.data.round} Clear!`, 200, 1.4);
         } else if (ev.type === 'fail') {
             spawnCelebration(`Round ${ev.data.round} Failed`, 0, 1.0);
-            totalScore += score;
+            totalScore += game.score;
             replayGameState = 'ended';
         }
     }
@@ -92,12 +100,22 @@
     // =====================================================================
     // UPDATE + DRAW
     // =====================================================================
-    function update() {
-        engineUpdatePhysics();
+    function update(dt) {
+        game.step(dt);
 
-        // Fever decay
-        if (feverIntensity > 0 && explosions.length === 0) {
+        // Process game-core events for visual effects
+        engineProcessEvents(game.events, game);
+        game.events = [];
+        engineUpdateVisuals(game);
+
+        // Fever decay when chain done
+        if (feverIntensity > 0 && game.explosions.length === 0) {
             feverIntensity = Math.max(0, feverIntensity - 0.008);
+        }
+
+        // Track resolving → done transition
+        if (replayGameState === 'resolving' && game.gameState !== 'resolving') {
+            replayGameState = 'playing';
         }
     }
 
@@ -126,10 +144,10 @@
             return;
         }
 
-        // Use the shared scene renderer (background, vignette, dots, explosions, particles, etc.)
-        engineDrawScene(ctx, replayGameState === 'playing' ? 'playing' : replayGameState === 'resolving' ? 'resolving' : 'start', false);
+        const mappedState = replayGameState === 'playing' ? 'playing'
+            : replayGameState === 'resolving' ? 'resolving' : 'start';
+        engineDrawScene(ctx, game, mappedState, false);
 
-        // Replay HUD
         drawReplayHUD();
         drawNavButtons();
         drawProgressBar();
@@ -138,7 +156,6 @@
     function drawReplayHUD() {
         const s = Math.max(1, Math.min(W, H) / 600);
 
-        // Top center: Round info
         if (currentRound > 0) {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
@@ -159,26 +176,23 @@
                 ctx.fillText(`of ${totalRounds}`, W/2, 68 * s);
             }
 
-            // Chain count during active chains
-            if (chainCount > 0) {
+            if (game.chainCount > 0) {
                 ctx.font = `700 ${14 * s | 0}px Inter, system-ui, sans-serif`;
                 ctx.save();
                 ctx.shadowColor = 'rgba(255, 200, 60, 0.4)';
                 ctx.shadowBlur = 6;
                 ctx.fillStyle = 'rgba(255, 220, 100, 0.95)';
-                ctx.fillText(`Chain: ${chainCount}`, W/2, 84 * s);
+                ctx.fillText(`Chain: ${game.chainCount}`, W/2, 84 * s);
                 ctx.restore();
             }
 
-            // Running score
-            if (totalScore > 0 || score > 0) {
+            if (totalScore > 0 || game.score > 0) {
                 ctx.font = `300 ${11 * s | 0}px Inter, system-ui, sans-serif`;
                 ctx.fillStyle = 'rgba(255,255,255,0.35)';
-                ctx.fillText(`Score: ${(totalScore + score).toLocaleString()}`, W/2, 100 * s);
+                ctx.fillText(`Score: ${(totalScore + game.score).toLocaleString()}`, W/2, 100 * s);
             }
         }
 
-        // Top-right: REPLAY badge
         ctx.textAlign = 'right';
         ctx.textBaseline = 'top';
         ctx.font = `600 ${9 * s | 0}px Inter, system-ui, sans-serif`;
@@ -187,7 +201,6 @@
         ctx.fillText('REPLAY', W - 10 * s, 10 * s);
         ctx.letterSpacing = '0px';
 
-        // Build version
         ctx.font = `300 ${9 * s | 0}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = 'rgba(255,255,255,0.12)';
         ctx.fillText(`${BUILD_VERSION} · ${BUILD_DATE}`, W - 8 * s, H - 6 * s);
@@ -198,17 +211,14 @@
         const s = Math.max(1, Math.min(W, H) / 600);
         const btnY = H - 28 * s;
 
-        // Left: "< Game" button
         const backRect = drawPill(ctx, 50 * s, btnY, '< Game', false, 200);
         uiButtons.push({ id: 'back', ...backRect });
 
         if (!loading && !errorMsg) {
-            // Center: Play/Pause
             const playLabel = playing ? 'Pause' : 'Play';
             const playRect = drawPill(ctx, W/2 - 55 * s, btnY, playLabel, playing, 120);
             uiButtons.push({ id: 'playpause', ...playRect });
 
-            // Speed buttons
             const speeds = [1, 2, 4];
             const speedLabels = ['1x', '2x', '4x'];
             for (let i = 0; i < speeds.length; i++) {
@@ -217,7 +227,6 @@
                 uiButtons.push({ id: `speed_${speeds[i]}`, ...rect });
             }
 
-            // Right: player info
             if (replayData) {
                 const name = replayData.player_name || (replayData.is_bot ? 'Bot' : 'Anonymous');
                 ctx.textAlign = 'right';
@@ -230,20 +239,18 @@
     }
 
     function drawProgressBar() {
-        if (!events.length || totalDuration <= 0) return;
+        if (!replayEvents.length || totalDuration <= 0) return;
         const s = Math.max(1, Math.min(W, H) / 600);
         const barY = H - 48 * s;
         const barX = 12 * s;
         const barW = W - 24 * s;
         const barH = 3 * s;
 
-        // Background track
         ctx.fillStyle = 'rgba(255,255,255,0.08)';
         ctx.beginPath();
         ctx.roundRect(barX, barY, barW, barH, barH / 2);
         ctx.fill();
 
-        // Progress fill
         const progress = Math.min(1, replayTime / totalDuration);
         if (progress > 0) {
             ctx.fillStyle = 'rgba(100, 180, 255, 0.4)';
@@ -252,7 +259,6 @@
             ctx.fill();
         }
 
-        // Playhead dot
         const headX = barX + barW * progress;
         ctx.beginPath();
         ctx.arc(headX, barY + barH / 2, 4 * s, 0, Math.PI * 2);
@@ -264,18 +270,21 @@
     // MAIN LOOP
     // =====================================================================
     function loop(now) {
-        if (playing && events.length > 0 && !loading && !errorMsg) {
+        if (playing && replayEvents.length > 0 && !loading && !errorMsg) {
             const dt = (now - lastFrameTime) * speed;
             replayTime += dt;
 
-            while (eventIdx < events.length && events[eventIdx].t <= replayTime) {
-                processEvent(events[eventIdx]);
+            while (eventIdx < replayEvents.length && replayEvents[eventIdx].t <= replayTime) {
+                processEvent(replayEvents[eventIdx]);
                 eventIdx++;
             }
+
+            update(Math.min(dt, 50));
+        } else {
+            update(0);
         }
         lastFrameTime = now;
 
-        update();
         draw();
         requestAnimationFrame(loop);
     }
@@ -295,15 +304,14 @@
             const res = await fetch(`/api/replay/${sessionId}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             replayData = await res.json();
-            events = replayData.events || [];
-            if (events.length === 0) {
+            replayEvents = replayData.events || [];
+            if (replayEvents.length === 0) {
                 loading = false;
                 errorMsg = 'Replay has no events';
                 return;
             }
 
-            // Calculate total duration and total rounds
-            totalDuration = events[events.length - 1].t;
+            totalDuration = replayEvents[replayEvents.length - 1].t;
             totalRounds = replayData.peak_round || 0;
 
             const name = replayData.player_name || (replayData.is_bot ? 'Bot' : 'Anonymous');
@@ -335,10 +343,7 @@
         const x = e.clientX, y = e.clientY;
         const hit = hitTestButtons(x, y);
 
-        if (hit === 'back') {
-            window.location.href = '/';
-            return;
-        }
+        if (hit === 'back') { window.location.href = '/'; return; }
         if (hit === 'playpause') {
             playing = !playing;
             if (playing) lastFrameTime = performance.now();
@@ -351,11 +356,7 @@
     });
 
     document.addEventListener('keydown', e => {
-        if (e.key === ' ') {
-            e.preventDefault();
-            playing = !playing;
-            if (playing) lastFrameTime = performance.now();
-        }
+        if (e.key === ' ') { e.preventDefault(); playing = !playing; if (playing) lastFrameTime = performance.now(); }
         if (e.key === '1') speed = 1;
         if (e.key === '2') speed = 2;
         if (e.key === '4') speed = 4;

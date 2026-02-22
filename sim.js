@@ -2,7 +2,7 @@
 'use strict';
 
 // =========================================================================
-// CHAIN REACTION — Headless Simulation Harness
+// CHAIN REACTION — Headless Simulation Harness (Thin wrapper over game-core)
 //
 // Extracts pure game logic from index.html. No canvas, no audio, no DOM.
 // Runs ~100 full games/second. Seeded RNG for reproducibility.
@@ -16,464 +16,20 @@
 //   node sim.js --compare '{"speedMin":0.6}' '{"speedMin":1.0}'  # A/B test
 // =========================================================================
 
-// --- Seeded PRNG (mulberry32) ---
-function createRNG(seed) {
-    let s = seed | 0;
-    return function() {
-        s = (s + 0x6D2B79F5) | 0;
-        let t = Math.imul(s ^ (s >>> 15), 1 | s);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
+const { Game, Bots, DEFAULTS, getRoundParams, getMultiplier, createRNG } = require('./game-core.js');
 
-// --- Easing ---
-const easeOutExpo = t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
-const easeInQuad = t => t * t;
-
-// --- Default Config (mirrors index.html v6) ---
-const DEFAULT_CONFIG = {
-    EXPLOSION_RADIUS_PCT: 0.10,
-    EXPLOSION_RADIUS_MIN_PX: 35,
-    EXPLOSION_GROW_MS: 200,
-    EXPLOSION_HOLD_MS: 1000,
-    EXPLOSION_SHRINK_MS: 500,
-    CASCADE_STAGGER_MS: 80,
-    CASCADE_JITTER_MS: 25,
-    CASCADE_RADIUS_GROWTH: 0,       // no cascade radius growth (v11)
-    CASCADE_HOLD_GROWTH_MS: 80,     // +80ms hold per generation (v11)
-    CASCADE_GEN_CAP: 4,            // max generation for cascade scaling
-    MIN_DOT_DISTANCE: 25,
-    SCREEN_MARGIN: 16,
-    // Multiplier thresholds — percentage of round's total dots (matches browser engine)
-    MULT_THRESHOLDS: [
-        { pct: 0.00, mult: 1 }, { pct: 0.10, mult: 2 },
-        { pct: 0.20, mult: 3 }, { pct: 0.35, mult: 4 },
-        { pct: 0.50, mult: 5 }, { pct: 0.75, mult: 8 },
-    ],
-};
-
-function getRoundParams(r, config) {
-    const dots = Math.min(60, Math.floor(10 + r * 2.5));
-    const pct = Math.min(0.80, 0.05 + (r - 1) * 0.028);
-    const target = Math.max(1, Math.ceil(dots * pct));
-    const speedMin = (config.speedMin || 0.7) + Math.min(0.6, (r - 1) * 0.04);
-    const speedMax = (config.speedMax || 1.4) + Math.min(1.2, (r - 1) * 0.07);
-    return { dots, target, pct, speedMin, speedMax };
-}
-
-function getMultiplier(chain, thresholds, totalDots) {
-    let m = 1;
-    for (const t of thresholds) {
-        const threshold = Math.ceil(t.pct * totalDots);
-        if (chain >= threshold) m = t.mult;
-    }
-    return m;
-}
+// Backward-compat alias
+const DEFAULT_CONFIG = DEFAULTS;
 
 // =========================================================================
-// SIMULATION ENGINE
+// SIMULATION WRAPPER (maps seed-based API to game-core's rng-based API)
 // =========================================================================
 
-class Simulation {
+class Simulation extends Game {
     constructor(width, height, config = {}, seed = 42) {
-        this.W = width;
-        this.H = height;
-        this.cfg = { ...DEFAULT_CONFIG, ...config };
-        this.rng = createRNG(seed);
-
-        const refDim = Math.min(width, height, 800);
-        this.explosionRadius = Math.max(
-            this.cfg.EXPLOSION_RADIUS_MIN_PX,
-            refDim * this.cfg.EXPLOSION_RADIUS_PCT
-        );
-        this.TOTAL_MS = this.cfg.EXPLOSION_GROW_MS + this.cfg.EXPLOSION_HOLD_MS + this.cfg.EXPLOSION_SHRINK_MS;
-
-        this.reset();
-    }
-
-    reset() {
-        this.dots = [];
-        this.explosions = [];
-        this.pendingExplosions = [];
-        this.scheduledDetonations = new Set();
-        this.chainCount = 0;
-        this.score = 0;
-        this.currentMultiplier = 1;
-        this.gameState = 'idle';
-        this.time = 0;
-        this.slowMo = 1.0;
-        this.slowMoTarget = 1.0;
-
-        // Metrics instrumentation
-        this._hitLog = []; // {dotIndex, generation, time, expansionHit: bool}
-    }
-
-    _pickType(typeWeights) {
-        if (!typeWeights) return 'standard';
-        const r = this.rng();
-        let sum = 0;
-        for (const [type, weight] of Object.entries(typeWeights)) {
-            sum += weight;
-            if (r <= sum) return type;
-        }
-        return 'standard';
-    }
-
-    generateDots(count, speedMin, speedMax, typeWeights) {
-        this.dots = [];
-        let attempts = 0;
-        const topMargin = this.cfg.SCREEN_MARGIN + 50;
-        const speedMults = { standard: 1.0, gravity: 0.7, volatile: 1.3 };
-        while (this.dots.length < count && attempts < 5000) {
-            const x = this.cfg.SCREEN_MARGIN + this.rng() * (this.W - this.cfg.SCREEN_MARGIN * 2);
-            const y = topMargin + this.rng() * (this.H - topMargin - this.cfg.SCREEN_MARGIN);
-            let valid = true;
-            for (const d of this.dots) {
-                if (Math.hypot(d.x - x, d.y - y) < this.cfg.MIN_DOT_DISTANCE) { valid = false; break; }
-            }
-            if (valid) {
-                const type = this._pickType(typeWeights);
-                const a = this.rng() * Math.PI * 2;
-                const spd = (speedMin + this.rng() * (speedMax - speedMin)) * (speedMults[type] || 1.0);
-                this.dots.push({
-                    x, y,
-                    vx: Math.cos(a) * spd,
-                    vy: Math.sin(a) * spd,
-                    active: true,
-                    bloomTimer: 0,
-                    type,
-                });
-            }
-            attempts++;
-        }
-    }
-
-    setupRound(round) {
-        // Per-round radius decay (matches engine.js getRoundRadiusScale)
-        const radiusScale = Math.max(0.85, 1.0 - (round - 1) * 0.01);
-        const refDim = Math.min(this.W, this.H, 800);
-        this.explosionRadius = Math.max(this.cfg.EXPLOSION_RADIUS_MIN_PX, refDim * this.cfg.EXPLOSION_RADIUS_PCT) * radiusScale;
-
-        const params = getRoundParams(round, this.cfg);
-        // Compute type weights matching the game's getRoundParams
-        let typeWeights = this.cfg.dotTypes; // allow override via config
-        if (!typeWeights) {
-            if (round <= 2) {
-                typeWeights = { standard: 1.0 };
-            } else if (round <= 4) {
-                const gw = Math.min(0.25, (round - 2) * 0.12);
-                typeWeights = { standard: 1 - gw, gravity: gw };
-            } else {
-                const gw = Math.min(0.25, 0.12 + (round - 4) * 0.03);
-                const vw = Math.min(0.20, (round - 4) * 0.08);
-                typeWeights = { standard: Math.max(0.5, 1 - gw - vw), gravity: gw, volatile: vw };
-            }
-        }
-        this.generateDots(params.dots, params.speedMin, params.speedMax, typeWeights);
-        this.totalDots = this.dots.length;  // For percentage-based multiplier thresholds
-        this.explosions = [];
-        this.pendingExplosions = [];
-        this.scheduledDetonations = new Set();
-        this.chainCount = 0;
-        this.score = 0;
-        this.currentMultiplier = 1;
-        this.gameState = 'playing';
-        this.time = 0;
-        this.slowMo = 1.0;
-        this.slowMoTarget = 1.0;
-        this._hitLog = [];
-        return params;
-    }
-
-    tap(x, y) {
-        if (this.gameState !== 'playing') return;
-        this.gameState = 'resolving';
-        this.explosions.push(this._createExplosion(x, y, 0));
-    }
-
-    _createExplosion(x, y, generation, dotType) {
-        const radiusMult = dotType === 'volatile' ? 1.5 : 1.0;
-        let maxRadius = this.explosionRadius * radiusMult;
-        let holdMs = this.cfg.EXPLOSION_HOLD_MS;
-        // Cascade momentum: each generation grows bigger + holds longer (capped)
-        const effectiveGen = Math.min(generation, this.cfg.CASCADE_GEN_CAP);
-        if (effectiveGen > 0) {
-            maxRadius *= (1 + this.cfg.CASCADE_RADIUS_GROWTH * effectiveGen);
-            holdMs += this.cfg.CASCADE_HOLD_GROWTH_MS * effectiveGen;
-        }
-        return {
-            x, y, generation,
-            dotType: dotType || 'standard',
-            maxRadius,
-            holdMs,
-            radius: 0,
-            phase: 'grow',
-            age: 0,
-            caught: new Set(),
-            createdAt: this.time,
-        };
-    }
-
-    // Advance simulation by dt milliseconds
-    step(dt) {
-        this.time += dt;
-
-        // Process pending explosions
-        for (let i = this.pendingExplosions.length - 1; i >= 0; i--) {
-            if (this.time >= this.pendingExplosions[i].time) {
-                const p = this.pendingExplosions[i];
-                this.explosions.push(this._createExplosion(p.x, p.y, p.generation, p.dotType));
-                this.pendingExplosions.splice(i, 1);
-            }
-        }
-
-        // Update dots (movement + wall bounce + gravity pull)
-        const margin = this.cfg.SCREEN_MARGIN;
-        for (const d of this.dots) {
-            if (!d.active) continue;
-            d.x += d.vx * this.slowMo;
-            d.y += d.vy * this.slowMo;
-
-            // Gravity dots pull nearby dots
-            if (d.type === 'gravity') {
-                const pullR = this.explosionRadius * 2.5;
-                const pullF = 0.012;
-                for (const o of this.dots) {
-                    if (o === d || !o.active) continue;
-                    const dist = Math.hypot(o.x - d.x, o.y - d.y);
-                    if (dist < pullR && dist > 5) {
-                        const f = pullF * this.slowMo / (dist / this.explosionRadius);
-                        o.vx += (d.x - o.x) / dist * f;
-                        o.vy += (d.y - o.y) / dist * f;
-                    }
-                }
-            }
-
-            if (d.x < margin) { d.vx = Math.abs(d.vx); d.x = margin; }
-            if (d.x > this.W - margin) { d.vx = -Math.abs(d.vx); d.x = this.W - margin; }
-            if (d.y < margin) { d.vy = Math.abs(d.vy); d.y = margin; }
-            if (d.y > this.H - margin) { d.vy = -Math.abs(d.vy); d.y = this.H - margin; }
-        }
-
-        // Update explosions
-        const cfg = this.cfg;
-        this.explosions = this.explosions.filter(e => {
-            const elapsed = dt * this.slowMo;
-            e.age += elapsed;
-
-            const holdMs = e.holdMs || cfg.EXPLOSION_HOLD_MS;
-            if (e.phase === 'grow') {
-                if (e.age >= cfg.EXPLOSION_GROW_MS) e.phase = 'hold';
-                e.radius = e.maxRadius * easeOutExpo(Math.min(e.age / cfg.EXPLOSION_GROW_MS, 1));
-            } else if (e.phase === 'hold') {
-                if (e.age >= cfg.EXPLOSION_GROW_MS + holdMs) e.phase = 'shrink';
-                e.radius = e.maxRadius;
-            } else if (e.phase === 'shrink') {
-                const t = (e.age - cfg.EXPLOSION_GROW_MS - holdMs) / cfg.EXPLOSION_SHRINK_MS;
-                if (t >= 1) return false; // Remove
-                e.radius = e.maxRadius * (1 - easeInQuad(t));
-            }
-
-            // Collision detection + gravity pull during grow + hold
-            if (e.phase === 'grow' || e.phase === 'hold') {
-                // Gravity-type explosions pull nearby dots inward
-                if (e.dotType === 'gravity') {
-                    const pullR = e.maxRadius * 2.5;
-                    for (let i = 0; i < this.dots.length; i++) {
-                        const dot = this.dots[i];
-                        if (!dot.active || e.caught.has(i)) continue;
-                        const dist = Math.hypot(dot.x - e.x, dot.y - e.y);
-                        if (dist < pullR && dist > 5) {
-                            const f = 0.025 * this.slowMo / (dist / e.maxRadius);
-                            dot.vx += (e.x - dot.x) / dist * f;
-                            dot.vy += (e.y - dot.y) / dist * f;
-                        }
-                    }
-                }
-
-                for (let i = 0; i < this.dots.length; i++) {
-                    const dot = this.dots[i];
-                    if (!dot.active || e.caught.has(i)) continue;
-                    if (Math.hypot(dot.x - e.x, dot.y - e.y) <= e.radius) {
-                        e.caught.add(i);
-                        this._detonateDot(dot, i, e.generation, e);
-                    }
-                }
-            }
-            return true;
-        });
-
-        // Slow-mo lerp
-        if (this.slowMo !== this.slowMoTarget) {
-            this.slowMo += (this.slowMoTarget - this.slowMo) * 0.15;
-            if (Math.abs(this.slowMo - this.slowMoTarget) < 0.01) this.slowMo = this.slowMoTarget;
-        }
-        if (this.slowMoTarget < 1 && this.explosions.length === 0 && this.pendingExplosions.length === 0) {
-            this.slowMoTarget = 1.0;
-        }
-
-        // Check round end
-        if (this.gameState === 'resolving' && this.explosions.length === 0 && this.pendingExplosions.length === 0) {
-            this.gameState = 'done';
-        }
-    }
-
-    _detonateDot(dot, dotIndex, generation, explosion) {
-        if (this.scheduledDetonations.has(dotIndex)) return;
-        this.scheduledDetonations.add(dotIndex);
-        dot.active = false;
-        this.chainCount++;
-
-        // Score
-        const newMult = getMultiplier(this.chainCount, this.cfg.MULT_THRESHOLDS, this.totalDots);
-        if (newMult > this.currentMultiplier) this.currentMultiplier = newMult;
-        const basePoints = 10 * (generation + 1);
-        this.score += basePoints * this.currentMultiplier;
-
-        // Log hit for drift analysis
-        const expansionEnd = explosion.createdAt + this.cfg.EXPLOSION_GROW_MS;
-        this._hitLog.push({
-            dotIndex, generation,
-            time: this.time,
-            expansionHit: this.time <= expansionEnd,
-        });
-
-        // Schedule cascade — inherits dot type (property transmission)
-        const delay = this.cfg.CASCADE_STAGGER_MS + (this.rng() - 0.5) * 2 * this.cfg.CASCADE_JITTER_MS;
-        this.pendingExplosions.push({
-            x: dot.x, y: dot.y,
-            generation: generation + 1,
-            time: this.time + delay,
-            dotType: dot.type || 'standard',
-        });
-    }
-
-    // Run until chain resolves (max 30s safety)
-    resolveChain() {
-        const DT = 16.67; // ~60fps
-        let safetyLimit = 30000 / DT;
-        while (this.gameState === 'resolving' && safetyLimit-- > 0) {
-            this.step(DT);
-        }
-    }
-
-    // Get snapshot of current dot positions
-    getSnapshot() {
-        return this.dots.map(d => ({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, active: d.active }));
-    }
-
-    // Count dots within radius of a point
-    countInRadius(x, y, radius) {
-        let c = 0;
-        for (const d of this.dots) {
-            if (d.active && Math.hypot(d.x - x, d.y - y) <= radius) c++;
-        }
-        return c;
+        super(width, height, config, createRNG(seed));
     }
 }
-
-// =========================================================================
-// BOTS
-// =========================================================================
-
-const Bots = {
-    // Random: tap uniformly random position
-    random(sim) {
-        const margin = sim.cfg.SCREEN_MARGIN + 20;
-        return {
-            x: margin + sim.rng() * (sim.W - margin * 2),
-            y: margin + 50 + sim.rng() * (sim.H - margin * 2 - 50),
-        };
-    },
-
-    // Greedy: grid search for densest cluster right now
-    greedy(sim, gridSize = 20) {
-        let bestX = sim.W / 2, bestY = sim.H / 2, bestCount = 0;
-        const r = sim.explosionRadius;
-        for (let gx = 0; gx < gridSize; gx++) {
-            for (let gy = 0; gy < gridSize; gy++) {
-                const x = (gx + 0.5) * sim.W / gridSize;
-                const y = (gy + 0.5) * sim.H / gridSize;
-                const count = sim.countInRadius(x, y, r);
-                if (count > bestCount) { bestCount = count; bestX = x; bestY = y; }
-            }
-        }
-        // Refine around best
-        const step = sim.W / gridSize / 4;
-        for (let dx = -3; dx <= 3; dx++) {
-            for (let dy = -3; dy <= 3; dy++) {
-                const x = bestX + dx * step;
-                const y = bestY + dy * step;
-                const count = sim.countInRadius(x, y, r);
-                if (count > bestCount) { bestCount = count; bestX = x; bestY = y; }
-            }
-        }
-        return { x: bestX, y: bestY, clusterSize: bestCount };
-    },
-
-    // Human-sim: greedy + 200ms reaction delay + position noise
-    humanSim(sim) {
-        // Find best spot now
-        const best = Bots.greedy(sim, 15);
-        // Add gaussian noise (stddev ~15px, simulating finger imprecision)
-        const noiseX = (sim.rng() + sim.rng() + sim.rng() - 1.5) * 20;
-        const noiseY = (sim.rng() + sim.rng() + sim.rng() - 1.5) * 20;
-        return {
-            x: Math.max(20, Math.min(sim.W - 20, best.x + noiseX)),
-            y: Math.max(70, Math.min(sim.H - 20, best.y + noiseY)),
-            delay: 200, // ms to wait before tapping (dots drift during this)
-        };
-    },
-
-    // Oracle: search positions AND timing for absolute maximum
-    oracle(sim, timeSteps = 10, gridSize = 20) {
-        let bestScore = 0, bestX = sim.W / 2, bestY = sim.H / 2, bestDelay = 0;
-        const snapshot = sim.getSnapshot();
-
-        for (let t = 0; t < timeSteps; t++) {
-            const delay = t * 200; // 0ms, 200ms, 400ms, ...
-
-            // Create a clone sim, advance by delay, then grid search
-            const clone = Bots._cloneSim(sim, snapshot, delay);
-            const tap = Bots.greedy(clone, gridSize);
-
-            // Now simulate the full chain
-            clone.tap(tap.x, tap.y);
-            clone.resolveChain();
-
-            if (clone.score > bestScore) {
-                bestScore = clone.score;
-                bestX = tap.x;
-                bestY = tap.y;
-                bestDelay = delay;
-            }
-        }
-        return { x: bestX, y: bestY, delay: bestDelay, projectedScore: bestScore };
-    },
-
-    _cloneSim(sim, snapshot, advanceMs) {
-        const clone = new Simulation(sim.W, sim.H, sim.cfg, Date.now());
-        clone.dots = snapshot.map(d => ({ ...d }));
-        clone.explosionRadius = sim.explosionRadius;
-        clone.gameState = 'playing';
-        // Advance by delay
-        const DT = 16.67;
-        for (let t = 0; t < advanceMs; t += DT) {
-            const margin = clone.cfg.SCREEN_MARGIN;
-            for (const d of clone.dots) {
-                if (!d.active) continue;
-                d.x += d.vx;
-                d.y += d.vy;
-                if (d.x < margin) { d.vx = Math.abs(d.vx); d.x = margin; }
-                if (d.x > clone.W - margin) { d.vx = -Math.abs(d.vx); d.x = clone.W - margin; }
-                if (d.y < margin) { d.vy = Math.abs(d.vy); d.y = margin; }
-                if (d.y > clone.H - margin) { d.vy = -Math.abs(d.vy); d.y = clone.H - margin; }
-            }
-        }
-        return clone;
-    },
-};
 
 // =========================================================================
 // METRICS
@@ -510,12 +66,12 @@ const Metrics = {
             if (i < Math.min(runs, 100)) {
                 const sim3 = new Simulation(W, H, config, seed);
                 sim3.setupRound(round);
-                const oTap = Bots.oracle(sim3, 8, 15);
+                const oTap = Bots.oracle(sim3);
                 const sim3b = new Simulation(W, H, config, seed);
                 sim3b.setupRound(round);
                 // Advance by oracle delay
                 const DT = 16.67;
-                for (let t = 0; t < oTap.delay; t += DT) sim3b.step(DT);
+                for (let t = 0; t < (oTap.waitMs || 0); t += DT) sim3b.step(DT);
                 sim3b.tap(oTap.x, oTap.y);
                 sim3b.resolveChain();
                 oracleScores.push(sim3b.chainCount);
@@ -637,7 +193,7 @@ const Metrics = {
 
     // 4. Opportunity Density
     opportunityDensity(W, H, config, runs, round) {
-        const clusterCounts = []; // max cluster per frame
+        const clusterCounts = [];
         const gapDurations = [];
         const halfLives = [];
 
@@ -651,7 +207,6 @@ const Metrics = {
             // Simulate 10 seconds of drift (no tap)
             for (let t = 0; t < 10000; t += DT) {
                 sim.step(DT);
-                // Grid search for max cluster
                 let maxC = 0;
                 const gridN = 12;
                 for (let gx = 0; gx < gridN; gx++) {
@@ -711,10 +266,8 @@ const Metrics = {
             const sim = new Simulation(W, H, config, i * 7 + 1);
             sim.setupRound(round);
 
-            // Find optimal tap
             const opt = Bots.greedy(sim);
 
-            // Score at optimal
             const simOpt = new Simulation(W, H, config, i * 7 + 1);
             simOpt.setupRound(round);
             simOpt.tap(opt.x, opt.y);
@@ -722,7 +275,6 @@ const Metrics = {
             const optScore = simOpt.chainCount;
             if (optScore === 0) continue;
 
-            // Score at 10px offsets (8 directions)
             const deltas = [10, 20, 40, 60, 80, 100];
             let foundR50 = false;
             for (const delta of deltas) {
@@ -745,10 +297,10 @@ const Metrics = {
                     foundR50 = true;
                 }
                 if (delta === 10) {
-                    gradients.push(1 - retention); // score drop per 10px
+                    gradients.push(1 - retention);
                 }
             }
-            if (!foundR50) r50Values.push(100); // very forgiving
+            if (!foundR50) r50Values.push(100);
         }
 
         const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
@@ -774,17 +326,15 @@ const Metrics = {
 
     // 6. Chaos Decay Rate
     chaosDecay(W, H, config, runs, round) {
-        const decays = []; // score retention after 200ms delay
+        const decays = [];
 
         for (let i = 0; i < Math.min(runs, 100); i++) {
             const seed = i * 7 + 1;
             const sim = new Simulation(W, H, config, seed);
             sim.setupRound(round);
 
-            // Find optimal now
             const tapNow = Bots.greedy(sim);
 
-            // Score tapping now
             const sim1 = new Simulation(W, H, config, seed);
             sim1.setupRound(round);
             sim1.tap(tapNow.x, tapNow.y);
@@ -792,7 +342,6 @@ const Metrics = {
             const scoreNow = sim1.chainCount;
             if (scoreNow === 0) continue;
 
-            // Score tapping same spot 200ms later (dots have drifted)
             const sim2 = new Simulation(W, H, config, seed);
             sim2.setupRound(round);
             const DT = 16.67;
@@ -801,7 +350,6 @@ const Metrics = {
             sim2.resolveChain();
             const score200 = sim2.chainCount;
 
-            // Score tapping same spot 500ms later
             const sim3 = new Simulation(W, H, config, seed);
             sim3.setupRound(round);
             for (let t = 0; t < 500; t += DT) sim3.step(DT);
@@ -863,53 +411,46 @@ function runDashboard(W, H, config, runs, round) {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`  CHAIN REACTION — Simulation Dashboard`);
     console.log(`  ${label}`);
-    console.log(`  explosionRadius: ${Math.max(DEFAULT_CONFIG.EXPLOSION_RADIUS_MIN_PX, Math.min(W, H, 800) * (config.EXPLOSION_RADIUS_PCT || DEFAULT_CONFIG.EXPLOSION_RADIUS_PCT)).toFixed(1)}px`);
+    console.log(`  explosionRadius: ${Math.max(DEFAULTS.EXPLOSION_RADIUS_MIN_PX, Math.min(W, H, 800) * (config.EXPLOSION_RADIUS_PCT || DEFAULTS.EXPLOSION_RADIUS_PCT)).toFixed(1)}px`);
     console.log(`${'='.repeat(60)}\n`);
 
     const t0 = Date.now();
 
-    // Chain distribution (fast)
     process.stdout.write('  [1/6] Chain distribution...      ');
     const chains = Metrics.chainDistribution(W, H, config, runs, round);
     console.log(`done (${Date.now() - t0}ms)`);
     printResult(chains);
 
-    // Skill ceiling
     const t1 = Date.now();
     process.stdout.write('  [2/6] Skill ceiling...           ');
     const skill = Metrics.skillCeiling(W, H, config, runs, round);
     console.log(`done (${Date.now() - t1}ms)`);
     printResult(skill);
 
-    // Drift ratio
     const t2 = Date.now();
     process.stdout.write('  [3/6] Drift hit ratio...         ');
     const drift = Metrics.driftRatio(W, H, config, runs, round);
     console.log(`done (${Date.now() - t2}ms)`);
     printResult(drift);
 
-    // Input sensitivity
     const t3 = Date.now();
     process.stdout.write('  [4/6] Input sensitivity...       ');
     const sensitivity = Metrics.inputSensitivity(W, H, config, Math.min(runs, 200), round);
     console.log(`done (${Date.now() - t3}ms)`);
     printResult(sensitivity);
 
-    // Opportunity density (slower — fewer runs)
     const t4 = Date.now();
     process.stdout.write('  [5/6] Opportunity density...     ');
     const density = Metrics.opportunityDensity(W, H, config, Math.min(runs, 50), round);
     console.log(`done (${Date.now() - t4}ms)`);
     printResult(density);
 
-    // Chaos decay (expensive)
     const t5 = Date.now();
     process.stdout.write('  [6/6] Chaos decay...             ');
     const chaos = Metrics.chaosDecay(W, H, config, Math.min(runs, 100), round);
     console.log(`done (${Date.now() - t5}ms)`);
     printResult(chaos);
 
-    // Summary with sweet-spot ranges
     console.log(`\n${'─'.repeat(60)}`);
     console.log('  SWEET SPOT CHECK');
     console.log(`${'─'.repeat(60)}`);
@@ -957,7 +498,7 @@ function printResult(obj) {
 }
 
 // =========================================================================
-// EXPORTS (for require() by other scripts)
+// EXPORTS (backward-compatible)
 // =========================================================================
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -1,67 +1,27 @@
 'use strict';
 
 // =========================================================================
-// CHAIN REACTION — Shared Engine
-// Used by both index.html (game) and replay.html (viewer)
+// CHAIN REACTION — Renderer
 //
-// Architecture (line ranges):
-//   Constants .............. ~12-69    All tunables, grouped by system
-//   Easing ................ ~73-79    Animation curves
-//   Shared State .......... ~83-113   Mutable state set by host page
-//   Resize / Radius ....... ~118-135  Screen dimensions + explosion radius
-//   Utility ............... ~139-178  getMultiplier(), drawPill()
-//   Particle Pool ......... ~182-299  SoA pool with spawn/update/draw/clear
-//   Ambient Background .... ~303-349  Twinkling star field
-//   Floating Text ......... ~353-414  Score popups + celebration banners
-//   Chain Lines ........... ~418-442  Visual links between cascade hits
-//   Dot class ............. ~447-614  Physics, rendering (trails, gravity spirals, volatile sparks)
-//   Explosion class ....... ~619-810  Lifecycle (grow/hold/shrink), cascade catch logic
-//   Connections ........... ~815-882  Soft auras + lines between chainable dots
-//   Core Simulation ....... ~886-952  detonateDot(), handleDotCaught() — cascade mechanics
-//   Shared Update ......... ~957-998  engineUpdatePhysics() — tick all systems
-//   Scene Rendering ....... ~1001-1067 engineDrawScene() — background + composite draw
-//   Round Reset ........... ~1070-1084 engineResetRound() — clear state between rounds
+// Visual effects only — no physics, no game logic. Reads state from a
+// Game instance (game-core.js). Handles particles, floating text, chain
+// lines, ambient stars, screen shake, and composite scene rendering.
+//
+// Loaded after game-core.js via <script> tag. All game-core exports
+// (Game, Bots, DEFAULTS, DOT_TYPES, easeOutExpo, easeInQuad, etc.)
+// are available in global scope.
 // =========================================================================
 
 // =====================================================================
-// CONSTANTS
+// RENDERING CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v14.2.0';
+const BUILD_VERSION = 'v16.0.0';
 const BUILD_DATE = '2026-02-22';
 
-// Dot types — physics modifiers
-const DOT_TYPES = {
-    standard: { label: 'standard', radiusMult: 1.0, speedMult: 1.0 },
-    gravity:  { label: 'gravity',  radiusMult: 1.0, speedMult: 0.7, pullRange: 2.5, pullForce: 0.012 },
-    volatile: { label: 'volatile', radiusMult: 1.5, speedMult: 1.3 },
-};
-
-// Cascade momentum — controls how chain reactions escalate with depth.
-// RADIUS_GROWTH=0 (v11): fixed explosion size at all depths prevents
-// percolation blowout at high dot densities. See research/difficulty-analysis.md.
-const CASCADE_RADIUS_GROWTH = 0;
-const CASCADE_HOLD_GROWTH_MS = 80;
-const CASCADE_GEN_CAP = 4;
-// Stagger + jitter create visual "wave" effect (simultaneous detonations look flat)
-const CASCADE_STAGGER_MS = 80;
-const CASCADE_JITTER_MS = 25;
-
-// Explosion radius
-const EXPLOSION_RADIUS_PCT = 0.10;
-const EXPLOSION_RADIUS_MIN_PX = 35;
-
-// Explosion lifecycle (ms)
-const EXPLOSION_GROW_MS = 200;
-const EXPLOSION_HOLD_MS = 1000;
-const EXPLOSION_SHRINK_MS = 500;
-const TOTAL_EXPLOSION_MS = EXPLOSION_GROW_MS + EXPLOSION_HOLD_MS + EXPLOSION_SHRINK_MS;
-
-// Dots
+// Dot rendering
 let DOT_RADIUS = 5;
 let DOT_GLOW_SIZE = 18;
-const MIN_DOT_DISTANCE = 25;
-const SCREEN_MARGIN = 16;
 const DOT_TRAIL_LENGTH = 8;
 
 // Particles
@@ -73,96 +33,19 @@ const SHAKE_MAX_OFFSET = 14;
 const SHAKE_DECAY = 0.90;
 const SHAKE_TRAUMA_PER_DOT = 0.06;
 
-// Multiplier thresholds — percentage of round's total dots (matches celebration scaling)
-// Calibrated via bot playtest: oracle bot median clear ~20%, p90 ~35%.
-const MULT_THRESHOLDS = [
-    { pct: 0.00, mult: 1 }, { pct: 0.10, mult: 2 },
-    { pct: 0.20, mult: 3 }, { pct: 0.35, mult: 4 },
-    { pct: 0.50, mult: 5 }, { pct: 0.75, mult: 8 },
-];
-
-// Celebration milestones — percentage of round's total dots, not absolute counts.
-// Calibrated via full-game bot simulation (playtest-v12.js):
-//   Oracle bot: median clear ~20%, p75 ~25%, p90 ~35%, max ~43%
-//   Greedy bot: median clear ~12%, p90 ~30%
-// Thresholds set so NICE! fires at p75 level, GODLIKE! is near-impossible.
-const CELEBRATIONS = [
-    { pct: 0.25, text: 'NICE!', hue: 50, size: 1.0 },
-    { pct: 0.40, text: 'AMAZING!', hue: 35, size: 1.3 },
-    { pct: 0.55, text: 'INCREDIBLE!', hue: 15, size: 1.6 },
-    { pct: 0.70, text: 'LEGENDARY!', hue: 300, size: 2.0 },
-    { pct: 0.85, text: 'GODLIKE!', hue: 280, size: 2.5 },
-];
-
 // =====================================================================
-// EASING
+// EASING (rendering-only — easeOutExpo, easeInQuad are in game-core.js)
 // =====================================================================
-const easeOutExpo = t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
-const easeInQuad = t => t * t;
 const easeOutQuad = t => 1 - (1 - t) * (1 - t);
 const easeOutBack = t => 1 + 2.70158 * Math.pow(t - 1, 3) + 1.70158 * Math.pow(t - 1, 2);
 const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
 const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
 
 // =====================================================================
-// TYPES (JSDoc — no build step, provides IDE hints + agent context)
+// VISUAL STATE
 // =====================================================================
-/**
- * @typedef {Object} DotTypeDef
- * @property {string} label
- * @property {number} radiusMult - Explosion radius multiplier (volatile = 1.5x)
- * @property {number} speedMult - Movement speed multiplier
- * @property {number} [pullRange] - Gravity pull range as multiple of explosion radius
- * @property {number} [pullForce] - Gravity pull force per tick
- */
-
-/**
- * @typedef {Object} FloatingText
- * @property {number} x
- * @property {number} y
- * @property {string} text
- * @property {number} hue
- * @property {number} age - Frames since spawn
- * @property {number} maxAge - Frames until removal
- * @property {number} [scale] - Size multiplier (celebrations)
- * @property {boolean} [celebration] - Large centered text vs small score popup
- */
-
-/**
- * @typedef {Object} PendingExplosion
- * @property {number} x
- * @property {number} y
- * @property {number} generation - Cascade depth (0 = player tap, 1+ = chain)
- * @property {number} time - performance.now() timestamp to spawn
- * @property {number} parentX - Origin of the chain (for chain lines)
- * @property {number} parentY
- * @property {string} dotType - Key from DOT_TYPES
- * @property {number} jitter - Random timing offset applied
- */
-
-// =====================================================================
-// SHARED STATE (set by host page)
-// =====================================================================
-// These are set by the host page (index.html or replay.html)
-// and referenced by engine classes/functions.
 let W, H, refDim;
 let explosionRadius;
-let roundRadiusScale = 1.0;
-
-// Game/replay state — the host page manages these arrays,
-// but engine code reads them for physics (gravity pull, connections, etc.)
-let dots = [];
-let explosions = [];
-let pendingExplosions = [];
-let scheduledDetonations = new Set();
-
-let chainCount = 0;
-let score = 0;
-let currentMultiplier = 1;
-let multiplierPulse = 0;
-let feverIntensity = 0;
-let lastCelebration = -1;
-let roundTotalDots = 0;  // Set by host page at round start — used for relative celebrations
 
 let floatingTexts = [];
 let chainLines = [];
@@ -172,8 +55,8 @@ let shakeX = 0, shakeY = 0;
 let bgPulse = 0;
 let screenFlash = 0;
 let beatPulse = 0;
-let slowMo = 1.0;
-let slowMoTarget = 1.0;
+let feverIntensity = 0;
+let multiplierPulse = 0;
 
 // Settings overrides (set by host page settings panel)
 let bgOverride = null;       // [r, g, b] or null for default
@@ -184,21 +67,11 @@ let particleMultiplier = 1.0; // 0.3 for REDUCED
 // =====================================================================
 // RESIZE
 // =====================================================================
-// Per-round radius decay — gentle counterpressure against dot density increase
-function getRoundRadiusScale(round) {
-    return Math.max(0.85, 1.0 - (round - 1) * 0.01);
-}
-
-function recalcExplosionRadius() {
-    explosionRadius = Math.max(EXPLOSION_RADIUS_MIN_PX, refDim * EXPLOSION_RADIUS_PCT) * roundRadiusScale;
-}
-
 function engineResize(canvas) {
     W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
     refDim = Math.min(W, H, 800);
     const screenMin = Math.min(W, H);
-    recalcExplosionRadius();
     DOT_RADIUS = Math.max(6, screenMin * 0.014);
     DOT_GLOW_SIZE = Math.max(28, screenMin * 0.06);
 }
@@ -206,16 +79,6 @@ function engineResize(canvas) {
 // =====================================================================
 // UTILITY
 // =====================================================================
-function getMultiplier(chain) {
-    let m = 1;
-    for (const t of MULT_THRESHOLDS) {
-        const threshold = Math.ceil(t.pct * roundTotalDots);
-        if (chain >= threshold) m = t.mult;
-    }
-    return m;
-}
-
-// Reusable pill button drawer — returns hit rect
 function drawPill(ctx, cx, cy, label, active, hue) {
     const s = Math.max(1, Math.min(W, H) / 600);
     const fontSize = Math.round(12 * s);
@@ -516,395 +379,304 @@ function drawChainLines(ctx) {
 }
 
 // =====================================================================
-// DOT — unified constructor takes (x, y, vx, vy, type).
-// Random velocity is generated in generateDots() (index.html), NOT here.
-// This lets replay.html inject recorded velocities using the same class.
+// DOT RENDERING — standalone functions for plain game-core dot objects.
+// Visual state (_trail, _alpha, etc.) added on first encounter.
 // =====================================================================
-class Dot {
-    constructor(x, y, vx, vy, type) {
-        this.type = type || 'standard';
-        this.x = x; this.y = y;
-        this.vx = vx; this.vy = vy;
-        this.active = true;
-        this.alpha = 0;
-        this.pulsePhase = Math.random() * Math.PI * 2;
-        this.trail = [];
-        this.bloomTimer = 0;
-        this.nearMiss = 0;
-        this._neighbors = 0;
+
+function getDotHue(dot) {
+    if (dot.type === 'gravity') return 270;
+    if (dot.type === 'volatile') return 15;
+    return 195 - (dot.y / H) * 180;
+}
+
+function ensureDotRenderState(dot) {
+    if (dot._trail !== undefined) return;
+    dot._trail = [];
+    dot._alpha = 0;
+    dot._pulsePhase = Math.random() * Math.PI * 2;
+    dot._nearMiss = 0;
+    dot._neighbors = 0;
+}
+
+function updateDotVisuals(dot) {
+    ensureDotRenderState(dot);
+    // Bloom timer (visual countdown after detonation — game-core sets it, renderer ticks it)
+    if (dot.bloomTimer > 0) {
+        dot.bloomTimer--;
+        return;
     }
+    if (!dot.active) return;
+    if (dot._alpha < 1) dot._alpha = Math.min(1, dot._alpha + 0.025);
+    dot._pulsePhase += 0.05;
+    dot._trail.push({ x: dot.x, y: dot.y });
+    if (dot._trail.length > DOT_TRAIL_LENGTH) dot._trail.shift();
+    if (dot._nearMiss > 0) dot._nearMiss = Math.max(0, dot._nearMiss - 0.012);
+}
 
-    getHue() {
-        if (this.type === 'gravity') return 270;
-        if (this.type === 'volatile') return 15;
-        return 195 - (this.y / H) * 180;
-    }
+function drawDot(ctx, dot) {
+    ensureDotRenderState(dot);
+    if (!dot.active && dot.bloomTimer <= 0) return;
+    const hue = getDotHue(dot);
+    const pulse = Math.sin(dot._pulsePhase) * 0.2 + 0.8;
+    const r = DOT_RADIUS * pulse;
+    const a = dot._alpha;
 
-    update() {
-        if (!this.active && this.bloomTimer <= 0) return;
-        if (this.bloomTimer > 0) { this.bloomTimer--; return; }
-        if (this.alpha < 1) this.alpha = Math.min(1, this.alpha + 0.025);
-
-        this.x += this.vx * slowMo;
-        this.y += this.vy * slowMo;
-        this.pulsePhase += 0.05;
-
-        // Gravity dots pull nearby dots toward themselves
-        if (this.type === 'gravity' && this.active) {
-            const td = DOT_TYPES.gravity;
-            const pullR = explosionRadius * td.pullRange;
-            for (const o of dots) {
-                if (o === this || !o.active) continue;
-                const dist = Math.hypot(o.x - this.x, o.y - this.y);
-                if (dist < pullR && dist > 5) {
-                    const f = td.pullForce * slowMo / (dist / explosionRadius);
-                    o.vx += (this.x - o.x) / dist * f;
-                    o.vy += (this.y - o.y) / dist * f;
-                }
-            }
-        }
-
-        if (this.x < SCREEN_MARGIN) { this.vx = Math.abs(this.vx); this.x = SCREEN_MARGIN; }
-        if (this.x > W - SCREEN_MARGIN) { this.vx = -Math.abs(this.vx); this.x = W - SCREEN_MARGIN; }
-        if (this.y < SCREEN_MARGIN) { this.vy = Math.abs(this.vy); this.y = SCREEN_MARGIN; }
-        if (this.y > H - SCREEN_MARGIN) { this.vy = -Math.abs(this.vy); this.y = H - SCREEN_MARGIN; }
-
-        this.trail.push({ x: this.x, y: this.y });
-        if (this.trail.length > DOT_TRAIL_LENGTH) this.trail.shift();
-
-        if (this.nearMiss > 0) this.nearMiss = Math.max(0, this.nearMiss - 0.012);
-    }
-
-    draw(ctx) {
-        if (!this.active && this.bloomTimer <= 0) return;
-        const hue = this.getHue();
-        const pulse = Math.sin(this.pulsePhase) * 0.2 + 0.8;
-        const r = DOT_RADIUS * pulse;
-        const a = this.alpha;
-
-        if (this.bloomTimer > 0) {
-            const bt = 1 - this.bloomTimer / 12;
-            const br = r * (1 + bt * 5);
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = (1 - bt) * 0.9;
-            const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, br);
-            g.addColorStop(0, `hsla(${hue}, 70%, 95%, 1)`);
-            g.addColorStop(0.3, `hsla(${hue}, 80%, 70%, 0.6)`);
-            g.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
-            ctx.fillStyle = g;
-            ctx.fillRect(this.x - br, this.y - br, br * 2, br * 2);
-            ctx.globalAlpha = 1;
-            ctx.globalCompositeOperation = 'source-over';
-            return;
-        }
-
-        // Trail
+    // Bloom (detonation flash)
+    if (dot.bloomTimer > 0) {
+        const bt = 1 - dot.bloomTimer / 12;
+        const br = r * (1 + bt * 5);
         ctx.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < this.trail.length - 1; i++) {
-            const t = this.trail[i];
-            const tp = (i + 1) / this.trail.length;
-            ctx.globalAlpha = a * tp * 0.12;
-            const ts = r * tp * 0.8;
-            const tg = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, ts * 2);
-            tg.addColorStop(0, `hsla(${hue}, 70%, 60%, 0.5)`);
-            tg.addColorStop(1, `hsla(${hue}, 70%, 60%, 0)`);
-            ctx.fillStyle = tg;
-            ctx.fillRect(t.x - ts * 2, t.y - ts * 2, ts * 4, ts * 4);
-        }
-
-        // Outer glow — brighter when near other dots (shows clusters)
-        const connectBoost = Math.min(1, (this._neighbors || 0) * 0.12);
-        const glowR = DOT_GLOW_SIZE * (1 + connectBoost * 0.3);
-        const glowA = a * (0.14 + pulse * 0.08 + connectBoost * 0.15);
-        const gg = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowR);
-        gg.addColorStop(0, `hsla(${hue}, 85%, 70%, ${glowA})`);
-        gg.addColorStop(0.4, `hsla(${hue}, 80%, 55%, ${glowA * 0.4})`);
-        gg.addColorStop(1, `hsla(${hue}, 80%, 50%, 0)`);
+        ctx.globalAlpha = (1 - bt) * 0.9;
+        const g = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, br);
+        g.addColorStop(0, `hsla(${hue}, 70%, 95%, 1)`);
+        g.addColorStop(0.3, `hsla(${hue}, 80%, 70%, 0.6)`);
+        g.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(dot.x - br, dot.y - br, br * 2, br * 2);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = gg;
-        ctx.fillRect(this.x - glowR, this.y - glowR, glowR * 2, glowR * 2);
         ctx.globalCompositeOperation = 'source-over';
-
-        // Core
-        ctx.globalAlpha = a;
-        const cg = ctx.createRadialGradient(this.x - r * 0.2, this.y - r * 0.2, 0, this.x, this.y, r);
-        cg.addColorStop(0, `hsla(${hue}, 60%, 95%, 1)`);
-        cg.addColorStop(0.4, `hsla(${hue}, 85%, ${65 + pulse * 10}%, 1)`);
-        cg.addColorStop(1, `hsla(${hue}, 90%, ${45 + pulse * 10}%, 0.9)`);
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = cg;
-        ctx.fill();
-
-        // Gravity dot: inward spiral lines
-        if (this.type === 'gravity') {
-            ctx.globalCompositeOperation = 'lighter';
-            const spiralT = performance.now() * 0.002;
-            const pullR = DOT_GLOW_SIZE * 1.8;
-            for (let i = 0; i < 3; i++) {
-                const angle = spiralT + i * (Math.PI * 2 / 3);
-                const outerR = pullR * (0.6 + 0.4 * Math.sin(spiralT * 1.5 + i));
-                const innerR = r * 1.5;
-                ctx.globalAlpha = a * 0.2;
-                ctx.strokeStyle = 'hsla(270, 60%, 75%, 1)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(this.x + Math.cos(angle) * outerR, this.y + Math.sin(angle) * outerR);
-                ctx.lineTo(this.x + Math.cos(angle + 0.3) * innerR, this.y + Math.sin(angle + 0.3) * innerR);
-                ctx.stroke();
-            }
-            ctx.globalCompositeOperation = 'source-over';
-        }
-
-        // Volatile dot: jittery outer sparks
-        if (this.type === 'volatile') {
-            ctx.globalCompositeOperation = 'lighter';
-            const sparkT = performance.now() * 0.004;
-            for (let i = 0; i < 4; i++) {
-                const sa = sparkT + i * (Math.PI / 2) + Math.sin(sparkT * 3 + i) * 0.5;
-                const sr = r * (1.5 + 0.8 * Math.sin(sparkT * 5 + i * 2));
-                const ss = 1.5;
-                ctx.globalAlpha = a * (0.3 + 0.2 * Math.sin(sparkT * 6 + i));
-                ctx.fillStyle = 'hsla(15, 100%, 70%, 1)';
-                ctx.fillRect(this.x + Math.cos(sa) * sr - ss/2, this.y + Math.sin(sa) * sr - ss/2, ss, ss);
-            }
-            ctx.globalCompositeOperation = 'source-over';
-        }
-
-        // Near-miss red pulse
-        if (this.nearMiss > 0) {
-            const nmP = Math.sin(performance.now() * 0.012) * 0.3 + 0.7;
-            const nmR = DOT_GLOW_SIZE * 1.2;
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = this.nearMiss * nmP * 0.25;
-            const ng = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, nmR);
-            ng.addColorStop(0, 'hsla(0, 90%, 60%, 0.6)');
-            ng.addColorStop(0.5, 'hsla(0, 80%, 50%, 0.15)');
-            ng.addColorStop(1, 'hsla(0, 70%, 40%, 0)');
-            ctx.fillStyle = ng;
-            ctx.fillRect(this.x - nmR, this.y - nmR, nmR * 2, nmR * 2);
-            ctx.globalCompositeOperation = 'source-over';
-        }
-        ctx.globalAlpha = 1;
+        return;
     }
+
+    // Trail
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < dot._trail.length - 1; i++) {
+        const t = dot._trail[i];
+        const tp = (i + 1) / dot._trail.length;
+        ctx.globalAlpha = a * tp * 0.12;
+        const ts = r * tp * 0.8;
+        const tg = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, ts * 2);
+        tg.addColorStop(0, `hsla(${hue}, 70%, 60%, 0.5)`);
+        tg.addColorStop(1, `hsla(${hue}, 70%, 60%, 0)`);
+        ctx.fillStyle = tg;
+        ctx.fillRect(t.x - ts * 2, t.y - ts * 2, ts * 4, ts * 4);
+    }
+
+    // Outer glow — brighter when near other dots (shows clusters)
+    const connectBoost = Math.min(1, (dot._neighbors || 0) * 0.12);
+    const glowR = DOT_GLOW_SIZE * (1 + connectBoost * 0.3);
+    const glowA = a * (0.14 + pulse * 0.08 + connectBoost * 0.15);
+    const gg = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, glowR);
+    gg.addColorStop(0, `hsla(${hue}, 85%, 70%, ${glowA})`);
+    gg.addColorStop(0.4, `hsla(${hue}, 80%, 55%, ${glowA * 0.4})`);
+    gg.addColorStop(1, `hsla(${hue}, 80%, 50%, 0)`);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = gg;
+    ctx.fillRect(dot.x - glowR, dot.y - glowR, glowR * 2, glowR * 2);
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Core
+    ctx.globalAlpha = a;
+    const cg = ctx.createRadialGradient(dot.x - r * 0.2, dot.y - r * 0.2, 0, dot.x, dot.y, r);
+    cg.addColorStop(0, `hsla(${hue}, 60%, 95%, 1)`);
+    cg.addColorStop(0.4, `hsla(${hue}, 85%, ${65 + pulse * 10}%, 1)`);
+    cg.addColorStop(1, `hsla(${hue}, 90%, ${45 + pulse * 10}%, 0.9)`);
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = cg;
+    ctx.fill();
+
+    // Gravity dot: inward spiral lines
+    if (dot.type === 'gravity') {
+        ctx.globalCompositeOperation = 'lighter';
+        const spiralT = performance.now() * 0.002;
+        const pullR = DOT_GLOW_SIZE * 1.8;
+        for (let i = 0; i < 3; i++) {
+            const angle = spiralT + i * (Math.PI * 2 / 3);
+            const outerR = pullR * (0.6 + 0.4 * Math.sin(spiralT * 1.5 + i));
+            const innerR = r * 1.5;
+            ctx.globalAlpha = a * 0.2;
+            ctx.strokeStyle = 'hsla(270, 60%, 75%, 1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(dot.x + Math.cos(angle) * outerR, dot.y + Math.sin(angle) * outerR);
+            ctx.lineTo(dot.x + Math.cos(angle + 0.3) * innerR, dot.y + Math.sin(angle + 0.3) * innerR);
+            ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Volatile dot: jittery outer sparks
+    if (dot.type === 'volatile') {
+        ctx.globalCompositeOperation = 'lighter';
+        const sparkT = performance.now() * 0.004;
+        for (let i = 0; i < 4; i++) {
+            const sa = sparkT + i * (Math.PI / 2) + Math.sin(sparkT * 3 + i) * 0.5;
+            const sr = r * (1.5 + 0.8 * Math.sin(sparkT * 5 + i * 2));
+            const ss = 1.5;
+            ctx.globalAlpha = a * (0.3 + 0.2 * Math.sin(sparkT * 6 + i));
+            ctx.fillStyle = 'hsla(15, 100%, 70%, 1)';
+            ctx.fillRect(dot.x + Math.cos(sa) * sr - ss/2, dot.y + Math.sin(sa) * sr - ss/2, ss, ss);
+        }
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Near-miss red pulse
+    if (dot._nearMiss > 0) {
+        const nmP = Math.sin(performance.now() * 0.012) * 0.3 + 0.7;
+        const nmR = DOT_GLOW_SIZE * 1.2;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = dot._nearMiss * nmP * 0.25;
+        const ng = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, nmR);
+        ng.addColorStop(0, 'hsla(0, 90%, 60%, 0.6)');
+        ng.addColorStop(0.5, 'hsla(0, 80%, 50%, 0.15)');
+        ng.addColorStop(1, 'hsla(0, 70%, 40%, 0)');
+        ctx.fillStyle = ng;
+        ctx.fillRect(dot.x - nmR, dot.y - nmR, nmR * 2, nmR * 2);
+        ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.globalAlpha = 1;
 }
 
 // =====================================================================
-// EXPLOSION
+// EXPLOSION RENDERING — standalone function for game-core explosion objects.
+// Game-core explosion: { x, y, radius, maxRadius, phase, age, generation,
+//                        dotType, holdMs, caught, createdAt }
 // =====================================================================
-class Explosion {
-    constructor(x, y, generation, radius, onCaught, parentX, parentY, dotType) {
-        this.x = x; this.y = y;
-        this.generation = generation;
-        this.dotType = dotType || 'standard';
-        const typeDef = DOT_TYPES[this.dotType] || DOT_TYPES.standard;
-        let baseRadius = radius * typeDef.radiusMult;
-        const effectiveGen = Math.min(generation, CASCADE_GEN_CAP);
-        if (effectiveGen > 0) {
-            baseRadius *= (1 + CASCADE_RADIUS_GROWTH * effectiveGen);
-        }
-        this.explosionRadius = baseRadius;
-        this.holdMs = EXPLOSION_HOLD_MS + (effectiveGen > 0 ? CASCADE_HOLD_GROWTH_MS * effectiveGen : 0);
-        this.onCaught = onCaught;
-        this.createdAt = performance.now();
-        this.phase = 'grow';
-        this.radius = 0;
-        this.caught = new Set();
-        this.hue = this.dotType === 'gravity' ? 270
-                 : this.dotType === 'volatile' ? 15
-                 : 195 - (y / H) * 180;
-        this.parentX = parentX;
-        this.parentY = parentY;
-        this.shockwaveRadius = 0;
-        this.flashAlpha = 1;
+
+function drawExplosion(ctx, e) {
+    if (e.phase === 'done' || (e.phase === 'shrink' && e.radius < 0.1)) return;
+    const r = Math.max(0.1, e.radius);
+    const age = e.age;
+    const GROW_MS = DEFAULTS.EXPLOSION_GROW_MS;
+    const SHRINK_MS = DEFAULTS.EXPLOSION_SHRINK_MS;
+
+    let alpha = 1;
+    if (e.phase === 'shrink') {
+        const t = (age - GROW_MS - e.holdMs) / SHRINK_MS;
+        alpha = 1 - easeInQuad(Math.min(t, 1));
     }
 
-    // Virtual age tracks time adjusted for slow-motion, so explosions
-    // expand/hold/shrink at perceived speed regardless of slowMo factor.
-    update(now) {
-        if (!this._virtualAge) this._virtualAge = 0;
-        const realDelta = now - (this._lastNow || this.createdAt);
-        this._lastNow = now;
-        this._virtualAge += realDelta * slowMo;
-        const age = this._virtualAge;
+    const flashAlpha = Math.max(0, 1 - age / 80);
 
-        this.flashAlpha = Math.max(0, 1 - age / 80);
-        this.shockwaveRadius = Math.min(this.explosionRadius * 1.6, age * 0.8);
+    ctx.globalCompositeOperation = 'lighter';
 
-        const holdMs = this.holdMs;
-        if (this.phase === 'grow') {
-            if (age >= EXPLOSION_GROW_MS) this.phase = 'hold';
-            this.radius = this.explosionRadius * easeOutExpo(Math.min(age / EXPLOSION_GROW_MS, 1));
-        } else if (this.phase === 'hold') {
-            if (age >= EXPLOSION_GROW_MS + holdMs) this.phase = 'shrink';
-            this.radius = this.explosionRadius;
-        } else if (this.phase === 'shrink') {
-            const t = (age - EXPLOSION_GROW_MS - holdMs) / EXPLOSION_SHRINK_MS;
-            if (t >= 1) { this.phase = 'done'; return false; }
-            this.radius = this.explosionRadius * (1 - easeInQuad(t));
-        }
-
-        if (this.phase === 'grow' || this.phase === 'hold') {
-            // Gravity-type explosions pull nearby dots inward
-            if (this.dotType === 'gravity') {
-                const pullR = this.explosionRadius * 2.5;
-                for (let i = 0; i < dots.length; i++) {
-                    const dot = dots[i];
-                    if (!dot.active || this.caught.has(i)) continue;
-                    const dist = Math.hypot(dot.x - this.x, dot.y - this.y);
-                    if (dist < pullR && dist > 5) {
-                        const f = 0.025 * slowMo / (dist / this.explosionRadius);
-                        dot.vx += (this.x - dot.x) / dist * f;
-                        dot.vy += (this.y - dot.y) / dist * f;
-                    }
-                }
-            }
-
-            for (let i = 0; i < dots.length; i++) {
-                const dot = dots[i];
-                if (!dot.active || this.caught.has(i)) continue;
-                if (Math.hypot(dot.x - this.x, dot.y - this.y) <= this.radius) {
-                    this.caught.add(i);
-                    if (this.onCaught) this.onCaught(dot, i, this.generation, this.x, this.y);
-                }
-            }
-        }
-        return true;
-    }
-
-    draw(ctx) {
-        if (this.phase === 'done') return;
-        const r = Math.max(0.1, this.radius);
-        const age = this._virtualAge || 0;
-        let alpha = 1;
-        if (this.phase === 'shrink') {
-            const t = (age - EXPLOSION_GROW_MS - this.holdMs) / EXPLOSION_SHRINK_MS;
-            alpha = 1 - easeInQuad(Math.min(t, 1));
-        }
-
-        ctx.globalCompositeOperation = 'lighter';
-
-        // Gen-0 (player tap) = ripple only
-        if (this.generation === 0) {
-            if (age < 500 && this.shockwaveRadius > 0) {
-                ctx.globalAlpha = 0.5 * (1 - age / 500) * alpha;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, Math.max(0.1, this.shockwaveRadius), 0, Math.PI * 2);
-                ctx.strokeStyle = `hsla(0, 0%, 90%, 1)`;
-                ctx.lineWidth = 2.5;
-                ctx.stroke();
-            }
-            if (age < 350) {
-                ctx.globalAlpha = 0.35 * (1 - age / 350) * alpha;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, Math.max(0.1, this.shockwaveRadius * 0.65), 0, Math.PI * 2);
-                ctx.strokeStyle = `hsla(0, 0%, 80%, 1)`;
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-            }
-            if (this.flashAlpha > 0) {
-                ctx.globalAlpha = this.flashAlpha * 0.4;
-                const fr = 8;
-                const fg = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, fr);
-                fg.addColorStop(0, 'rgba(255,255,255,0.8)');
-                fg.addColorStop(1, 'rgba(255,255,255,0)');
-                ctx.fillStyle = fg;
-                ctx.fillRect(this.x - fr, this.y - fr, fr * 2, fr * 2);
-            }
-            ctx.globalAlpha = 1;
-            ctx.globalCompositeOperation = 'source-over';
-            return;
-        }
-
-        // Dot detonation (gen 1+) — escalating with chain depth
-        const genBoost = Math.min(0.5, this.generation * 0.08);
-        const hue = this.hue + this.generation * 3;
-
-        // Ambient glow
-        const ambR = r * (2.5 + genBoost);
-        ctx.globalAlpha = alpha * (0.12 + genBoost * 0.15);
-        const ag = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, ambR);
-        ag.addColorStop(0, `hsla(${hue + 10}, 60%, 70%, 1)`);
-        ag.addColorStop(0.5, `hsla(${hue}, 50%, 50%, 0.3)`);
-        ag.addColorStop(1, `hsla(${hue}, 50%, 40%, 0)`);
-        ctx.fillStyle = ag;
-        ctx.fillRect(this.x - ambR, this.y - ambR, ambR * 2, ambR * 2);
-
-        // Flash
-        if (this.flashAlpha > 0) {
-            ctx.globalAlpha = this.flashAlpha * (0.7 + genBoost);
-            const fr = r * 0.6 * (1 + (1 - this.flashAlpha) * 0.8);
-            const fg = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, fr);
-            fg.addColorStop(0, '#ffffffee');
-            fg.addColorStop(0.5, `hsla(50, 100%, 90%, 0.5)`);
-            fg.addColorStop(1, `hsla(50, 100%, 80%, 0)`);
-            ctx.fillStyle = fg;
-            ctx.fillRect(this.x - fr, this.y - fr, fr * 2, fr * 2);
-        }
-
-        // Shockwave (scales with chain depth)
-        const swScale = 1.6 + Math.min(1.0, this.generation * 0.15);
-        this.shockwaveRadius = Math.min(this.explosionRadius * swScale, age * 0.8);
-        if (age < 400 && this.shockwaveRadius > 0) {
-            ctx.globalAlpha = (0.45 + genBoost * 0.3) * (1 - age / 400);
+    // Gen-0 (player tap) = ripple only
+    if (e.generation === 0) {
+        const shockR = Math.min(e.maxRadius * 1.6, age * 0.8);
+        if (age < 500 && shockR > 0) {
+            ctx.globalAlpha = 0.5 * (1 - age / 500) * alpha;
             ctx.beginPath();
-            ctx.arc(this.x, this.y, Math.max(0.1, this.shockwaveRadius), 0, Math.PI * 2);
-            ctx.strokeStyle = `hsla(${hue}, 70%, 85%, 1)`;
-            ctx.lineWidth = 2.5 + genBoost * 2;
+            ctx.arc(e.x, e.y, Math.max(0.1, shockR), 0, Math.PI * 2);
+            ctx.strokeStyle = 'hsla(0, 0%, 90%, 1)';
+            ctx.lineWidth = 2.5;
             ctx.stroke();
         }
-
-        // Core
-        ctx.globalAlpha = alpha * (0.75 + genBoost * 0.2);
-        const cg = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r);
-        cg.addColorStop(0, `hsla(45, 100%, 95%, 0.9)`);
-        cg.addColorStop(0.15, `hsla(40, 95%, 80%, 0.6)`);
-        cg.addColorStop(0.4, `hsla(${hue + 15}, 80%, 65%, 0.3)`);
-        cg.addColorStop(0.7, `hsla(${hue}, 70%, 55%, 0.1)`);
-        cg.addColorStop(1, `hsla(${hue}, 60%, 45%, 0)`);
-        ctx.fillStyle = cg;
-        ctx.fillRect(this.x - r, this.y - r, r * 2, r * 2);
-
-        // Edge ring
-        ctx.globalAlpha = alpha * 0.85;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, Math.max(0.1, r), 0, Math.PI * 2);
-        ctx.strokeStyle = `hsla(30, 95%, 65%, ${alpha})`;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-
-        // Inner core
-        ctx.globalAlpha = alpha * 0.8;
-        const cr = r * 0.2;
-        const ig = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, cr);
-        ig.addColorStop(0, `hsla(50, 100%, 97%, 1)`);
-        ig.addColorStop(1, `hsla(45, 90%, 80%, 0)`);
-        ctx.fillStyle = ig;
-        ctx.fillRect(this.x - cr, this.y - cr, cr * 2, cr * 2);
-
+        if (age < 350) {
+            ctx.globalAlpha = 0.35 * (1 - age / 350) * alpha;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, Math.max(0.1, shockR * 0.65), 0, Math.PI * 2);
+            ctx.strokeStyle = 'hsla(0, 0%, 80%, 1)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+        if (flashAlpha > 0) {
+            ctx.globalAlpha = flashAlpha * 0.4;
+            const fr = 8;
+            const fg = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, fr);
+            fg.addColorStop(0, 'rgba(255,255,255,0.8)');
+            fg.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = fg;
+            ctx.fillRect(e.x - fr, e.y - fr, fr * 2, fr * 2);
+        }
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
+        return;
     }
+
+    // Dot detonation (gen 1+) — escalating with chain depth
+    const hue = e.dotType === 'gravity' ? 270
+              : e.dotType === 'volatile' ? 15
+              : 195 - (e.y / H) * 180;
+    const genBoost = Math.min(0.5, e.generation * 0.08);
+
+    // Ambient glow
+    const ambR = r * (2.5 + genBoost);
+    ctx.globalAlpha = alpha * (0.12 + genBoost * 0.15);
+    const ag = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, ambR);
+    ag.addColorStop(0, `hsla(${hue + 10}, 60%, 70%, 1)`);
+    ag.addColorStop(0.5, `hsla(${hue}, 50%, 50%, 0.3)`);
+    ag.addColorStop(1, `hsla(${hue}, 50%, 40%, 0)`);
+    ctx.fillStyle = ag;
+    ctx.fillRect(e.x - ambR, e.y - ambR, ambR * 2, ambR * 2);
+
+    // Flash
+    if (flashAlpha > 0) {
+        ctx.globalAlpha = flashAlpha * (0.7 + genBoost);
+        const fr = r * 0.6 * (1 + (1 - flashAlpha) * 0.8);
+        const fg = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, fr);
+        fg.addColorStop(0, '#ffffffee');
+        fg.addColorStop(0.5, 'hsla(50, 100%, 90%, 0.5)');
+        fg.addColorStop(1, 'hsla(50, 100%, 80%, 0)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(e.x - fr, e.y - fr, fr * 2, fr * 2);
+    }
+
+    // Shockwave (scales with chain depth)
+    const swScale = 1.6 + Math.min(1.0, e.generation * 0.15);
+    const shockR = Math.min(e.maxRadius * swScale, age * 0.8);
+    if (age < 400 && shockR > 0) {
+        ctx.globalAlpha = (0.45 + genBoost * 0.3) * (1 - age / 400);
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, Math.max(0.1, shockR), 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${hue}, 70%, 85%, 1)`;
+        ctx.lineWidth = 2.5 + genBoost * 2;
+        ctx.stroke();
+    }
+
+    // Core
+    ctx.globalAlpha = alpha * (0.75 + genBoost * 0.2);
+    const cg = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+    cg.addColorStop(0, 'hsla(45, 100%, 95%, 0.9)');
+    cg.addColorStop(0.15, 'hsla(40, 95%, 80%, 0.6)');
+    cg.addColorStop(0.4, `hsla(${hue + 15}, 80%, 65%, 0.3)`);
+    cg.addColorStop(0.7, `hsla(${hue}, 70%, 55%, 0.1)`);
+    cg.addColorStop(1, `hsla(${hue}, 60%, 45%, 0)`);
+    ctx.fillStyle = cg;
+    ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+
+    // Edge ring
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, Math.max(0.1, r), 0, Math.PI * 2);
+    ctx.strokeStyle = `hsla(30, 95%, 65%, ${alpha})`;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Inner core
+    ctx.globalAlpha = alpha * 0.8;
+    const cr = r * 0.2;
+    const ig = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, cr);
+    ig.addColorStop(0, 'hsla(50, 100%, 97%, 1)');
+    ig.addColorStop(1, 'hsla(45, 90%, 80%, 0)');
+    ctx.fillStyle = ig;
+    ctx.fillRect(e.x - cr, e.y - cr, cr * 2, cr * 2);
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
 }
 
 // =====================================================================
 // CONNECTIONS — soft auras + lines between chainable dots
 // =====================================================================
-function drawConnections(ctx, gameState) {
+function drawConnections(ctx, gameDots, gameState) {
     if (gameState !== 'playing' && gameState !== 'resolving') return;
     const now = performance.now();
     const pulse = Math.sin(now * 0.003) * 0.12 + 0.88;
     const r = explosionRadius;
 
-    for (let i = 0; i < dots.length; i++) {
-        if (dots[i].active) dots[i]._neighbors = 0;
+    for (let i = 0; i < gameDots.length; i++) {
+        if (gameDots[i].active) {
+            ensureDotRenderState(gameDots[i]);
+            gameDots[i]._neighbors = 0;
+        }
     }
     const pairs = [];
-    for (let i = 0; i < dots.length; i++) {
-        const a = dots[i];
+    for (let i = 0; i < gameDots.length; i++) {
+        const a = gameDots[i];
         if (!a.active) continue;
-        for (let j = i + 1; j < dots.length; j++) {
-            const b = dots[j];
+        for (let j = i + 1; j < gameDots.length; j++) {
+            const b = gameDots[j];
             if (!b.active) continue;
             const dist = Math.hypot(a.x - b.x, a.y - b.y);
             if (dist <= r) {
@@ -918,13 +690,14 @@ function drawConnections(ctx, gameState) {
     ctx.globalCompositeOperation = 'lighter';
 
     // Soft gradient auras around every active dot
-    for (const d of dots) {
+    for (const d of gameDots) {
         if (!d.active) continue;
-        const hue = d.getHue();
+        ensureDotRenderState(d);
+        const hue = getDotHue(d);
         const n = d._neighbors;
         const auraAlpha = (n > 0
             ? 0.06 + Math.min(0.14, n * 0.04)
-            : 0.025) * pulse * d.alpha;
+            : 0.025) * pulse * d._alpha;
 
         ctx.globalAlpha = auraAlpha;
         const ag = ctx.createRadialGradient(d.x, d.y, DOT_GLOW_SIZE, d.x, d.y, r);
@@ -941,15 +714,15 @@ function drawConnections(ctx, gameState) {
     for (let k = 0; k < pairs.length; k += 3) {
         const a = pairs[k], b = pairs[k+1], dist = pairs[k+2];
         const proximity = 1 - dist / r;
-        const hue = (a.getHue() + b.getHue()) / 2;
-        const alpha = proximity * 0.40 * pulse;
+        const hue = (getDotHue(a) + getDotHue(b)) / 2;
+        const al = proximity * 0.40 * pulse;
 
-        ctx.globalAlpha = alpha * 0.4;
+        ctx.globalAlpha = al * 0.4;
         ctx.strokeStyle = `hsla(${hue}, 50%, 65%, 1)`;
         ctx.lineWidth = 6;
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
 
-        ctx.globalAlpha = alpha;
+        ctx.globalAlpha = al;
         ctx.strokeStyle = `hsla(${hue}, 40%, 88%, 1)`;
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
@@ -960,113 +733,64 @@ function drawConnections(ctx, gameState) {
 }
 
 // =====================================================================
-// CORE SIMULATION — detonation + cascade
+// EVENT PROCESSING — Convert game-core events to visual effects.
+// Called by host page after game.step(), before draining game.events.
 // =====================================================================
-// Callback for audio — set by host page. Null in replay.
-let onDetonateAudio = null;
-// Callback for replay recording — set by host page. Null in replay.
-let onDetonateRecord = null;
 
-function detonateDot(dot, dotIndex, generation, parentX, parentY) {
-    dot.active = false;
-    dot.bloomTimer = 12;
-    chainCount++;
+function engineProcessEvents(events, game) {
+    for (const ev of events) {
+        switch (ev.type) {
+            case 'dotCaught':
+                emitParticles(ev.x, ev.y, ev.hue, ev.generation);
+                spawnFloatingText(ev.x, ev.y - 15, `+${ev.points}`, ev.hue);
+                if (ev.parentX !== undefined) {
+                    spawnChainLine(ev.parentX, ev.parentY, ev.x, ev.y);
+                }
+                shakeTrauma = Math.min(1.0, shakeTrauma + SHAKE_TRAUMA_PER_DOT);
+                bgPulse = Math.min(0.3, bgPulse + 0.03);
+                // Extra particles when chain clears 20%+ of the field
+                if (game.totalDots > 0 && ev.chainCount / game.totalDots >= 0.20) {
+                    emitParticles(ev.x, ev.y, ev.hue + 20, Math.max(0, ev.generation - 2));
+                }
+                // Fever intensity
+                if (game.totalDots > 0) {
+                    const feverPct = ev.chainCount / game.totalDots;
+                    if (feverPct >= 0.45) feverIntensity = Math.min(1.0, feverIntensity + 0.15);
+                    else if (feverPct >= 0.25) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
+                    else if (feverPct >= 0.12) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
+                }
+                break;
 
-    const newMult = getMultiplier(chainCount);
-    if (newMult > currentMultiplier) {
-        currentMultiplier = newMult;
-        multiplierPulse = 1.0;
-        spawnFloatingText(W/2, H * 0.25, `x${newMult}!`, 50);
-    }
+            case 'multiplierUp':
+                multiplierPulse = 1.0;
+                spawnFloatingText(W/2, H * 0.25, `x${ev.mult}!`, 50);
+                break;
 
-    const basePoints = 10 * (generation + 1);
-    const points = basePoints * currentMultiplier;
-    score += points;
-
-    if (onDetonateAudio) onDetonateAudio(chainCount, generation);
-
-    spawnFloatingText(dot.x, dot.y - 15, `+${points}`, dot.getHue());
-    emitParticles(dot.x, dot.y, dot.getHue(), generation);
-    // Extra particles when chain clears 20%+ of the field
-    if (roundTotalDots > 0 && chainCount / roundTotalDots >= 0.20) {
-        emitParticles(dot.x, dot.y, dot.getHue() + 20, Math.max(0, generation - 2));
-    }
-
-    if (parentX !== undefined && parentY !== undefined) {
-        spawnChainLine(parentX, parentY, dot.x, dot.y);
-    }
-
-    shakeTrauma = Math.min(1.0, shakeTrauma + SHAKE_TRAUMA_PER_DOT);
-    bgPulse = Math.min(0.3, bgPulse + 0.03);
-
-    // Fever intensity scales with percentage of field cleared, not absolute count
-    const feverPct = roundTotalDots > 0 ? chainCount / roundTotalDots : 0;
-    if (feverPct >= 0.45) feverIntensity = Math.min(1.0, feverIntensity + 0.15);
-    else if (feverPct >= 0.25) feverIntensity = Math.min(0.6, feverIntensity + 0.1);
-    else if (feverPct >= 0.12) feverIntensity = Math.min(0.3, feverIntensity + 0.05);
-
-    // Celebrations fire when chain crosses a percentage of the round's total dots.
-    // This gates celebrations on relative performance, not absolute chain length.
-    const clearPct = roundTotalDots > 0 ? chainCount / roundTotalDots : 0;
-    for (const cel of CELEBRATIONS) {
-        const threshold = Math.ceil(cel.pct * roundTotalDots);
-        if (chainCount >= threshold && lastCelebration < threshold && roundTotalDots > 0) {
-            lastCelebration = threshold;
-            spawnCelebration(cel.text, cel.hue, cel.size);
-            if (onDetonateAudio) onDetonateAudio('celebration', CELEBRATIONS.indexOf(cel));
-            break;
+            case 'celebration':
+                spawnCelebration(ev.text, ev.hue, ev.scale);
+                break;
         }
+        // Other event types (chainEnd, overflow, roundDone) are handled by game.js
     }
-
-    const jitter = (Math.random() - 0.5) * 2 * CASCADE_JITTER_MS;
-    const delay = CASCADE_STAGGER_MS + jitter;
-    pendingExplosions.push({
-        x: dot.x, y: dot.y,
-        generation: generation + 1,
-        time: performance.now() + delay,
-        parentX: dot.x, parentY: dot.y,
-        dotType: dot.type,
-        jitter,
-    });
-}
-
-function handleDotCaught(dot, dotIndex, generation, expX, expY) {
-    if (scheduledDetonations.has(dotIndex)) return;
-    scheduledDetonations.add(dotIndex);
-    detonateDot(dot, dotIndex, generation, expX, expY);
 }
 
 // =====================================================================
-// SHARED UPDATE HELPERS
+// VISUAL UPDATE — Tick all visual systems. No physics.
 // =====================================================================
-function engineUpdatePhysics() {
+
+function engineUpdateVisuals(game) {
+    // Sync explosion radius from game
+    explosionRadius = game.explosionRadius;
+
     updateAmbient();
     updateFloatingTexts();
     updateChainLines();
     particles.update();
 
-    // Dot neighbor count (for connectivity glow)
-    for (const d of dots) {
-        if (!d.active) continue;
-        d._neighbors = 0;
-        for (const o of dots) {
-            if (o === d || !o.active) continue;
-            if (Math.hypot(d.x - o.x, d.y - o.y) <= explosionRadius * 2) d._neighbors++;
-        }
+    // Update dot visual state
+    for (const d of game.dots) {
+        updateDotVisuals(d);
     }
-
-    // Process pending explosions
-    const now = performance.now();
-    for (let i = pendingExplosions.length - 1; i >= 0; i--) {
-        if (now >= pendingExplosions[i].time) {
-            const p = pendingExplosions[i];
-            explosions.push(new Explosion(p.x, p.y, p.generation, explosionRadius, handleDotCaught, p.parentX, p.parentY, p.dotType));
-            pendingExplosions.splice(i, 1);
-        }
-    }
-
-    for (const d of dots) d.update();
-    explosions = explosions.filter(e => e.update(now));
 
     // Screen shake
     if (shakeEnabled && shakeTrauma > 0.001) {
@@ -1082,8 +806,11 @@ function engineUpdatePhysics() {
     if (beatPulse > 0.001) beatPulse *= 0.86; else beatPulse = 0;
 }
 
-// Shared background + scene draw (everything except HUD)
-function engineDrawScene(ctx, gameState, supernovaActive) {
+// =====================================================================
+// SCENE RENDERING — background + composite draw
+// =====================================================================
+
+function engineDrawScene(ctx, game, gameState, supernovaActive) {
     const bgR = bgOverride ? bgOverride[0] : 2;
     const bgG = bgOverride ? bgOverride[1] : 2;
     const bgB = bgOverride ? bgOverride[2] : 16;
@@ -1144,107 +871,23 @@ function engineDrawScene(ctx, gameState, supernovaActive) {
     ctx.save();
     ctx.translate(shakeX, shakeY);
 
-    drawConnections(ctx, gameState);
+    drawConnections(ctx, game.dots, gameState);
     drawChainLines(ctx);
-    for (const e of explosions) e.draw(ctx);
+    for (const e of game.explosions) drawExplosion(ctx, e);
     particles.draw(ctx);
-    for (const d of dots) d.draw(ctx);
+    for (const d of game.dots) drawDot(ctx, d);
     drawFloatingTexts(ctx);
 
     ctx.restore();
 }
 
 // =====================================================================
-// CONTINUOUS PLAY (shared engine support)
+// VISUAL RESET — Clear visual state between rounds/games
 // =====================================================================
-
-// Calibrated via calibrate-continuous.js (600s sessions, 5 seeds, binary search).
-// Browser rates set ~5-10% below bot survival threshold so a skilled human can maintain.
-// Calibrated with chain-resolving 2-ply oracle (not simple greedy).
-// Browser rates set at ~90% of oracle survival threshold.
-const CONTINUOUS_TIERS = {
-    CALM:          { spawnRate: 0.65, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
-    FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
-    SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
-    TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
-    IMPOSSIBLE:    { spawnRate: 2.20, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8 },
-};
-
-/** Pick dot type from weights (e.g. {standard:0.7, gravity:0.2, volatile:0.1}) */
-function pickWeightedType(typeWeights) {
-    const r = Math.random();
-    let sum = 0;
-    for (const [type, weight] of Object.entries(typeWeights)) {
-        sum += weight;
-        if (r <= sum) return type;
-    }
-    return 'standard';
-}
-
-/** Spawn a single dot at a random screen edge with inward velocity. Returns the Dot. */
-function spawnEdgeDot(tier) {
-    const type = pickWeightedType(tier.dotTypes);
-    const typeDef = DOT_TYPES[type] || DOT_TYPES.standard;
-    const speed = (tier.speedMin + Math.random() * (tier.speedMax - tier.speedMin)) * typeDef.speedMult;
-
-    // Pick random edge: 0=top, 1=right, 2=bottom, 3=left
-    const edge = Math.floor(Math.random() * 4);
-    const spread = Math.PI * 0.4; // ±0.4 rad from inward normal
-    let x, y, vx, vy;
-
-    switch (edge) {
-        case 0: // top edge
-            x = SCREEN_MARGIN + Math.random() * (W - SCREEN_MARGIN * 2);
-            y = SCREEN_MARGIN;
-            { const a = Math.PI / 2 + (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
-            break;
-        case 1: // right edge
-            x = W - SCREEN_MARGIN;
-            y = SCREEN_MARGIN + Math.random() * (H - SCREEN_MARGIN * 2);
-            { const a = Math.PI + (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
-            break;
-        case 2: // bottom edge
-            x = SCREEN_MARGIN + Math.random() * (W - SCREEN_MARGIN * 2);
-            y = H - SCREEN_MARGIN;
-            { const a = -Math.PI / 2 + (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
-            break;
-        default: // left edge
-            x = SCREEN_MARGIN;
-            y = SCREEN_MARGIN + Math.random() * (H - SCREEN_MARGIN * 2);
-            { const a = (Math.random() - 0.5) * spread; vx = Math.cos(a) * speed; vy = Math.sin(a) * speed; }
-            break;
-    }
-
-    const dot = new Dot(x, y, vx, vy, type);
-    dots.push(dot);
-    return dot;
-}
-
-/** Count currently active (non-detonated) dots */
-function countActiveDots() {
-    let c = 0;
-    for (const d of dots) if (d.active) c++;
-    return c;
-}
-
-/** Current density as fraction of tier's maxDots */
-function getDensity(tier) {
-    return countActiveDots() / tier.maxDots;
-}
-
-// Reset round state (shared between game and replay)
-function engineResetRound() {
-    explosions = [];
-    scheduledDetonations = new Set();
-    pendingExplosions = [];
+function engineResetVisuals() {
     chainLines = [];
     floatingTexts = [];
     particles.clear();
-    chainCount = 0;
-    score = 0;
-    currentMultiplier = 1;
     multiplierPulse = 0;
     feverIntensity = 0;
-    lastCelebration = -1;
-    // roundTotalDots is NOT reset here — it's set by host page after generateDots()
 }
