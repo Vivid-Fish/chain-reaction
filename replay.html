@@ -74,21 +74,15 @@
     // =====================================================================
     function resize() {
         if (isContinuous && replayData) {
-            // Fixed viewport matching the replay — CSS scales to screen
+            // Fixed viewport matching the replay — uniform CSS scale to fit screen
             const vp = replayData.viewport;
             const dpr = window.devicePixelRatio || 1;
             canvas.width = vp.w * dpr;
             canvas.height = vp.h * dpr;
-            // Fill viewport maintaining aspect ratio
-            const screenAR = window.innerWidth / window.innerHeight;
-            const replayAR = vp.w / vp.h;
-            if (screenAR > replayAR) {
-                canvas.style.height = '100vh';
-                canvas.style.width = `${window.innerHeight * replayAR}px`;
-            } else {
-                canvas.style.width = '100vw';
-                canvas.style.height = `${window.innerWidth / replayAR}px`;
-            }
+            // Single scale factor → circles stay circles
+            const scale = Math.min(window.innerWidth / vp.w, window.innerHeight / vp.h);
+            canvas.style.width = Math.floor(vp.w * scale) + 'px';
+            canvas.style.height = Math.floor(vp.h * scale) + 'px';
             W = vp.w;
             H = vp.h;
             refDim = Math.min(W, H, 800);
