@@ -243,6 +243,28 @@ async function handleDeleteSession(res, sessionId) {
     json(res, { ok: true });
 }
 
+// Client error log (last 50, in-memory)
+const clientErrors = [];
+
+async function handlePostError(req, res) {
+    const body = await readBody(req);
+    const entry = {
+        time: new Date().toISOString(),
+        message: String(body.message || '').slice(0, 500),
+        stack: String(body.stack || '').slice(0, 2000),
+        state: body.state || {},
+        ua: (req.headers['user-agent'] || '').slice(0, 200),
+    };
+    clientErrors.push(entry);
+    if (clientErrors.length > 50) clientErrors.shift();
+    console.error('CLIENT ERROR:', entry.message, entry.state);
+    json(res, { ok: true });
+}
+
+function handleGetErrors(req, res) {
+    json(res, clientErrors);
+}
+
 // Router
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -258,6 +280,12 @@ const server = http.createServer(async (req, res) => {
 
     try {
         // API routes
+        if (req.method === 'POST' && pathname === '/api/error') {
+            return await handlePostError(req, res);
+        }
+        if (req.method === 'GET' && pathname === '/api/errors') {
+            return handleGetErrors(req, res);
+        }
         if (req.method === 'POST' && pathname === '/api/session') {
             return await handlePostSession(req, res);
         }

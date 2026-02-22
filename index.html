@@ -1059,16 +1059,15 @@
             return;
         }
 
-        // Continuous mode: tap on summary → restart or go to start
-        if (continuousActive && (gameState === 'overflow' || gameState === 'summary')) {
-            continuousActive = false;
-            overflowTriggered = false;
-            bgOverride = null;
-            stopAllEpochAudio();
-            gameState = 'start';
-            dots = [];
-            generateDots(10, 0.5, 1.0);
+        // Continuous mode: during bloom animation, ignore taps
+        if (continuousActive && gameState === 'overflow' && overflowBloomPhase !== 'summary') {
             return;
+        }
+
+        // Continuous summary: handle button hits
+        if (continuousActive && overflowBloomPhase === 'summary') {
+            if (handleButtonHit(x, y)) return;
+            return; // ignore taps that don't hit buttons
         }
 
         if (gameState === 'gameover') {
@@ -1670,13 +1669,15 @@
         ctx.fillStyle = 'rgba(255,255,255,0.35)';
         ctx.fillText(`${mins}:${secs.toString().padStart(2, '0')}`, W / 2, 50 * s);
 
-        // Difficulty label (top right, subtle)
+        // Quit button (top right) — tap to return to menu
         ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
         ctx.font = `200 ${10 * s | 0}px Inter, system-ui, sans-serif`;
-        ctx.letterSpacing = '2px';
-        ctx.fillStyle = 'rgba(255,255,255,0.15)';
-        ctx.fillText(TIER_LABELS[selectedTier], W - 12 * s, 16 * s);
-        ctx.letterSpacing = '0px';
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        const quitLabel = '\u2715 ' + TIER_LABELS[selectedTier];
+        ctx.fillText(quitLabel, W - 12 * s, 16 * s);
+        const qw = ctx.measureText(quitLabel).width + 16 * s;
+        uiButtons.push({ id: 'quit_continuous', x: W - 12 * s - qw, y: 8 * s, w: qw + 12 * s, h: 24 * s });
 
         // Pressure bar (left side, vertical) — shows how full the field is
         if (currentTier) {
@@ -1861,10 +1862,11 @@
         }
 
         if (t > 0.7) {
-            const a = 0.2 + 0.15 * Math.sin(performance.now() * 0.003);
-            ctx.font = `400 ${13 * s | 0}px Inter, system-ui, sans-serif`;
-            ctx.fillStyle = `rgba(255,255,255,${a + 0.1})`;
-            ctx.fillText('Tap to continue', W / 2, H * 0.82);
+            const btnY = H * 0.82;
+            const playRect = drawPill(ctx, W / 2 - 60 * s, btnY, 'Play Again', true, 200);
+            uiButtons.push({ id: 'cont_play_again', ...playRect });
+            const menuRect = drawPill(ctx, W / 2 + 60 * s, btnY, 'Menu', false, 0);
+            uiButtons.push({ id: 'cont_menu', ...menuRect });
         }
     }
 
@@ -1969,22 +1971,43 @@
         return { x: bestX, y: bestY, count: bestCount };
     }
 
+    // Bot behavior per tier: { scanInterval, reactionDelay, jitter }
+    const BOT_PROFILES = {
+        CALM:          { scanInterval: 800,  reactionDelay: 1200, jitter: 40 }, // slow, imprecise
+        FLOW:          { scanInterval: 400,  reactionDelay: 600,  jitter: 20 }, // moderate
+        SURGE:         { scanInterval: 200,  reactionDelay: 300,  jitter: 10 }, // fast, precise
+        TRANSCENDENCE: { scanInterval: 100,  reactionDelay: 150,  jitter: 5 },  // near-perfect
+    };
+
     function updateBot(now) {
         if (!spectatorMode) return;
         if (gameState === 'start') { handleTap(W / 2, H / 2); return; }
         if (gameState === 'gameover' && gameOverTimer > 0.8) { handleTap(W / 2, H / 2); return; }
+        if (continuousActive && overflowBloomPhase === 'summary') { handleTap(W / 2, H / 2); return; }
         if (gameState !== 'playing') return;
 
-        if (!botTarget && now - botLastScan > botScanInterval) {
+        // In continuous mode, respect tap cooldown
+        if (continuousActive && currentTier) {
+            const cooldownElapsed = now - lastTapTime;
+            if (cooldownElapsed < currentTier.cooldown) return;
+        }
+
+        // Use tier-specific bot profile in continuous mode
+        const profile = (continuousActive && selectedTier) ? (BOT_PROFILES[selectedTier] || BOT_PROFILES.FLOW) : null;
+        const scanInt = profile ? profile.scanInterval : botScanInterval;
+        const reactDelay = profile ? profile.reactionDelay : botReactionDelay;
+        const jitter = profile ? profile.jitter : 20;
+
+        if (!botTarget && now - botLastScan > scanInt) {
             botLastScan = now;
             const best = botFindBestTap();
             if (best.count >= 1) {
                 botTarget = {
-                    x: best.x + (Math.random() - 0.5) * 20,
-                    y: best.y + (Math.random() - 0.5) * 20,
+                    x: best.x + (Math.random() - 0.5) * jitter,
+                    y: best.y + (Math.random() - 0.5) * jitter,
                     count: best.count,
                 };
-                botThinkTimer = botReactionDelay + Math.random() * 200;
+                botThinkTimer = reactDelay + Math.random() * (reactDelay * 0.3);
             }
         }
 
@@ -1993,7 +2016,7 @@
             if (botThinkTimer <= 0) {
                 const fresh = botFindBestTap();
                 if (fresh.count >= 1) {
-                    handleTap(fresh.x + (Math.random() - 0.5) * 10, fresh.y + (Math.random() - 0.5) * 10);
+                    handleTap(fresh.x + (Math.random() - 0.5) * (jitter * 0.5), fresh.y + (Math.random() - 0.5) * (jitter * 0.5));
                 }
                 botTarget = null;
                 botLastScan = now;
@@ -2065,6 +2088,24 @@
     // =====================================================================
     // GAME LOOP
     // =====================================================================
+    let _lastErrorTime = 0;
+    function _reportError(e) {
+        const now = Date.now();
+        if (now - _lastErrorTime < 5000) return; // throttle to 1 per 5s
+        _lastErrorTime = now;
+        console.error('Game loop error:', e);
+        fetch('/api/error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: e.message,
+                stack: e.stack,
+                state: { gameState, gameMode, continuousActive, overflowTriggered, overflowBloomPhase, selectedTier },
+            }),
+            keepalive: true,
+        }).catch(() => {});
+    }
+
     function loop() {
         try {
             const now = performance.now();
@@ -2074,7 +2115,7 @@
             draw();
             drawBotOverlay();
         } catch (e) {
-            console.error('Game loop error:', e);
+            _reportError(e);
         }
         requestAnimationFrame(loop);
     }
@@ -2351,6 +2392,25 @@
             return true;
         }
 
+        if (hit === 'cont_play_again') {
+            overflowTriggered = false;
+            overflowBloomPhase = null;
+            bgOverride = null;
+            stopAllEpochAudio();
+            startContinuous();
+            return true;
+        }
+        if (hit === 'cont_menu' || hit === 'quit_continuous') {
+            continuousActive = false;
+            overflowTriggered = false;
+            overflowBloomPhase = null;
+            bgOverride = null;
+            stopAllEpochAudio();
+            gameState = 'start';
+            dots = [];
+            generateDots(10, 0.5, 1.0);
+            return true;
+        }
         if (hit === 'watch') {
             spectatorMode = !spectatorMode;
             if (spectatorMode) { botTarget = null; botLastScan = 0; }
