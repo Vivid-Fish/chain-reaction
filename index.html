@@ -105,6 +105,9 @@
     // Shape: { enabled, target, thinkTimer, scanInterval, lastScan, reactionDelay }
     const urlParams = new URLSearchParams(window.location.search);
     let spectatorMode = urlParams.has('watch');
+    let botSkillLevel = null; // null = match tier, or 'CALM'|'FLOW'|'SURGE'|'TRANSCENDENCE'
+    const BOT_SKILL_NAMES = { CALM: 'Dumb', FLOW: 'Average', SURGE: 'Good', TRANSCENDENCE: 'Pro' };
+    const BOT_SKILL_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE'];
     let botTarget = null;
     let botThinkTimer = 0;
     let botScanInterval = 400;
@@ -1558,8 +1561,16 @@
 
         // Bottom buttons
         const btnY = H - 50 * s;
-        const watchRect = drawPill(ctx, cx, btnY, spectatorMode ? 'Bot: ON' : 'Watch Bot', spectatorMode, 55);
-        uiButtons.push({ id: 'watch', ...watchRect });
+        if (spectatorMode) {
+            const watchRect = drawPill(ctx, cx - 60 * s, btnY, 'Bot: ON', true, 42);
+            uiButtons.push({ id: 'watch', ...watchRect });
+            const skillName = botSkillLevel ? BOT_SKILL_NAMES[botSkillLevel] : 'Auto';
+            const skillRect = drawPill(ctx, cx + 60 * s, btnY, `Skill: ${skillName}`, false, 55);
+            uiButtons.push({ id: 'bot_skill', ...skillRect });
+        } else {
+            const watchRect = drawPill(ctx, cx, btnY, 'Watch Bot', false, 55);
+            uiButtons.push({ id: 'watch', ...watchRect });
+        }
     }
 
     function drawContinuousStartPage(offsetX) {
@@ -1649,8 +1660,17 @@
 
         // Bottom buttons
         const btnY = H - 50 * s;
-        const watchRect = drawPill(ctx, cx, btnY, spectatorMode ? 'Bot: ON' : 'Watch Bot', spectatorMode, 55);
-        uiButtons.push({ id: 'watch', ...watchRect });
+        if (spectatorMode) {
+            // Two pills: Bot toggle + Skill selector
+            const watchRect = drawPill(ctx, cx - 60 * s, btnY, 'Bot: ON', true, 42);
+            uiButtons.push({ id: 'watch', ...watchRect });
+            const skillName = botSkillLevel ? BOT_SKILL_NAMES[botSkillLevel] : 'Auto';
+            const skillRect = drawPill(ctx, cx + 60 * s, btnY, `Skill: ${skillName}`, false, 55);
+            uiButtons.push({ id: 'bot_skill', ...skillRect });
+        } else {
+            const watchRect = drawPill(ctx, cx, btnY, 'Watch Bot', false, 55);
+            uiButtons.push({ id: 'watch', ...watchRect });
+        }
     }
 
     function drawContinuousHUD(s) {
@@ -1992,8 +2012,9 @@
             if (cooldownElapsed < currentTier.cooldown) return;
         }
 
-        // Use tier-specific bot profile in continuous mode
-        const profile = (continuousActive && selectedTier) ? (BOT_PROFILES[selectedTier] || BOT_PROFILES.FLOW) : null;
+        // Use bot skill level if set, otherwise match tier in continuous mode
+        const skillKey = botSkillLevel || (continuousActive ? selectedTier : null);
+        const profile = skillKey ? (BOT_PROFILES[skillKey] || BOT_PROFILES.FLOW) : null;
         const scanInt = profile ? profile.scanInterval : botScanInterval;
         const reactDelay = profile ? profile.reactionDelay : botReactionDelay;
         const jitter = profile ? profile.jitter : 20;
@@ -2414,6 +2435,16 @@
         if (hit === 'watch') {
             spectatorMode = !spectatorMode;
             if (spectatorMode) { botTarget = null; botLastScan = 0; }
+            return true;
+        }
+        if (hit === 'bot_skill') {
+            // Cycle: Auto → Dumb → Average → Good → Pro → Auto
+            if (!botSkillLevel) {
+                botSkillLevel = BOT_SKILL_ORDER[0]; // Dumb
+            } else {
+                const idx = BOT_SKILL_ORDER.indexOf(botSkillLevel);
+                botSkillLevel = idx < BOT_SKILL_ORDER.length - 1 ? BOT_SKILL_ORDER[idx + 1] : null;
+            }
             return true;
         }
         if (hit === 'replay') { downloadReplay(); return true; }
