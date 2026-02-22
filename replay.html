@@ -27,6 +27,9 @@
 
     // =========================================================================
     // CHAIN REACTION — Replay Viewer (uses game-core.js + engine.js)
+    //
+    // Supports both round-based and continuous replays.
+    // Load via: ?file=replay.json (static file) or /replay/{sessionId} (API)
     // =========================================================================
 
     const canvas = document.getElementById('game');
@@ -48,14 +51,15 @@
     let totalRounds = 0;
     let totalScore = 0;
     let replayGameState = 'waiting'; // waiting, playing, resolving, ended
+    let isContinuous = false;
 
     let loading = true;
     let errorMsg = null;
 
     let uiButtons = [];
 
-    // Game instance for physics
-    const game = new Game(400, 700, {}, Math.random);
+    // Game instance for physics — replaced on replay load for continuous mode
+    let game = new Game(400, 700, {}, Math.random);
 
     // =====================================================================
     // RESIZE
@@ -85,7 +89,6 @@
             replayGameState = 'playing';
         } else if (ev.type === 'tap') {
             game.tap(ev.data.x, ev.data.y);
-            spawnFloatingText(ev.data.x, ev.data.y + 20, 'TAP', 200);
             replayGameState = 'resolving';
         } else if (ev.type === 'clear') {
             totalScore += game.score;
@@ -116,6 +119,12 @@
         // Track resolving → done transition
         if (replayGameState === 'resolving' && game.gameState !== 'resolving') {
             replayGameState = 'playing';
+        }
+
+        // Continuous: check overflow
+        if (isContinuous && game.overflowed && replayGameState !== 'ended') {
+            replayGameState = 'ended';
+            spawnCelebration('OVERFLOW', 0, 1.6);
         }
     }
 
@@ -156,7 +165,70 @@
     function drawReplayHUD() {
         const s = Math.max(1, Math.min(W, H) / 600);
 
-        if (currentRound > 0) {
+        if (isContinuous) {
+            // Continuous mode HUD
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+
+            const tierNames = { CALM: 'Calm', FLOW: 'Flow', SURGE: 'Surge', TRANSCENDENCE: 'Transcendence', IMPOSSIBLE: 'Impossible' };
+            const tierName = tierNames[replayData.tier] || replayData.tier;
+            ctx.font = `400 ${13 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            ctx.letterSpacing = '2px';
+            ctx.fillText(tierName.toUpperCase(), W/2, 14 * s);
+            ctx.letterSpacing = '0px';
+
+            // Time
+            const secs = Math.floor(replayTime / 1000);
+            const mins = Math.floor(secs / 60);
+            const remSecs = secs % 60;
+            ctx.font = `300 ${38 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillText(`${mins}:${remSecs.toString().padStart(2, '0')}`, W/2, 28 * s);
+
+            // Density bar
+            const density = game.density();
+            if (density > 0) {
+                const barW = 80 * s, barH = 4 * s;
+                const barX = W/2 - barW/2, barY = 72 * s;
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, barH/2); ctx.fill();
+                const fill = Math.min(1, density);
+                const hue = fill < 0.5 ? 200 : fill < 0.7 ? 40 : 0;
+                ctx.fillStyle = `hsla(${hue}, 80%, 60%, 0.5)`;
+                ctx.beginPath(); ctx.roundRect(barX, barY, barW * fill, barH, barH/2); ctx.fill();
+                ctx.font = `300 ${9 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                ctx.fillText(`${(density * 100).toFixed(0)}%`, W/2, barY + barH + 4 * s);
+            }
+
+            // Chain count
+            if (game.chainCount > 0) {
+                ctx.font = `700 ${14 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.save();
+                ctx.shadowColor = 'rgba(255, 200, 60, 0.4)';
+                ctx.shadowBlur = 6;
+                ctx.fillStyle = 'rgba(255, 220, 100, 0.95)';
+                ctx.fillText(`Chain: ${game.chainCount}`, W/2, 92 * s);
+                ctx.restore();
+            }
+
+            // Score
+            if (game.score > 0) {
+                ctx.font = `300 ${11 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                ctx.fillText(`Score: ${game.score.toLocaleString()}`, W/2, 110 * s);
+            }
+
+            // Bot label
+            const botNames = { CALM: 'Dumb', FLOW: 'Average', SURGE: 'Good', TRANSCENDENCE: 'Pro', IMPOSSIBLE: 'Inhuman' };
+            const botName = botNames[replayData.botProfile] || replayData.botProfile;
+            ctx.font = `400 ${9 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255, 255, 100, 0.35)';
+            ctx.textAlign = 'left';
+            ctx.fillText(`BOT: ${botName}`, 10 * s, 14 * s);
+        } else if (currentRound > 0) {
+            // Round mode HUD
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
 
@@ -228,12 +300,16 @@
             }
 
             if (replayData) {
-                const name = replayData.player_name || (replayData.is_bot ? 'Bot' : 'Anonymous');
                 ctx.textAlign = 'right';
                 ctx.textBaseline = 'middle';
                 ctx.font = `300 ${10 * s | 0}px Inter, system-ui, sans-serif`;
                 ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.fillText(`${name} — R${replayData.peak_round}`, W - 12 * s, btnY);
+                if (isContinuous) {
+                    ctx.fillText(`${replayData.tier} · seed ${replayData.seed}`, W - 12 * s, btnY);
+                } else {
+                    const name = replayData.player_name || (replayData.is_bot ? 'Bot' : 'Anonymous');
+                    ctx.fillText(`${name} — R${replayData.peak_round}`, W - 12 * s, btnY);
+                }
             }
         }
     }
@@ -293,29 +369,50 @@
     // LOAD REPLAY
     // =====================================================================
     async function loadReplay() {
-        const pathParts = window.location.pathname.split('/');
-        const sessionId = pathParts[pathParts.length - 1];
-        if (!sessionId) {
-            loading = false;
-            errorMsg = 'No replay ID in URL';
-            return;
-        }
+        const params = new URLSearchParams(window.location.search);
+        const file = params.get('file');
+
         try {
-            const res = await fetch(`/api/replay/${sessionId}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            replayData = await res.json();
-            replayEvents = replayData.events || [];
-            if (replayEvents.length === 0) {
-                loading = false;
-                errorMsg = 'Replay has no events';
-                return;
+            let data;
+            if (file) {
+                // Load from static file: ?file=replays/surge-137.json
+                const res = await fetch(file);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                data = await res.json();
+            } else {
+                // Load from API: /replay/{sessionId}
+                const pathParts = window.location.pathname.split('/');
+                const sessionId = pathParts[pathParts.length - 1];
+                if (!sessionId) { loading = false; errorMsg = 'No replay ID in URL. Use ?file=replay.json'; return; }
+                const res = await fetch(`/api/replay/${sessionId}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                data = await res.json();
             }
 
-            totalDuration = replayEvents[replayEvents.length - 1].t;
-            totalRounds = replayData.peak_round || 0;
+            replayData = data;
+            replayEvents = data.events || [];
+            if (replayEvents.length === 0) { loading = false; errorMsg = 'Replay has no events'; return; }
 
-            const name = replayData.player_name || (replayData.is_bot ? 'Bot' : 'Anonymous');
-            document.title = `Replay — ${name} R${replayData.peak_round}`;
+            // Detect continuous mode
+            isContinuous = data.mode === 'continuous';
+
+            if (isContinuous) {
+                // Deterministic replay: same seed → same spawning
+                const vp = data.viewport || { w: 390, h: 844 };
+                game = new Game(vp.w, vp.h, {}, createRNG(data.seed));
+                game.startContinuous(data.tierConfig);
+                game.W = W;
+                game.H = H;
+                replayGameState = 'playing';
+
+                totalDuration = replayEvents[replayEvents.length - 1].t + 5000; // pad 5s after last tap
+                document.title = `Replay — ${data.tier} · seed ${data.seed}`;
+            } else {
+                totalDuration = replayEvents[replayEvents.length - 1].t;
+                totalRounds = data.peak_round || 0;
+                const name = data.player_name || (data.is_bot ? 'Bot' : 'Anonymous');
+                document.title = `Replay — ${name} R${data.peak_round}`;
+            }
 
             loading = false;
             playing = true;

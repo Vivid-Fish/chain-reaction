@@ -88,12 +88,17 @@ function runContinuous(opts) {
         height = 844,
         config = {},
         seed = 42,
+        replay = false,
     } = opts;
 
-    const rng = createRNG(seed);
+    // Separate RNGs: game spawning is deterministic from seed alone,
+    // independent of bot decisions. Enables replay from seed + taps.
+    const gameRng = createRNG(seed);
+    const botRng = createRNG(seed + 1);
     const merged = { ...CONTINUOUS_DEFAULTS, ...config };
-    const game = new Game(width, height, merged, rng);
-    game.startContinuous(toTierConfig(merged));
+    const game = new Game(width, height, merged, gameRng);
+    const tierConfig = toTierConfig(merged);
+    game.startContinuous(tierConfig);
 
     // Resolve skill key: 'CALM' → use BOT_PROFILES directly,
     // 'random' → find matching profile (or create minimal one)
@@ -107,18 +112,34 @@ function runContinuous(opts) {
         throw new Error(`Unknown bot: ${bot}`);
     }
 
-    const runner = new BotRunner(game, skillKey, rng);
+    const runner = new BotRunner(game, skillKey, botRng);
     const DT = 16.67; // ~60fps
+    const replayEvents = replay ? [] : null;
 
     while (game.time < duration && !game.overflowed) {
         game.step(DT);
         game.events = []; // drain events (headless — no consumer)
 
         const tap = runner.update(DT);
-        if (tap) game.tap(tap.x, tap.y);
+        if (tap) {
+            game.tap(tap.x, tap.y);
+            if (replayEvents) replayEvents.push({ t: game.time, type: 'tap', data: { x: tap.x, y: tap.y } });
+        }
     }
 
-    return game.getStats();
+    const stats = game.getStats();
+    if (replayEvents) {
+        stats.replay = {
+            mode: 'continuous',
+            seed,
+            tier: skillKey,
+            tierConfig,
+            botProfile: skillKey,
+            viewport: { w: width, h: height },
+            events: replayEvents,
+        };
+    }
+    return stats;
 }
 
 // =========================================================================
@@ -139,6 +160,7 @@ if (typeof module !== 'undefined' && module.exports) {
 // =========================================================================
 
 if (require.main === module) {
+    const fs = require('fs');
     const args = process.argv.slice(2);
     const opts = {
         bot: 'greedy',
@@ -147,6 +169,8 @@ if (require.main === module) {
         height: 844,
         seed: 42,
         config: {},
+        replay: false,
+        output: null,
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -154,6 +178,18 @@ if (require.main === module) {
         else if (args[i] === '--time') opts.time = parseInt(args[++i]);
         else if (args[i] === '--seed') opts.seed = parseInt(args[++i]);
         else if (args[i] === '--config') opts.config = JSON.parse(args[++i]);
+        else if (args[i] === '--tier') {
+            const tierName = args[++i];
+            if (CONTINUOUS_TIERS[tierName]) {
+                opts.config = { ...opts.config, ...CONTINUOUS_TIERS[tierName] };
+                if (!args.includes('--bot')) opts.bot = tierName;
+            } else {
+                console.error(`Unknown tier: ${tierName}. Available: ${Object.keys(CONTINUOUS_TIERS).join(', ')}`);
+                process.exit(1);
+            }
+        }
+        else if (args[i] === '--replay') opts.replay = true;
+        else if (args[i] === '--output' || args[i] === '-o') opts.output = args[++i];
         else if (args[i] === '--viewport') {
             const [w, h] = args[++i].split('x').map(Number);
             opts.width = w; opts.height = h;
@@ -196,6 +232,7 @@ if (require.main === module) {
             height: opts.height,
             config: opts.config,
             seed: opts.seed,
+            replay: opts.replay,
         });
 
         console.log(`  Duration: ${(stats.duration / 1000).toFixed(1)}s${stats.overflowed ? ' (OVERFLOW at ' + (stats.overflowTime / 1000).toFixed(1) + 's)' : ''}`);
@@ -203,6 +240,12 @@ if (require.main === module) {
         console.log(`  Chains: ${stats.chainCount} | Avg length: ${stats.avgChainLength.toFixed(1)} | Max: ${stats.maxChainLength}`);
         console.log(`  Score: ${stats.score}`);
         console.log(`  Mean density: ${(stats.meanDensity * 100).toFixed(1)}% | Max: ${(stats.maxDensity * 100).toFixed(1)}%`);
+
+        if (stats.replay) {
+            const file = opts.output || `replay-${opts.bot}-${opts.seed}.json`;
+            fs.writeFileSync(file, JSON.stringify(stats.replay, null, 2));
+            console.log(`  Replay: ${file} (${stats.replay.events.length} events)`);
+        }
     }
 
     console.log(`  Total wall time: ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
