@@ -49,9 +49,8 @@ In any 10-second window, how many "God Moments" exist? Too few = frustrating. To
 | File | Purpose |
 |------|---------|
 | `sim.js` | Headless simulation engine. Seeded PRNG, bot ladder, 6-metric dashboard. |
-| `continuous-sim.js` | Continuous play simulation. Edge spawning, tap cooldown, overflow detection, 4 continuous bots. |
-| `calibrate-continuous.js` | Binary-search calibration per bot for continuous difficulty tiers. |
-| `difficulty-regression.js` | Regression test: 12 tests validating difficulty tier invariants (steady-state + margin + lower-bot). |
+| `continuous-sim.js` | Continuous play simulation. Edge spawning, tap cooldown, overflow detection. |
+| `difficulty-regression.js` | Regression test: 15 tests validating difficulty tier invariants (steady-state + margin + lower-bot). |
 | `sweep.js` | Parallel parameter sweep via worker threads. Tests configs + mechanic variants. |
 | `capture-screenshots.js` | Playwright visual verification (phone + desktop viewports). |
 
@@ -216,11 +215,6 @@ Cascade scaling stops growing after generation 4. Gen-5+ explosions are the same
 
 The cap *improves* DHR (0.347→0.361) because capped explosions don't trivially catch everything — dots still need to drift in. Single problem remaining: R1 trivial (98% clear, 12 dots target 1 — acceptable warm-up).
 
-### Tools Built
-| File | Purpose |
-|------|---------|
-| `progression-test.js` | Tests R1-R15 with greedy bot. Measures per-round clear rate, wipe rate, chain/target ratio, DHR. Flags trivial/wipe/wall rounds. |
-
 ### Lesson
 Don't test one slice of a dynamic system and assume the whole system works. Progression creates runaway positive feedback — must test the full curve. The simulation harness was necessary but insufficient; the progression test is the real validator.
 
@@ -311,11 +305,6 @@ Multi-Tap breaks the ONE-TAP RULE — the fundamental constraint of the game. Th
 - **Audio shift**: Low-pass filter sweep on activation (Tetris Effect pattern). New musical layer during Multi-Tap round. Filter lifts when round ends.
 - **Visual shift**: Color palette shifts (warmer/brighter). Particle density increases. Tap counter shows "2 taps remaining."
 - **After Supernova**: Meter resets. Normal play resumes. The contrast between Supernova and normal makes normal feel tighter and more focused.
-
-### Tools Built
-| File | Purpose |
-|------|---------|
-| `supernova-experiment.js` | Tests 7 Supernova variants at R5/R8/R12. Measures contrast (clear rate delta, wipe rate). Scores variants on dramatic-but-earned scale. |
 
 ## Oracle Bot v4 — Proof of Near-Optimality (2026-02-22)
 

@@ -29,8 +29,8 @@ Tasks organized by epic. Review at session start. Update as you go.
 - Started: 2026-02-21
 - Completed: 2026-02-21
 - Depends: (needs: T-013)
-- Notes: `calibrate-continuous.js` binary-searches spawn rate per bot. 4 tiers calibrated. Key insight: at high maxDots, cascade percolation creates self-regulating equilibrium (any bot survives). TRANSCENDENCE uses low maxDots (60) for tighter overflow threshold. Final: CALM 0.5/s, FLOW 3.2/s, SURGE 5.0/s, TRANSCENDENCE 2.5/s@60cap.
-- Files: `calibrate-continuous.js`
+- Notes: Binary-searched spawn rate per bot. 4 tiers calibrated. Key insight: at high maxDots, cascade percolation creates self-regulating equilibrium (any bot survives). TRANSCENDENCE uses low maxDots (60) for tighter overflow threshold. Final: CALM 0.5/s, FLOW 3.2/s, SURGE 5.0/s, TRANSCENDENCE 2.5/s@60cap.
+- Files: `difficulty-regression.js` (validates tiers), `game-core.js` (CONTINUOUS_TIERS)
 
 ### T-015: Difficulty regression test [x]
 - Priority: P0
@@ -190,14 +190,11 @@ Tasks organized by epic. Review at session start. Update as you go.
 
 | File | Purpose |
 |------|---------|
-| `sim.js` | Headless simulation engine. Seeded PRNG, bot ladder, 6-metric dashboard. |
-| `continuous-sim.js` | Continuous play simulation. Edge spawning, tap cooldown, overflow detection. |
-| `calibrate-continuous.js` | Binary-search calibration per bot for difficulty tiers. |
-| `difficulty-regression.js` | Regression test: steady-state + margin + lower-bot-fails per tier. |
+| `game-core.js` | Single source of truth: physics, bots, BotRunner, constants, tiers. |
+| `sim.js` | Headless round simulation. Metrics, bot ladder, 6-metric dashboard. |
+| `continuous-sim.js` | Headless continuous play simulation. |
+| `difficulty-regression.js` | Regression test: 15 tests (steady-state + margin + lower-bot per tier). |
 | `sweep.js` | Parallel parameter sweep via worker threads. |
-| `progression-test.js` | Round-based R1-R15 progression test. |
-| `supernova-experiment.js` | Tests 7 Supernova variants at R5/R8/R12. |
-| `playtest-v12.js` | Celebration threshold validation. |
 | `capture-screenshots.js` | Playwright visual verification. |
 
 ---
