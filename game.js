@@ -68,7 +68,7 @@ let lastSessionId = null;
 // Mode & tier selection
 let gameMode = localStorage.getItem('cr_game_mode') || 'continuous';
 let selectedTier = localStorage.getItem('cr_continuous_tier') || 'FLOW';
-const TIER_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE', 'IMPOSSIBLE'];
+const TIER_ORDER = Object.keys(CONTINUOUS_TIERS);
 const TIER_LABELS = { CALM: 'Calm', FLOW: 'Flow', SURGE: 'Surge', TRANSCENDENCE: 'Transcendence', IMPOSSIBLE: 'Impossible' };
 const TIER_DESCRIPTIONS = {
     CALM: 'Slow pace. No rush. Learn the feel.',
@@ -238,14 +238,8 @@ function resize() {
     if (game) {
         game.W = W;
         game.H = H;
-        // Recalculate explosion radius
-        const refDim = Math.min(W, H, 800);
-        let radius = Math.max(DEFAULTS.EXPLOSION_RADIUS_MIN_PX, refDim * DEFAULTS.EXPLOSION_RADIUS_PCT);
-        if (!continuousActive && round > 0) {
-            const radiusScale = Math.max(0.85, 1.0 - (round - 1) * 0.01);
-            radius *= radiusScale * (1 + mercyBonus);
-        }
-        game.explosionRadius = radius;
+        game.recalcRadius(!continuousActive && round > 0 ? round : 0);
+        if (!continuousActive && round > 0) game.explosionRadius *= (1 + mercyBonus);
     }
 }
 window.addEventListener('resize', resize);

@@ -2,103 +2,33 @@
 'use strict';
 
 // =========================================================================
-// CHAIN REACTION — Continuous Play Difficulty Regression Test
+// CHAIN REACTION — Difficulty Regression Test
 //
-// Validates the "indefinite play" invariant: each difficulty tier is
-// calibrated so its matched bot survives almost indefinitely while
-// experiencing higher pressure at increased difficulty.
+// Tests the ACTUAL game config from game-core.js — no separate calibrated
+// values. Uses BotRunner (same code as browser + headless sim).
 //
-// 4 tiers × 3 tests each = 12 tests:
-//   1. Steady-state: bot plays 600s, density stays below Dcrit
-//   2. Margin: same bot at 2x spawn rate overflows within 600s
-//   3. Lower-bot-struggles: one-tier-lower bot at tier params has
-//      significantly higher density (or overflows)
+// For each tier, the matched bot (from BOT_PROFILES) should survive
+// indefinitely at the tier's spawn rate (from CONTINUOUS_TIERS).
+//
+// 5 tiers × 3 tests each = 15 tests:
+//   1. Steady-state: matched bot survives, density manageable
+//   2. Margin: 2x spawn rate creates significantly higher pressure
+//   3. Lower-bot-struggles: CALM bot overflows at this tier's rate
 //
 // Usage:
-//   node difficulty-regression.js          # Run all tests
-//   node difficulty-regression.js --fast   # Quick validation (120s, 3 seeds)
-//   node difficulty-regression.js --tier FLOW  # Single tier
+//   node difficulty-regression.js          # Full run (10min, 5 seeds)
+//   node difficulty-regression.js --fast   # Quick (2min, 3 seeds)
+//   node difficulty-regression.js --tier FLOW
 // =========================================================================
 
+const { CONTINUOUS_TIERS, BOT_PROFILES } = require('./game-core.js');
 const { runContinuous } = require('./continuous-sim.js');
-
-// --- Calibrated tier parameters ---
-// From calibrate-continuous.js full run (10min, 5 seeds).
-// Rates set conservatively below calibrated edge for reliable steady-state.
-// IMPORTANT: Re-run calibration after changing sim physics.
-// Calibrated with chain-resolving 2-ply oracle (2026-02-22).
-// Rates are the bot survival thresholds. Browser uses ~90% of these.
-const CALIBRATED_TIERS = {
-    CALM: {
-        bot: 'random',
-        spawnRate: 0.72,
-        speedMin: 0.4, speedMax: 0.8,
-        dotTypes: { standard: 1.0 },
-        tapCooldown: 1500,
-        maxDots: 80,
-        overflowDensity: 0.8,
-    },
-    FLOW: {
-        bot: 'humanSim',
-        spawnRate: 4.0,
-        speedMin: 0.5, speedMax: 1.0,
-        dotTypes: { standard: 0.85, gravity: 0.15 },
-        tapCooldown: 2000,
-        maxDots: 90,
-        overflowDensity: 0.8,
-    },
-    SURGE: {
-        bot: 'greedy',
-        spawnRate: 5.8,
-        speedMin: 0.6, speedMax: 1.2,
-        dotTypes: { standard: 0.70, gravity: 0.20, volatile: 0.10 },
-        tapCooldown: 2500,
-        maxDots: 100,
-        overflowDensity: 0.8,
-    },
-    TRANSCENDENCE: {
-        bot: 'oracle',
-        spawnRate: 3.0,
-        speedMin: 0.7, speedMax: 1.4,
-        dotTypes: { standard: 0.50, gravity: 0.25, volatile: 0.25 },
-        tapCooldown: 2000,
-        maxDots: 60,
-        overflowDensity: 0.8,
-    },
-    IMPOSSIBLE: {
-        bot: 'oracle',
-        spawnRate: 2.2,
-        speedMin: 0.8, speedMax: 1.6,
-        dotTypes: { standard: 0.30, gravity: 0.30, volatile: 0.40 },
-        tapCooldown: 1500,
-        maxDots: 40,
-        overflowDensity: 0.8,
-    },
-};
-
-// Lower bot mapping: which bot struggles at this tier.
-// Adjacent-tier bots are nearly equivalent in continuous mode (humanSim ≈ greedy,
-// greedy ≈ oracle) because tap cooldown negates timing/precision advantages.
-// Use wider gaps to get meaningful differentiation.
-// Lower-bot-struggles test: verify the random bot overflows at each tier's rate.
-// Cascade momentum narrows the gap between adjacent bots, so we use random
-// as the universal baseline — it should overflow at all non-CALM rates.
-const LOWER_BOT = {
-    CALM: null,          // no tier below CALM
-    FLOW: 'random',      // random overflows at humanSim rates
-    SURGE: 'random',     // random overflows at greedy rates
-    TRANSCENDENCE: 'random', // random overflows at oracle rates
-    IMPOSSIBLE: 'random',    // random overflows at oracle rates
-};
 
 // =========================================================================
 // TEST RUNNER
 // =========================================================================
 
-/**
- * Run a test across multiple seeds and return aggregate result.
- */
-function runTest(testName, botName, config, duration, seeds) {
+function runTest(testName, skillKey, tierOverrides, duration, seeds) {
     let survivals = 0;
     let totalMeanDensity = 0;
     let totalMaxDensity = 0;
@@ -108,11 +38,11 @@ function runTest(testName, botName, config, duration, seeds) {
 
     for (const seed of seeds) {
         const stats = runContinuous({
-            bot: botName,
+            bot: skillKey,
             duration,
             width: 390,
             height: 844,
-            config: { ...config, spawnAccel: 0 },
+            config: { ...tierOverrides, spawnAccel: 0 },
             seed,
         });
 
@@ -136,23 +66,20 @@ function runTest(testName, botName, config, duration, seeds) {
     };
 }
 
-/**
- * Run all tests for a tier. Returns array of { test, pass, ... }
- */
 function runTierTests(tierName, tier, opts) {
     const { duration, marginDuration, lowerBotDuration, seeds } = opts;
+    const profile = BOT_PROFILES[tierName];
     const results = [];
 
-    // Test 1: Steady-state — bot survives full duration with manageable density
-    process.stdout.write(`    [1/3] Steady-state (${tier.bot}, ${duration / 1000}s)... `);
+    // Test 1: Steady-state — matched bot survives at tier's actual params
+    process.stdout.write(`    [1/3] Steady-state (${profile.bot}, ${duration / 1000}s)... `);
     const steady = runTest(
         `${tierName}/steady-state`,
-        tier.bot,
+        tierName,
         tier,
         duration,
         seeds
     );
-    // Pass if 60%+ survive AND mean density < 70%
     const steadyPass = steady.survivalRate >= 0.6 && steady.meanDensity < 0.70;
     console.log(
         `${steadyPass ? '\x1b[32mPASS\x1b[0m' : '\x1b[31mFAIL\x1b[0m'}` +
@@ -160,17 +87,16 @@ function runTierTests(tierName, tier, opts) {
     );
     results.push({ ...steady, pass: steadyPass });
 
-    // Test 2: Margin — 2x spawn rate creates significantly higher pressure
+    // Test 2: Margin — 2x spawn rate should overwhelm even the matched bot
     const marginRate = tier.spawnRate * 2;
-    process.stdout.write(`    [2/3] Margin (${tier.bot}, ${marginRate.toFixed(1)}/s, ${marginDuration / 1000}s)... `);
+    process.stdout.write(`    [2/3] Margin (${profile.bot}, ${marginRate.toFixed(1)}/s, ${marginDuration / 1000}s)... `);
     const margin = runTest(
         `${tierName}/margin`,
-        tier.bot,
+        tierName,
         { ...tier, spawnRate: marginRate },
         marginDuration,
         seeds
     );
-    // Pass if: overflows 40%+, OR density > 65%, OR density significantly higher than steady-state
     const densityIncrease = margin.meanDensity - steady.meanDensity;
     const marginPass = margin.survivalRate <= 0.4 || margin.meanDensity > 0.65 || densityIncrease > 0.10;
     console.log(
@@ -180,18 +106,16 @@ function runTierTests(tierName, tier, opts) {
     );
     results.push({ ...margin, pass: marginPass });
 
-    // Test 3: Lower-bot-struggles — weaker bot has higher density or overflows
-    const lowerBot = LOWER_BOT[tierName];
-    if (lowerBot) {
-        process.stdout.write(`    [3/3] Lower-bot-struggles (${lowerBot}, ${lowerBotDuration / 1000}s)... `);
+    // Test 3: Lower-bot-struggles — CALM (random/dumb) bot at this tier's rate
+    if (tierName !== 'CALM') {
+        process.stdout.write(`    [3/3] Lower-bot (CALM at ${tierName}, ${lowerBotDuration / 1000}s)... `);
         const lower = runTest(
-            `${tierName}/lower-bot-struggles`,
-            lowerBot,
+            `${tierName}/lower-bot`,
+            'CALM',
             tier,
             lowerBotDuration,
             seeds
         );
-        // Pass if lower bot overflows 40%+ OR has mean density > matched bot + 0.05
         const densityGap = lower.meanDensity - steady.meanDensity;
         const lowerPass = lower.survivalRate <= 0.6 || densityGap > 0.05;
         console.log(
@@ -201,8 +125,8 @@ function runTierTests(tierName, tier, opts) {
         );
         results.push({ ...lower, pass: lowerPass });
     } else {
-        console.log(`    [3/3] Lower-bot-struggles: SKIP (no tier below ${tierName})`);
-        results.push({ test: `${tierName}/lower-bot-struggles`, pass: true, skipped: true });
+        console.log(`    [3/3] Lower-bot: SKIP (no tier below CALM)`);
+        results.push({ test: `${tierName}/lower-bot`, pass: true, skipped: true });
     }
 
     return results;
@@ -218,30 +142,32 @@ if (require.main === module) {
     const tierFilter = args.includes('--tier') ? args[args.indexOf('--tier') + 1] : null;
 
     const opts = fast ? {
-        duration: 120000,         // 2min steady-state
-        marginDuration: 120000,   // 2min margin
-        lowerBotDuration: 120000, // 2min lower bot
+        duration: 120000,
+        marginDuration: 120000,
+        lowerBotDuration: 120000,
         seeds: [42, 137, 256],
     } : {
-        duration: 600000,         // 10min steady-state
-        marginDuration: 600000,   // 10min margin
-        lowerBotDuration: 300000, // 5min lower bot
+        duration: 600000,
+        marginDuration: 600000,
+        lowerBotDuration: 300000,
         seeds: [42, 137, 256, 314, 999],
     };
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`  CHAIN REACTION — Difficulty Regression Test`);
     console.log(`  Mode: ${fast ? 'FAST (2min, 3 seeds)' : 'FULL (10min, 5 seeds)'}`);
+    console.log(`  Source: game-core.js CONTINUOUS_TIERS + BOT_PROFILES`);
     console.log(`${'='.repeat(60)}\n`);
 
     const t0 = Date.now();
     const allResults = [];
     let totalTests = 0, totalPass = 0;
 
-    for (const [name, tier] of Object.entries(CALIBRATED_TIERS)) {
+    for (const [name, tier] of Object.entries(CONTINUOUS_TIERS)) {
         if (tierFilter && name !== tierFilter) continue;
 
-        console.log(`  ── ${name} (${tier.bot}, ${tier.spawnRate}/s) ──`);
+        const profile = BOT_PROFILES[name];
+        console.log(`  ── ${name} (${profile.bot}, ${tier.spawnRate}/s, ${tier.cooldown}ms cd) ──`);
         const results = runTierTests(name, tier, opts);
         allResults.push(...results);
 
@@ -252,7 +178,6 @@ if (require.main === module) {
         console.log('');
     }
 
-    // Summary
     console.log(`${'═'.repeat(60)}`);
     const allPassed = totalPass === totalTests;
     const color = allPassed ? '\x1b[32m' : '\x1b[31m';

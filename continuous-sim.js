@@ -14,7 +14,7 @@
 //   node continuous-sim.js --tier FLOW             # Run a difficulty tier
 // =========================================================================
 
-const { Game, Bots, DEFAULTS, CONTINUOUS_TIERS, createRNG } = require('./game-core.js');
+const { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, CONTINUOUS_TIERS, createRNG } = require('./game-core.js');
 
 // --- Continuous play defaults (backward-compat re-export) ---
 const CONTINUOUS_DEFAULTS = {
@@ -68,8 +68,11 @@ const ContinuousBots = Bots;
 
 /**
  * Run a continuous simulation with a bot for a specified duration.
+ * Uses BotRunner from game-core.js — identical behavior to browser.
+ *
  * @param {object} opts
- * @param {string} opts.bot - 'random'|'greedy'|'humanSim'|'oracle'
+ * @param {string} opts.bot - Bot name ('random'|'greedy'|'humanSim'|'oracle')
+ *                            OR skill key ('CALM'|'FLOW'|'SURGE'|'TRANSCENDENCE'|'IMPOSSIBLE')
  * @param {number} opts.duration - sim time in ms
  * @param {number} opts.width - viewport width
  * @param {number} opts.height - viewport height
@@ -87,39 +90,32 @@ function runContinuous(opts) {
         seed = 42,
     } = opts;
 
+    const rng = createRNG(seed);
     const merged = { ...CONTINUOUS_DEFAULTS, ...config };
-    const game = new Game(width, height, merged, createRNG(seed));
+    const game = new Game(width, height, merged, rng);
     game.startContinuous(toTierConfig(merged));
 
-    const botFn = Bots[bot];
-    if (!botFn) throw new Error(`Unknown bot: ${bot}`);
+    // Resolve skill key: 'CALM' → use BOT_PROFILES directly,
+    // 'random' → find matching profile (or create minimal one)
+    let skillKey;
+    if (BOT_PROFILES[bot]) {
+        skillKey = bot;
+    } else if (Bots[bot]) {
+        // Legacy: raw bot name → find a profile that uses this bot
+        skillKey = Object.keys(BOT_PROFILES).find(k => BOT_PROFILES[k].bot === bot) || 'FLOW';
+    } else {
+        throw new Error(`Unknown bot: ${bot}`);
+    }
 
+    const runner = new BotRunner(game, skillKey, rng);
     const DT = 16.67; // ~60fps
-    let botWaitUntil = 0;
-    let pendingTap = null;
 
     while (game.time < duration && !game.overflowed) {
         game.step(DT);
         game.events = []; // drain events (headless — no consumer)
 
-        // Bot logic: execute pending tap if wait is over
-        if (pendingTap && game.time >= botWaitUntil) {
-            game.tap(pendingTap.x, pendingTap.y);
-            pendingTap = null;
-        }
-
-        // If no pending tap and not resolving, ask bot for next action
-        if (!pendingTap && game.gameState === 'playing') {
-            const decision = botFn(game);
-            if (decision.action === 'tap') {
-                if (decision.waitMs > 0) {
-                    pendingTap = { x: decision.x, y: decision.y };
-                    botWaitUntil = game.time + decision.waitMs;
-                } else {
-                    game.tap(decision.x, decision.y);
-                }
-            }
-        }
+        const tap = runner.update(DT);
+        if (tap) game.tap(tap.x, tap.y);
     }
 
     return game.getStats();

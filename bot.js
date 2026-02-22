@@ -1,16 +1,14 @@
 'use strict';
 
 // =========================================================================
-// CHAIN REACTION — Spectator Bot
+// CHAIN REACTION — Spectator Bot (Browser IO)
 //
-// Auto-play using game-core Bots. Each skill level maps to a different
-// bot strategy (random, humanSim, greedy) + humanization (delay, jitter).
+// Thin wrapper: creates a BotRunner from game-core.js and feeds taps
+// to handleTap(). The bot logic itself is 100% shared with headless sim.
 //
-// CRITICAL FIX: Previously all skill levels used the same greedy grid
-// search — "Dumb" bot survived IMPOSSIBLE indefinitely. Now CALM→random,
-// FLOW→humanSim, SURGE+→greedy, matching the headless sim calibration.
-//
-// Depends on: game-core.js (Bots), game.js (game, gameState, handleTap, etc.)
+// Depends on: game-core.js (BotRunner, BOT_PROFILES)
+//             game.js (game, gameState, handleTap, etc.)
+//             ui.js (uiButtons)
 // =========================================================================
 
 // Spectator mode state
@@ -20,71 +18,45 @@ let botSkillLevel = null; // null = match tier, or 'CALM'|'FLOW'|'SURGE'|'TRANSC
 const BOT_SKILL_NAMES = { CALM: 'Dumb', FLOW: 'Average', SURGE: 'Good', TRANSCENDENCE: 'Pro', IMPOSSIBLE: 'Inhuman' };
 const BOT_SKILL_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE', 'IMPOSSIBLE'];
 
-let botTarget = null;
-let botThinkTimer = 0;
-let botLastScan = 0;
+// BotRunner instance — created/updated lazily
+let botRunner = null;
+let botRunnerSkill = null;
 
-// Bot strategy + humanization per skill level.
-// Uses game-core Bots for strategy — same code as headless sim.
-const BOT_MAP = {
-    CALM:          { bot: 'random',   scanInterval: 800,  delay: 1200, jitter: 40 },
-    FLOW:          { bot: 'humanSim', scanInterval: 400,  delay: 600,  jitter: 20 },
-    SURGE:         { bot: 'greedy',   scanInterval: 200,  delay: 300,  jitter: 10 },
-    TRANSCENDENCE: { bot: 'greedy',   scanInterval: 100,  delay: 150,  jitter: 5 },
-    IMPOSSIBLE:    { bot: 'greedy',   scanInterval: 50,   delay: 80,   jitter: 2 },
-};
+function getOrUpdateRunner() {
+    const skillKey = botSkillLevel || (continuousActive ? selectedTier : 'FLOW');
+    if (!botRunner || botRunnerSkill !== skillKey) {
+        botRunner = new BotRunner(game, skillKey);
+        botRunnerSkill = skillKey;
+    }
+    return botRunner;
+}
+
+let lastBotFrame = 0;
 
 function updateBot(now) {
     if (!spectatorMode) return;
+
+    // Auto-advance through menus
     if (gameState === 'start') { handleTap(W / 2, H / 2); return; }
     if (gameState === 'gameover' && gameOverTimer > 0.8) { handleTap(W / 2, H / 2); return; }
     if (continuousActive && overflowBloomPhase === 'summary') { handleTap(W / 2, H / 2); return; }
     if (gameState !== 'playing') return;
 
-    // Use bot skill level if set, otherwise match tier in continuous mode
-    const skillKey = botSkillLevel || (continuousActive ? selectedTier : 'FLOW');
-    const profile = BOT_MAP[skillKey] || BOT_MAP.FLOW;
+    // BotRunner.update(dt) — identical to headless sim
+    const dt = lastBotFrame ? now - lastBotFrame : 16.67;
+    lastBotFrame = now;
 
-    // In continuous mode, respect tap cooldown
-    if (continuousActive && !game.canTap()) return;
-
-    // Scan phase: ask game-core bot for next action
-    if (!botTarget && now - botLastScan > profile.scanInterval) {
-        botLastScan = now;
-        const decision = Bots[profile.bot](game);
-        if (decision.action === 'tap') {
-            botTarget = {
-                x: decision.x + (Math.random() - 0.5) * profile.jitter,
-                y: decision.y + (Math.random() - 0.5) * profile.jitter,
-            };
-            botThinkTimer = profile.delay + Math.random() * (profile.delay * 0.3);
-        }
-    }
-
-    // Execute phase: tap after reaction delay
-    if (botTarget) {
-        botThinkTimer -= 16.67;
-        if (botThinkTimer <= 0) {
-            // Re-evaluate with fresh game state
-            const decision = Bots[profile.bot](game);
-            if (decision.action === 'tap') {
-                const jit = profile.jitter * 0.5;
-                handleTap(
-                    decision.x + (Math.random() - 0.5) * jit,
-                    decision.y + (Math.random() - 0.5) * jit
-                );
-            }
-            botTarget = null;
-            botLastScan = now;
-        }
-    }
+    const runner = getOrUpdateRunner();
+    const tap = runner.update(Math.min(dt, 50));
+    if (tap) handleTap(tap.x, tap.y);
 }
 
 function drawBotOverlay(ctx) {
     const s = Math.max(1, Math.min(W, H) / 600);
 
     // Crosshair on bot target
-    if (spectatorMode && botTarget && gameState === 'playing') {
+    const runner = botRunner;
+    if (spectatorMode && runner && runner.target && gameState === 'playing') {
         const pulse = Math.sin(performance.now() * 0.008) * 0.3 + 0.7;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -92,10 +64,10 @@ function drawBotOverlay(ctx) {
         ctx.strokeStyle = 'rgba(255, 255, 100, 1)';
         ctx.lineWidth = 1.5;
         const cr = 15 * s;
-        ctx.beginPath(); ctx.moveTo(botTarget.x - cr, botTarget.y); ctx.lineTo(botTarget.x + cr, botTarget.y); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(botTarget.x, botTarget.y - cr); ctx.lineTo(botTarget.x, botTarget.y + cr); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(runner.target.x - cr, runner.target.y); ctx.lineTo(runner.target.x + cr, runner.target.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(runner.target.x, runner.target.y - cr); ctx.lineTo(runner.target.x, runner.target.y + cr); ctx.stroke();
         ctx.globalAlpha = 0.15 * pulse;
-        ctx.beginPath(); ctx.arc(botTarget.x, botTarget.y, explosionRadius, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(runner.target.x, runner.target.y, explosionRadius, 0, Math.PI * 2); ctx.stroke();
         ctx.globalCompositeOperation = 'source-over';
         ctx.restore();
     }

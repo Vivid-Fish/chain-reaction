@@ -134,12 +134,7 @@ class Game {
         this.H = height;
         this.cfg = { ...DEFAULTS, ...config };
         this.rng = rng;
-
-        const refDim = Math.min(width, height, 800);
-        this.explosionRadius = Math.max(
-            this.cfg.EXPLOSION_RADIUS_MIN_PX,
-            refDim * this.cfg.EXPLOSION_RADIUS_PCT
-        );
+        this.recalcRadius(0);
 
         // Events: filled during step(), drained by consumer
         this.events = [];
@@ -180,12 +175,19 @@ class Game {
         this._hitLog = [];
     }
 
+    /** Recalculate explosion radius for current viewport + optional round scaling. */
+    recalcRadius(round) {
+        const refDim = Math.min(this.W, this.H, 800);
+        let r = Math.max(this.cfg.EXPLOSION_RADIUS_MIN_PX, refDim * this.cfg.EXPLOSION_RADIUS_PCT);
+        if (round > 0) r *= Math.max(0.85, 1.0 - (round - 1) * 0.01);
+        this.explosionRadius = r;
+        return r;
+    }
+
     // === ROUND MODE ===
 
     setupRound(round) {
-        const radiusScale = Math.max(0.85, 1.0 - (round - 1) * 0.01);
-        const refDim = Math.min(this.W, this.H, 800);
-        this.explosionRadius = Math.max(this.cfg.EXPLOSION_RADIUS_MIN_PX, refDim * this.cfg.EXPLOSION_RADIUS_PCT) * radiusScale;
+        this.recalcRadius(round);
 
         const params = getRoundParams(round, this.cfg);
         this._generateDots(params.dots, params.speedMin, params.speedMax, params.typeWeights);
@@ -897,9 +899,103 @@ const Bots = {
 };
 
 // =====================================================================
+// BOT PROFILES — Humanization parameters per skill level
+//
+// scanInterval: ms between bot scans for a target
+// delay:        base reaction time before executing
+// jitter:       spatial noise in pixels on tap position
+// =====================================================================
+
+const BOT_PROFILES = {
+    CALM:          { bot: 'random',   scanInterval: 800,  delay: 1200, jitter: 40 },
+    FLOW:          { bot: 'humanSim', scanInterval: 400,  delay: 600,  jitter: 20 },
+    SURGE:         { bot: 'greedy',   scanInterval: 200,  delay: 300,  jitter: 10 },
+    TRANSCENDENCE: { bot: 'greedy',   scanInterval: 100,  delay: 150,  jitter: 5 },
+    IMPOSSIBLE:    { bot: 'greedy',   scanInterval: 50,   delay: 80,   jitter: 2 },
+};
+
+// =====================================================================
+// BOT RUNNER — Unified bot state machine for both headless and browser
+//
+// Usage (identical in both environments):
+//   const runner = new BotRunner(game, 'CALM', rng);
+//   // each frame:
+//   const tap = runner.update(dt);
+//   if (tap) game.tap(tap.x, tap.y);  // or handleTap(tap.x, tap.y)
+// =====================================================================
+
+class BotRunner {
+    constructor(game, skillKey, rng = Math.random) {
+        this.game = game;
+        this.rng = rng;
+        this.setSkill(skillKey);
+        this.target = null;
+        this.thinkTimer = 0;
+        this.scanTimer = 0;
+    }
+
+    setSkill(skillKey) {
+        this.skillKey = skillKey;
+        this.profile = BOT_PROFILES[skillKey] || BOT_PROFILES.FLOW;
+        this.botFn = Bots[this.profile.bot];
+    }
+
+    /** Advance bot by dt ms. Returns {x, y} if bot wants to tap, null otherwise. */
+    update(dt) {
+        const game = this.game;
+        if (game.gameState !== 'playing') return null;
+        if (game._continuous && !game.canTap()) return null;
+
+        // Scan phase: find a target
+        if (!this.target) {
+            this.scanTimer += dt;
+            if (this.scanTimer < this.profile.scanInterval) return null;
+            this.scanTimer = 0;
+
+            const decision = this.botFn(game);
+            if (decision.action !== 'tap') return null;
+
+            this.target = {
+                x: decision.x + (this.rng() - 0.5) * this.profile.jitter,
+                y: decision.y + (this.rng() - 0.5) * this.profile.jitter,
+            };
+            // Bot's waitMs (strategy-specific delay) + profile delay (humanization)
+            this.thinkTimer = this.profile.delay
+                + (decision.waitMs || 0)
+                + this.rng() * (this.profile.delay * 0.3);
+            return null;
+        }
+
+        // Think phase: wait for reaction time
+        this.thinkTimer -= dt;
+        if (this.thinkTimer > 0) return null;
+
+        // Execute phase: re-evaluate with fresh game state, then tap
+        const decision = this.botFn(game);
+        this.target = null;
+        this.scanTimer = 0;
+
+        if (decision.action !== 'tap') return null;
+
+        const jit = this.profile.jitter * 0.5;
+        return {
+            x: decision.x + (this.rng() - 0.5) * jit,
+            y: decision.y + (this.rng() - 0.5) * jit,
+        };
+    }
+
+    /** Reset bot state (e.g., between rounds). */
+    reset() {
+        this.target = null;
+        this.thinkTimer = 0;
+        this.scanTimer = 0;
+    }
+}
+
+// =====================================================================
 // EXPORTS (isomorphic)
 // =====================================================================
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { Game, Bots, DEFAULTS, CONTINUOUS_TIERS, DOT_TYPES, getRoundParams, getMultiplier, createRNG };
+    module.exports = { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, CONTINUOUS_TIERS, DOT_TYPES, getRoundParams, getMultiplier, createRNG };
 }
