@@ -839,6 +839,14 @@
         overflowBloomTime += dt;
 
         if (overflowBloomPhase === 'detonating') {
+            // Skip straight to hold if no dots to detonate
+            if (!overflowDots || overflowDots.length === 0) {
+                overflowBloomPhase = 'hold';
+                overflowBloomTime = 0;
+                stopAllEpochAudio();
+                return;
+            }
+
             // Detonate 3 dots every ~50ms
             const dotsPerTick = 3;
             const tickInterval = 50;
@@ -848,8 +856,9 @@
             );
 
             while (overflowDetonateIdx < dotsToDetonate && overflowDetonateIdx < overflowDots.length) {
-                const { dot } = overflowDots[overflowDetonateIdx];
-                if (dot.active) {
+                const entry = overflowDots[overflowDetonateIdx];
+                const dot = entry && entry.dot;
+                if (dot && dot.active) {
                     dot.active = false;
                     dot.bloomTimer = 30;
                     chainCount++;
@@ -2057,12 +2066,16 @@
     // GAME LOOP
     // =====================================================================
     function loop() {
-        const now = performance.now();
-        uiButtons = [];
-        updateBot(now);
-        update();
-        draw();
-        drawBotOverlay();
+        try {
+            const now = performance.now();
+            uiButtons = [];
+            updateBot(now);
+            update();
+            draw();
+            drawBotOverlay();
+        } catch (e) {
+            console.error('Game loop error:', e);
+        }
         requestAnimationFrame(loop);
     }
 
