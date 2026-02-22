@@ -106,8 +106,8 @@
     const urlParams = new URLSearchParams(window.location.search);
     let spectatorMode = urlParams.has('watch');
     let botSkillLevel = null; // null = match tier, or 'CALM'|'FLOW'|'SURGE'|'TRANSCENDENCE'
-    const BOT_SKILL_NAMES = { CALM: 'Dumb', FLOW: 'Average', SURGE: 'Good', TRANSCENDENCE: 'Pro' };
-    const BOT_SKILL_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE'];
+    const BOT_SKILL_NAMES = { CALM: 'Dumb', FLOW: 'Average', SURGE: 'Good', TRANSCENDENCE: 'Pro', IMPOSSIBLE: 'Inhuman' };
+    const BOT_SKILL_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE', 'IMPOSSIBLE'];
     let botTarget = null;
     let botThinkTimer = 0;
     let botScanInterval = 400;
@@ -131,15 +131,16 @@
     let lastSessionId = null;
 
     // Mode & tier selection
-    let gameMode = localStorage.getItem('cr_game_mode') || 'rounds'; // 'rounds' | 'continuous'
+    let gameMode = localStorage.getItem('cr_game_mode') || 'continuous'; // 'rounds' | 'continuous'
     let selectedTier = localStorage.getItem('cr_continuous_tier') || 'FLOW';
-    const TIER_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE'];
-    const TIER_LABELS = { CALM: 'Calm', FLOW: 'Flow', SURGE: 'Surge', TRANSCENDENCE: 'Transcendence' };
+    const TIER_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE', 'IMPOSSIBLE'];
+    const TIER_LABELS = { CALM: 'Calm', FLOW: 'Flow', SURGE: 'Surge', TRANSCENDENCE: 'Transcendence', IMPOSSIBLE: 'Impossible' };
     const TIER_DESCRIPTIONS = {
         CALM: 'Slow pace. No rush. Learn the feel.',
         FLOW: 'Steady rhythm. Time your taps.',
         SURGE: 'Fast and dense. Stay sharp.',
         TRANSCENDENCE: 'Tight space. Every tap counts.',
+        IMPOSSIBLE: 'Brutal. Tiny field. Good luck.',
     };
     let tiersVisited = JSON.parse(localStorage.getItem('cr_tiers_visited') || '{}');
     let modeSwipeOffset = 0;   // current horizontal offset (px)
@@ -1304,10 +1305,9 @@
 
         if (gameState === 'start') { drawStartScreen(); return; }
 
-        // Continuous mode
+        // Mode-specific HUD
         if (continuousActive) {
             if (overflowTriggered) {
-                // During bloom detonation/hold: show HUD + white fade overlay
                 if (overflowBloomPhase !== 'summary') {
                     drawContinuousHUD(s);
                     if (overflowWhiteAlpha > 0) {
@@ -1320,8 +1320,7 @@
             } else {
                 drawContinuousHUD(s);
             }
-            return;
-        }
+        } else {
 
         // Round counter
         ctx.textAlign = 'center';
@@ -1421,6 +1420,22 @@
             ctx.fillText(`Best: Round ${bestRound}`, W/2, H - 12 * s);
         }
 
+        } // end rounds-mode else block
+
+        // --- Shared HUD elements (both modes) ---
+
+        // Quit button (top right)
+        if (gameState === 'playing' || gameState === 'resolving') {
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'top';
+            ctx.font = `200 ${10 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            const quitLabel = continuousActive ? '\u2715 ' + TIER_LABELS[selectedTier] : '\u2715 Menu';
+            ctx.fillText(quitLabel, W - 12 * s, 16 * s);
+            const qw = ctx.measureText(quitLabel).width + 16 * s;
+            uiButtons.push({ id: 'quit_menu', x: W - 12 * s - qw, y: 8 * s, w: qw + 12 * s, h: 24 * s });
+        }
+
         // Build info
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
@@ -1454,21 +1469,40 @@
         if (Math.abs(contX) < W) drawContinuousStartPage(contX);
         ctx.restore();
 
-        // Page indicator dots
+        // Page indicator with labeled tabs
         const s = Math.max(1, Math.min(W, H) / 600);
-        const indicatorY = H - 20 * s;
-        const dotR = 3 * s;
-        const dotGap = 14 * s;
-        const pulseAlpha = sessionCount < 3 ? 0.15 + 0.15 * Math.sin(performance.now() * 0.004) : 0;
+        const indicatorY = H - 22 * s;
+        const modeLabels = ['Rounds', 'Endless'];
+        const activeIdx = gameMode === 'rounds' ? 0 : 1;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `400 ${10 * s | 0}px Inter, system-ui, sans-serif`;
+        const tabGap = 60 * s;
         for (let i = 0; i < 2; i++) {
-            const dx = W / 2 + (i - 0.5) * dotGap;
-            const isActive = (i === 0 && gameMode === 'rounds') || (i === 1 && gameMode === 'continuous');
-            ctx.beginPath();
-            ctx.arc(dx, indicatorY, dotR, 0, Math.PI * 2);
-            ctx.fillStyle = isActive
-                ? `rgba(255, 255, 255, ${0.6 + pulseAlpha})`
-                : `rgba(255, 255, 255, ${0.15 + pulseAlpha})`;
-            ctx.fill();
+            const tx = W / 2 + (i - 0.5) * tabGap;
+            const isActive = i === activeIdx;
+            ctx.fillStyle = isActive ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)';
+            ctx.fillText(modeLabels[i], tx, indicatorY);
+            if (isActive) {
+                const tw = ctx.measureText(modeLabels[i]).width;
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.fillRect(tx - tw / 2, indicatorY + 8 * s, tw, 1.5);
+            }
+        }
+
+        // Swipe hint (first 5 sessions, pulsing arrow toward other mode)
+        if (sessionCount < 5 && modeSwipeOffset === 0) {
+            const hintAlpha = 0.12 + 0.1 * Math.sin(performance.now() * 0.003);
+            const bobX = 6 * Math.sin(performance.now() * 0.002);
+            ctx.font = `300 ${11 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = `rgba(255,255,255,${hintAlpha})`;
+            if (gameMode === 'continuous') {
+                ctx.textAlign = 'left';
+                ctx.fillText('\u2190 Rounds', 12 * s + bobX, H / 2);
+            } else {
+                ctx.textAlign = 'right';
+                ctx.fillText('Endless \u2192', W - 12 * s + bobX, H / 2);
+            }
         }
     }
 
@@ -1688,16 +1722,6 @@
         ctx.font = `200 ${12 * s | 0}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = 'rgba(255,255,255,0.35)';
         ctx.fillText(`${mins}:${secs.toString().padStart(2, '0')}`, W / 2, 50 * s);
-
-        // Quit button (top right) — tap to return to menu
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'top';
-        ctx.font = `200 ${10 * s | 0}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        const quitLabel = '\u2715 ' + TIER_LABELS[selectedTier];
-        ctx.fillText(quitLabel, W - 12 * s, 16 * s);
-        const qw = ctx.measureText(quitLabel).width + 16 * s;
-        uiButtons.push({ id: 'quit_continuous', x: W - 12 * s - qw, y: 8 * s, w: qw + 12 * s, h: 24 * s });
 
         // Pressure bar (left side, vertical) — shows how full the field is
         if (currentTier) {
@@ -1997,6 +2021,7 @@
         FLOW:          { scanInterval: 400,  reactionDelay: 600,  jitter: 20 }, // moderate
         SURGE:         { scanInterval: 200,  reactionDelay: 300,  jitter: 10 }, // fast, precise
         TRANSCENDENCE: { scanInterval: 100,  reactionDelay: 150,  jitter: 5 },  // near-perfect
+        IMPOSSIBLE:    { scanInterval: 50,   reactionDelay: 80,   jitter: 2 },  // inhuman
     };
 
     function updateBot(now) {
@@ -2083,6 +2108,21 @@
                 ctx.fillStyle = 'rgba(100, 255, 100, 0.6)'; ctx.fill();
             }
             uiButtons.push({ id: 'watch', x: bx, y: by, w: bw, h: bh });
+
+            // Bot skill pill (tappable during gameplay)
+            if (spectatorMode) {
+                const sx = bx + bw + 6 * s, sy = by;
+                const skillName = botSkillLevel ? BOT_SKILL_NAMES[botSkillLevel] : 'Auto';
+                ctx.font = `400 ${7 * s | 0}px Inter, system-ui, sans-serif`;
+                const sw = Math.max(44 * s, ctx.measureText(skillName).width + 16 * s);
+                ctx.beginPath(); ctx.roundRect(sx, sy, sw, bh, br);
+                ctx.fillStyle = 'rgba(255, 255, 100, 0.08)'; ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 100, 0.15)'; ctx.lineWidth = 0.5; ctx.stroke();
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillStyle = 'rgba(255, 255, 100, 0.4)';
+                ctx.fillText(skillName, sx + sw / 2, sy + bh / 2);
+                uiButtons.push({ id: 'bot_skill', x: sx, y: sy, w: sw, h: bh });
+            }
         }
     }
 
@@ -2421,12 +2461,14 @@
             startContinuous();
             return true;
         }
-        if (hit === 'cont_menu' || hit === 'quit_continuous') {
-            continuousActive = false;
-            overflowTriggered = false;
-            overflowBloomPhase = null;
-            bgOverride = null;
-            stopAllEpochAudio();
+        if (hit === 'quit_menu' || hit === 'cont_menu') {
+            if (continuousActive) {
+                continuousActive = false;
+                overflowTriggered = false;
+                overflowBloomPhase = null;
+                bgOverride = null;
+                stopAllEpochAudio();
+            }
             gameState = 'start';
             dots = [];
             generateDots(10, 0.5, 1.0);

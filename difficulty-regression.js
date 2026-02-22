@@ -63,6 +63,15 @@ const CALIBRATED_TIERS = {
         maxDots: 60,           // lower cap = tighter overflow threshold = skill matters
         overflowDensity: 0.8,
     },
+    IMPOSSIBLE: {
+        bot: 'oracle',
+        spawnRate: 2.0,
+        speedMin: 0.8, speedMax: 1.6,
+        dotTypes: { standard: 0.30, gravity: 0.30, volatile: 0.40 },
+        tapCooldown: 1500,
+        maxDots: 40,
+        overflowDensity: 0.8,
+    },
 };
 
 // Lower bot mapping: which bot struggles at this tier.
@@ -74,6 +83,7 @@ const LOWER_BOT = {
     FLOW: 'random',      // random << humanSim (wide gap)
     SURGE: 'random',     // random << greedy (wide gap)
     TRANSCENDENCE: 'random', // random << oracle (wide gap)
+    IMPOSSIBLE: 'random',    // random << oracle (wide gap)
 };
 
 // =========================================================================
