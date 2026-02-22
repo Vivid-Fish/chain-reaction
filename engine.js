@@ -1158,11 +1158,13 @@ function engineDrawScene(ctx, gameState, supernovaActive) {
 // CONTINUOUS PLAY (shared engine support)
 // =====================================================================
 
+// Calibrated via calibrate-continuous.js (600s sessions, 5 seeds, binary search).
+// Browser rates set ~5-10% below bot survival threshold so a skilled human can maintain.
 const CONTINUOUS_TIERS = {
-    CALM:          { spawnRate: 0.5, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
-    FLOW:          { spawnRate: 3.2, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
-    SURGE:         { spawnRate: 5.0, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
-    TRANSCENDENCE: { spawnRate: 2.5, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
+    CALM:          { spawnRate: 0.50, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
+    FLOW:          { spawnRate: 3.20, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
+    SURGE:         { spawnRate: 5.10, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
+    TRANSCENDENCE: { spawnRate: 3.20, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
 };
 
 /** Pick dot type from weights (e.g. {standard:0.7, gravity:0.2, volatile:0.1}) */
