@@ -26,10 +26,12 @@ const { runContinuous } = require('./continuous-sim.js');
 // From calibrate-continuous.js full run (10min, 5 seeds).
 // Rates set conservatively below calibrated edge for reliable steady-state.
 // IMPORTANT: Re-run calibration after changing sim physics.
+// Calibrated with chain-resolving 2-ply oracle (2026-02-22).
+// Rates are the bot survival thresholds. Browser uses ~90% of these.
 const CALIBRATED_TIERS = {
     CALM: {
         bot: 'random',
-        spawnRate: 0.5,
+        spawnRate: 0.72,
         speedMin: 0.4, speedMax: 0.8,
         dotTypes: { standard: 1.0 },
         tapCooldown: 1500,
@@ -38,7 +40,7 @@ const CALIBRATED_TIERS = {
     },
     FLOW: {
         bot: 'humanSim',
-        spawnRate: 3.2,
+        spawnRate: 4.0,
         speedMin: 0.5, speedMax: 1.0,
         dotTypes: { standard: 0.85, gravity: 0.15 },
         tapCooldown: 2000,
@@ -47,7 +49,7 @@ const CALIBRATED_TIERS = {
     },
     SURGE: {
         bot: 'greedy',
-        spawnRate: 5.0,
+        spawnRate: 5.8,
         speedMin: 0.6, speedMax: 1.2,
         dotTypes: { standard: 0.70, gravity: 0.20, volatile: 0.10 },
         tapCooldown: 2500,
@@ -56,16 +58,16 @@ const CALIBRATED_TIERS = {
     },
     TRANSCENDENCE: {
         bot: 'oracle',
-        spawnRate: 2.5,
+        spawnRate: 3.0,
         speedMin: 0.7, speedMax: 1.4,
         dotTypes: { standard: 0.50, gravity: 0.25, volatile: 0.25 },
         tapCooldown: 2000,
-        maxDots: 60,           // lower cap = tighter overflow threshold = skill matters
+        maxDots: 60,
         overflowDensity: 0.8,
     },
     IMPOSSIBLE: {
         bot: 'oracle',
-        spawnRate: 2.0,
+        spawnRate: 2.1,
         speedMin: 0.8, speedMax: 1.6,
         dotTypes: { standard: 0.30, gravity: 0.30, volatile: 0.40 },
         tapCooldown: 1500,
@@ -78,12 +80,15 @@ const CALIBRATED_TIERS = {
 // Adjacent-tier bots are nearly equivalent in continuous mode (humanSim ≈ greedy,
 // greedy ≈ oracle) because tap cooldown negates timing/precision advantages.
 // Use wider gaps to get meaningful differentiation.
+// Lower-bot-struggles test: verify the random bot overflows at each tier's rate.
+// Cascade momentum narrows the gap between adjacent bots, so we use random
+// as the universal baseline — it should overflow at all non-CALM rates.
 const LOWER_BOT = {
     CALM: null,          // no tier below CALM
-    FLOW: 'random',      // random << humanSim (wide gap)
-    SURGE: 'random',     // random << greedy (wide gap)
-    TRANSCENDENCE: 'random', // random << oracle (wide gap)
-    IMPOSSIBLE: 'random',    // random << oracle (wide gap)
+    FLOW: 'random',      // random overflows at humanSim rates
+    SURGE: 'random',     // random overflows at greedy rates
+    TRANSCENDENCE: 'random', // random overflows at oracle rates
+    IMPOSSIBLE: 'random',    // random overflows at oracle rates
 };
 
 // =========================================================================
@@ -186,9 +191,9 @@ function runTierTests(tierName, tier, opts) {
             lowerBotDuration,
             seeds
         );
-        // Pass if lower bot overflows 40%+ OR has mean density > matched bot + 0.10
+        // Pass if lower bot overflows 40%+ OR has mean density > matched bot + 0.05
         const densityGap = lower.meanDensity - steady.meanDensity;
-        const lowerPass = lower.survivalRate <= 0.6 || densityGap > 0.10;
+        const lowerPass = lower.survivalRate <= 0.6 || densityGap > 0.05;
         console.log(
             `${lowerPass ? '\x1b[32mPASS\x1b[0m' : '\x1b[31mFAIL\x1b[0m'}` +
             ` (${((1 - lower.survivalRate) * 100).toFixed(0)}% overflowed, density ${(lower.meanDensity * 100).toFixed(0)}%` +

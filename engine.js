@@ -27,7 +27,7 @@
 // CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v13.2.0';
+const BUILD_VERSION = 'v13.3.0';
 const BUILD_DATE = '2026-02-21';
 
 // Dot types — physics modifiers
@@ -1160,12 +1160,14 @@ function engineDrawScene(ctx, gameState, supernovaActive) {
 
 // Calibrated via calibrate-continuous.js (600s sessions, 5 seeds, binary search).
 // Browser rates set ~5-10% below bot survival threshold so a skilled human can maintain.
+// Calibrated with chain-resolving 2-ply oracle (not simple greedy).
+// Browser rates set at ~90% of oracle survival threshold.
 const CONTINUOUS_TIERS = {
-    CALM:          { spawnRate: 0.50, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
-    FLOW:          { spawnRate: 3.20, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
-    SURGE:         { spawnRate: 5.10, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
-    TRANSCENDENCE: { spawnRate: 3.20, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
-    IMPOSSIBLE:    { spawnRate: 2.00, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8 },
+    CALM:          { spawnRate: 0.65, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
+    FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
+    SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
+    TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
+    IMPOSSIBLE:    { spawnRate: 1.90, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8 },
 };
 
 /** Pick dot type from weights (e.g. {standard:0.7, gravity:0.2, volatile:0.1}) */

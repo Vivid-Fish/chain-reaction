@@ -303,53 +303,161 @@ const ContinuousBots = {
     },
 
     /**
-     * OracleContinuous: During cooldown, search future positions at offsets, tap optimal.
-     * Simplified: tests a few time offsets and picks the best.
+     * OracleContinuous: Near-optimal play via full chain resolution + 2-ply lookahead.
+     *
+     * 1. Snapshots current dots with positions + velocities
+     * 2. Tests 12 time offsets (0-1100ms in 100ms steps)
+     * 3. At each offset, advances physics (with wall bouncing) to future positions
+     * 4. Does 30x30 grid search + refinement to find best tap position
+     * 5. Fully resolves the chain (with cascade momentum) and counts dots caught
+     * 6. Scores = dotsCaught + densityPressureBonus (prioritize clearing when near overflow)
+     * 7. For top 3 candidates, does 2-ply lookahead: after cooldown, what's the best 2nd tap?
      */
     oracle(sim) {
         if (!sim.canTap()) return { action: 'wait' };
 
-        let bestScore = 0, bestX = sim.W / 2, bestY = sim.H / 2, bestDelay = 0;
-        const snapshot = sim.dots.map(d => ({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, active: d.active, type: d.type }));
+        const snapshot = sim.dots.map(d => ({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, active: d.active, type: d.type, bloomTimer: 0 }));
+        const activeDots = snapshot.filter(d => d.active).length;
+        const density = activeDots / sim.cfg.maxDots;
+        const DT = 16.67;
+        const margin = sim.cfg.SCREEN_MARGIN;
 
-        // Test a few time offsets: 0, 200, 400, 600ms
-        for (let t = 0; t < 4; t++) {
-            const delay = t * 200;
-            const clone = new ContinuousSimulation(sim.W, sim.H, sim.cfg, Date.now() ^ t);
-            clone.dots = snapshot.map(d => ({ ...d, bloomTimer: 0 }));
-            clone.explosionRadius = sim.explosionRadius;
-            clone.gameState = 'playing';
-            clone._lastTapTime = -Infinity; // allow immediate tap
-            clone.totalDots = sim.activeDotCount();
-
-            // Advance by delay (physics only, no spawning for clone)
-            const DT = 16.67;
-            for (let ms = 0; ms < delay; ms += DT) {
-                const margin = clone.cfg.SCREEN_MARGIN;
-                for (const d of clone.dots) {
+        // Helper: advance dot positions by deltaMs (physics only, no spawning)
+        function advanceDots(dots, deltaMs) {
+            for (let ms = 0; ms < deltaMs; ms += DT) {
+                for (const d of dots) {
                     if (!d.active) continue;
                     d.x += d.vx; d.y += d.vy;
                     if (d.x < margin) { d.vx = Math.abs(d.vx); d.x = margin; }
-                    if (d.x > clone.W - margin) { d.vx = -Math.abs(d.vx); d.x = clone.W - margin; }
+                    if (d.x > sim.W - margin) { d.vx = -Math.abs(d.vx); d.x = sim.W - margin; }
                     if (d.y < margin) { d.vy = Math.abs(d.vy); d.y = margin; }
-                    if (d.y > clone.H - margin) { d.vy = -Math.abs(d.vy); d.y = clone.H - margin; }
+                    if (d.y > sim.H - margin) { d.vy = -Math.abs(d.vy); d.y = sim.H - margin; }
                 }
-            }
-
-            // Grid search for best tap
-            const tap = Bots.greedy(clone, 20);
-            clone.tap(tap.x, tap.y);
-            clone.resolveChain();
-
-            if (clone.chainCount > bestScore) {
-                bestScore = clone.chainCount;
-                bestX = tap.x;
-                bestY = tap.y;
-                bestDelay = delay;
             }
         }
 
-        return { action: 'tap', x: bestX, y: bestY, waitMs: bestDelay };
+        // Helper: create clone sim with given dots, resolve tap, return dots caught
+        function evalTap(dots, x, y) {
+            const clone = new ContinuousSimulation(sim.W, sim.H, sim.cfg, 0);
+            clone.dots = dots.map(d => ({ ...d }));
+            clone.explosionRadius = sim.explosionRadius;
+            clone.gameState = 'playing';
+            clone._lastTapTime = -Infinity;
+            clone.totalDots = dots.filter(d => d.active).length;
+            clone.chainCount = 0;
+            clone.tap(x, y);
+            clone.resolveChain();
+            return clone.chainCount;
+        }
+
+        // Helper: grid search on dot array, return {x, y, caught}
+        function gridSearch(dots, gridSize) {
+            let bestX = sim.W / 2, bestY = sim.H / 2, bestCaught = 0;
+            const r = sim.explosionRadius;
+            // Coarse grid
+            for (let gx = 0; gx < gridSize; gx++) {
+                for (let gy = 0; gy < gridSize; gy++) {
+                    const x = (gx + 0.5) * sim.W / gridSize;
+                    const y = (gy + 0.5) * sim.H / gridSize;
+                    let count = 0;
+                    for (const d of dots) {
+                        if (d.active && Math.hypot(d.x - x, d.y - y) <= r) count++;
+                    }
+                    if (count > bestCaught) { bestCaught = count; bestX = x; bestY = y; }
+                }
+            }
+            // Refinement around best (7x7 sub-grid)
+            const step = sim.W / gridSize / 4;
+            for (let dx = -3; dx <= 3; dx++) {
+                for (let dy = -3; dy <= 3; dy++) {
+                    const x = bestX + dx * step;
+                    const y = bestY + dy * step;
+                    let count = 0;
+                    for (const d of dots) {
+                        if (d.active && Math.hypot(d.x - x, d.y - y) <= r) count++;
+                    }
+                    if (count > bestCaught) { bestCaught = count; bestX = x; bestY = y; }
+                }
+            }
+            // Also check every active dot's position as candidate (cluster centers)
+            for (const d of dots) {
+                if (!d.active) continue;
+                let count = 0;
+                for (const d2 of dots) {
+                    if (d2.active && Math.hypot(d2.x - d.x, d2.y - d.y) <= r) count++;
+                }
+                if (count > bestCaught) { bestCaught = count; bestX = d.x; bestY = d.y; }
+            }
+            return { x: bestX, y: bestY, count: bestCaught };
+        }
+
+        // Phase 1: Evaluate all time offsets with full chain resolution
+        const candidates = [];
+        const timeSteps = 12; // 0ms to 1100ms in 100ms steps
+        for (let t = 0; t < timeSteps; t++) {
+            const delay = t * 100;
+            const futureDots = snapshot.map(d => ({ ...d }));
+            advanceDots(futureDots, delay);
+
+            // Find best tap position via grid search
+            const best = gridSearch(futureDots, 30);
+            if (best.count < 1) continue;
+
+            // Full chain resolution to get actual dots caught
+            const caught = evalTap(futureDots, best.x, best.y);
+
+            // Density pressure bonus: when near overflow, reward clearing more dots
+            const pressureBonus = density > 0.5 ? caught * (density - 0.5) * 2 : 0;
+            const score = caught + pressureBonus;
+
+            candidates.push({ x: best.x, y: best.y, delay, caught, score });
+        }
+
+        if (candidates.length === 0) {
+            return { action: 'tap', x: sim.W / 2, y: sim.H / 2, waitMs: 0 };
+        }
+
+        // Sort by score descending
+        candidates.sort((a, b) => b.score - a.score);
+
+        // Phase 2: 2-ply lookahead on top 3 candidates
+        const cooldown = sim.cfg.tapCooldown;
+        let bestTotal = 0, bestCandidate = candidates[0];
+
+        for (let i = 0; i < Math.min(3, candidates.length); i++) {
+            const c = candidates[i];
+            // Simulate first tap + resolve + advance by cooldown + second tap
+            const futureDots = snapshot.map(d => ({ ...d }));
+            advanceDots(futureDots, c.delay);
+
+            // Resolve first tap
+            const clone = new ContinuousSimulation(sim.W, sim.H, sim.cfg, 0);
+            clone.dots = futureDots.map(d => ({ ...d }));
+            clone.explosionRadius = sim.explosionRadius;
+            clone.gameState = 'playing';
+            clone._lastTapTime = -Infinity;
+            clone.totalDots = futureDots.filter(d => d.active).length;
+            clone.chainCount = 0;
+            clone.tap(c.x, c.y);
+            clone.resolveChain();
+            const firstCaught = clone.chainCount;
+
+            // After first chain resolves, advance remaining dots by cooldown
+            const remainingDots = clone.dots.filter(d => d.active).map(d => ({ ...d }));
+            advanceDots(remainingDots, cooldown);
+
+            // Find best second tap
+            const best2 = gridSearch(remainingDots, 20);
+            const secondCaught = best2.count >= 1 ? evalTap(remainingDots, best2.x, best2.y) : 0;
+
+            const totalCaught = firstCaught + secondCaught;
+            if (totalCaught > bestTotal) {
+                bestTotal = totalCaught;
+                bestCandidate = c;
+            }
+        }
+
+        return { action: 'tap', x: bestCandidate.x, y: bestCandidate.y, waitMs: bestCandidate.delay };
     },
 };
 

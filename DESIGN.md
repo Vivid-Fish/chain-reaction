@@ -1,10 +1,11 @@
 # Chain Reaction — Design Evolution
 
 ## Status
-- **Current version:** v5.1 (2026-02-20)
+- **Current version:** v13.3.0+ (2026-02-22)
 - **Live at:** chain-reaction.vivid.fish
 - **Coolify UUID:** ng4cwsc4csgcs84gssw0o0ww
-- **Git:** github.com/simonswims/chain-reaction (master branch)
+- **Git:** github.com/Vivid-Fish/chain-reaction (main branch)
+- **Versioning:** Conventional commits + semver auto-bump (commit-msg hook)
 
 ## Design Principles
 
@@ -316,14 +317,62 @@ Multi-Tap breaks the ONE-TAP RULE — the fundamental constraint of the game. Th
 |------|---------|
 | `supernova-experiment.js` | Tests 7 Supernova variants at R5/R8/R12. Measures contrast (clear rate delta, wipe rate). Scores variants on dramatic-but-earned scale. |
 
+## Oracle Bot v2 — Chain-Resolving 2-Ply Lookahead (2026-02-22)
+
+### The Problem
+The original oracle bot was "greedy with 600ms lookahead" — it counted dots within initial explosion radius at 4 time offsets and picked the best. It completely ignored:
+- Cascade momentum (later-gen explosions are bigger + longer)
+- Chain resolution (the ACTUAL dots caught, not just initial radius)
+- Density-aware scoring (should clear more aggressively when near overflow)
+- Multi-tap planning (what's the best follow-up after cooldown?)
+
+A skilled human player survived 4 minutes on "Impossible" tier — a tier calibrated against this weak oracle.
+
+### The Fix
+New oracle bot in `continuous-sim.js`:
+1. **12 time offsets** (0-1100ms in 100ms steps, not 4 × 200ms)
+2. **30x30 grid + refinement + dot-position candidates** (not just 20x20 grid)
+3. **Full chain resolution** — clones the sim, taps, resolves cascade, counts ACTUAL caught dots
+4. **Density pressure bonus** — `score = caught + caught * max(0, density - 0.5) * 2`
+5. **2-ply lookahead** — for top 3 candidates, simulates: tap → resolve → advance by cooldown → find best 2nd tap → sum both chains
+
+### Results
+Recalibrated all tiers. Spawn rate thresholds shifted significantly:
+
+| Tier | Old Oracle Rate | New Oracle Rate | Change |
+|------|----------------|----------------|--------|
+| CALM (random) | 0.50/s | 0.72/s | +44% |
+| FLOW (humanSim) | 3.20/s | 4.01/s | +25% |
+| SURGE (greedy) | 5.10/s | 6.40/s | +25% |
+| TRANSCENDENCE (oracle) | 3.20/s | 3.33/s | +4% |
+| IMPOSSIBLE (oracle) | 2.00/s | 2.12/s | +6% |
+
+Browser rates set at ~90% of bot threshold for human challenge.
+
+### If This Still Isn't Enough
+
+The new oracle is 2-ply with grid search — significantly better than v1 but NOT theoretically optimal. If a skilled human still finds it too easy, the next steps (in order of increasing complexity and diminishing returns):
+
+1. **N-ply lookahead (N=3-4)** — chain 3-4 tap decisions forward. Diminishing returns: the board changes so much between taps (spawning, bouncing) that ply-3+ predictions are noisy. Estimated improvement: ~10-15%.
+
+2. **Monte Carlo rollouts** — for each candidate tap, simulate 50-100 random futures (different spawn positions/timing) and average the outcomes. This handles spawn uncertainty and gives more robust evaluation. Estimated improvement: ~15-20%. Computational cost: 50-100x current.
+
+3. **Spawn-aware chain resolution** — current oracle ignores new dots spawning during chain resolution. In the real game, dots spawn continuously during the 1-3 seconds a chain takes to resolve. Adding spawning to the clone sim during resolution would make evaluation more accurate. Estimated improvement: ~5-10%.
+
+4. **MCTS (Monte Carlo Tree Search)** — full game tree search with random playouts. Each node is a tap decision. This is how AlphaGo works, adapted for continuous action space. Would need discretization of tap positions and timing. This would be near-optimal but very expensive (minutes per decision in headless sim). Only worth it for definitive calibration runs, not real-time play.
+
+5. **Manual empirical tuning** — ultimately, the sim is a proxy for human play. If the gap between sim-optimal and human-optimal persists, just adjust rates based on playtest data. The simulation narrows the search space from infinite to a small region; human testing does the final 15%.
+
+### Key Insight
+The skill gap between bots was narrower than expected because cascade momentum is an equalizer — even random taps that hit 2-3 dots can cascade to 10+ via the growing-radius mechanic. The bot hierarchy still holds (random < humanSim < greedy < oracle) but the gaps are smaller than in rounds mode where there's no cascade.
+
 ## Next Steps (Pending)
 
-1. **Continuous play mode (browser)** — port ContinuousSimulation to engine.js, mode selector UI, epoch transitions, overflow bloom. Simulation harness validated (12/12 tests pass). See `research/continuous-play.md`.
-2. **Implement Multi-Tap Supernova** — charge meter, 3-tap round, audio/visual shift.
-3. **Musical audio upgrade** — beat quantization, position-to-pitch mapping, stem layering across rounds.
-4. **Near-miss feedback** — ghost tap, "X/Y — so close!", slow-mo on chain break.
-5. **Structured spawning** — "Salad not Soup": dot types in clusters/veins.
-6. **Meta-persistence** — localStorage high scores, daily challenge (fixed seed).
+1. **Structured spawning** — "Salad not Soup": dot types in clusters/veins, not randomly mixed.
+2. **Daily challenge** — fixed seed, everyone plays the same round, compare scores.
+3. **Musical audio for rounds mode** — beat quantization, position-to-pitch, stem layering.
+4. **Meta-persistence** — localStorage high scores, personal bests per tier.
+5. **Clean code pass** — eliminate duplication between modes in index.html.
 
 ## Reference Docs
 - `SPEC.md` — Original game spec (vision, rules, audio, visuals, progression)
