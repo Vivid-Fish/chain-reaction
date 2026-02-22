@@ -139,9 +139,10 @@ class Game {
         const REF_AREA = 390 * 844;
         this.spatialScale = Math.sqrt((this.W * this.H) / REF_AREA);
 
-        // Scale spatial constants by s
-        this.cfg.SCREEN_MARGIN = (config.SCREEN_MARGIN || DEFAULTS.SCREEN_MARGIN) * this.spatialScale;
-        this.cfg.MIN_DOT_DISTANCE = (config.MIN_DOT_DISTANCE || DEFAULTS.MIN_DOT_DISTANCE) * this.spatialScale;
+        // Scale spatial constants by s (always from unscaled DEFAULTS to avoid double-scaling
+        // when a clone inherits an already-scaled cfg)
+        this.cfg.SCREEN_MARGIN = DEFAULTS.SCREEN_MARGIN * this.spatialScale;
+        this.cfg.MIN_DOT_DISTANCE = DEFAULTS.MIN_DOT_DISTANCE * this.spatialScale;
 
         this.recalcRadius(0);
 
@@ -923,6 +924,7 @@ const BOT_PROFILES = {
     SURGE:         { bot: 'greedy',   scanInterval: 200,  delay: 300,  jitter: 10 },
     TRANSCENDENCE: { bot: 'greedy',   scanInterval: 100,  delay: 150,  jitter: 5 },
     IMPOSSIBLE:    { bot: 'greedy',   scanInterval: 50,   delay: 80,   jitter: 2 },
+    ORACLE:        { bot: 'oracle',   scanInterval: 0,    delay: 0,    jitter: 0 },
 };
 
 // =====================================================================
