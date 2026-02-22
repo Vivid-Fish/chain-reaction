@@ -1,0 +1,30 @@
+#!/bin/bash
+# Post-commit hook: apply version bump determined by commit-msg hook.
+# Amends the commit to include the updated BUILD_VERSION in engine.js.
+
+ENGINE="engine.js"
+BUMP_FILE=".git/PENDING_VERSION_BUMP"
+
+# Only proceed if commit-msg hook left a bump file
+if [ ! -f "$BUMP_FILE" ]; then
+    exit 0
+fi
+
+NEW_VERSION=$(cat "$BUMP_FILE")
+rm -f "$BUMP_FILE"
+
+if [ -z "$NEW_VERSION" ]; then
+    exit 0
+fi
+
+TODAY=$(date +%Y-%m-%d)
+
+# Update version and date in engine.js
+sed -i "s/BUILD_VERSION = 'v[0-9]*\.[0-9]*\.[0-9]*'/BUILD_VERSION = '${NEW_VERSION}'/" "$ENGINE"
+sed -i "s/BUILD_DATE = '[0-9-]*'/BUILD_DATE = '${TODAY}'/" "$ENGINE"
+
+# Amend the commit to include the version bump
+git add "$ENGINE"
+git commit --amend --no-edit --no-verify >/dev/null 2>&1
+
+echo "Version bumped to ${NEW_VERSION} (${TODAY})"

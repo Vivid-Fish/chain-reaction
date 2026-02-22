@@ -27,8 +27,8 @@
 // CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v13.3.0';
-const BUILD_DATE = '2026-02-21';
+const BUILD_VERSION = 'v14.1.0';
+const BUILD_DATE = '2026-02-22';
 
 // Dot types — physics modifiers
 const DOT_TYPES = {

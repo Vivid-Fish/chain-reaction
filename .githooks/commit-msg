@@ -1,28 +1,39 @@
 #!/bin/bash
-# Auto-bump semver in engine.js based on conventional commit message
+# Auto-bump semver in engine.js based on conventional commit message.
 #
-# feat!: or BREAKING CHANGE → major bump (v13.1.0 → v14.0.0)
-# feat:                      → minor bump (v13.1.0 → v13.2.0)
-# everything else            → patch bump (v13.1.0 → v13.1.1)
+# Strategy: commit-msg hook determines the new version and writes it to
+# a temp file. post-commit hook reads it, stages, and amends.
+#
+# feat!: or BREAKING CHANGE → major bump (v1.0.0 → v2.0.0)
+# feat:                      → minor bump (v1.0.0 → v1.1.0)
+# everything else            → patch bump (v1.0.0 → v1.0.1)
 #
 # Only bumps when game files are in the commit (engine.js, index.html, server.js)
 
 ENGINE="engine.js"
 MSG_FILE="$1"
 MSG=$(head -1 "$MSG_FILE")
+BUMP_FILE=".git/PENDING_VERSION_BUMP"
 
-# Skip merges and amends that already have a version bump
-if echo "$MSG" | grep -qE '^Merge |^Auto-bump'; then
+# Clean up any stale bump file
+rm -f "$BUMP_FILE"
+
+# Skip merges, amends from post-commit, and version bump commits
+if echo "$MSG" | grep -qE '^Merge |^chore\(version\):'; then
     exit 0
 fi
 
 # Only bump if game files are staged
-if ! git diff --cached --name-only | grep -qE '^(engine\.js|index\.html|server\.js)$'; then
+if ! git diff --cached --name-only | grep -qE '^(engine\.js|index\.html|server\.js|continuous-sim\.js|difficulty-regression\.js)$'; then
     exit 0
 fi
 
-# Extract current version
-CURRENT=$(grep -oP "BUILD_VERSION = 'v\K[0-9]+\.[0-9]+\.[0-9]+" "$ENGINE")
+# Extract current version from the STAGED version of engine.js (not working tree)
+CURRENT=$(git show :engine.js 2>/dev/null | grep -oP "BUILD_VERSION = 'v\K[0-9]+\.[0-9]+\.[0-9]+")
+if [ -z "$CURRENT" ]; then
+    # Fallback to working tree
+    CURRENT=$(grep -oP "BUILD_VERSION = 'v\K[0-9]+\.[0-9]+\.[0-9]+" "$ENGINE")
+fi
 if [ -z "$CURRENT" ]; then
     echo "Warning: Could not find BUILD_VERSION in $ENGINE"
     exit 0
@@ -48,13 +59,7 @@ else
 fi
 
 NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-TODAY=$(date +%Y-%m-%d)
 
-# Update version and date in engine.js
-sed -i "s/BUILD_VERSION = 'v[0-9]*\.[0-9]*\.[0-9]*'/BUILD_VERSION = '${NEW_VERSION}'/" "$ENGINE"
-sed -i "s/BUILD_DATE = '[0-9-]*'/BUILD_DATE = '${TODAY}'/" "$ENGINE"
-
-# Re-stage engine.js
-git add "$ENGINE"
-
-echo "[$BUMP] v${CURRENT} → ${NEW_VERSION} (${TODAY})"
+# Write bump info for post-commit hook
+echo "${NEW_VERSION}" > "$BUMP_FILE"
+echo "[$BUMP] v${CURRENT} → ${NEW_VERSION}"
