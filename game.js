@@ -238,6 +238,11 @@ function resize() {
     if (game) {
         game.W = W;
         game.H = H;
+        // Recompute spatial scale for new viewport dimensions
+        const REF_AREA = 390 * 844;
+        game.spatialScale = Math.sqrt((W * H) / REF_AREA);
+        game.cfg.SCREEN_MARGIN = 16 * game.spatialScale;
+        game.cfg.MIN_DOT_DISTANCE = 25 * game.spatialScale;
         game.recalcRadius(!continuousActive && round > 0 ? round : 0);
         if (!continuousActive && round > 0) game.explosionRadius *= (1 + mercyBonus);
     }

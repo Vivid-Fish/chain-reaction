@@ -28,7 +28,7 @@ const { runContinuous } = require('./continuous-sim.js');
 // TEST RUNNER
 // =========================================================================
 
-function runTest(testName, skillKey, tierOverrides, duration, seeds) {
+function runTest(testName, skillKey, tierOverrides, duration, seeds, width = 390, height = 844) {
     let survivals = 0;
     let totalMeanDensity = 0;
     let totalMaxDensity = 0;
@@ -40,8 +40,8 @@ function runTest(testName, skillKey, tierOverrides, duration, seeds) {
         const stats = runContinuous({
             bot: skillKey,
             duration,
-            width: 390,
-            height: 844,
+            width,
+            height,
             config: { ...tierOverrides, spawnAccel: 0 },
             seed,
         });
@@ -67,7 +67,7 @@ function runTest(testName, skillKey, tierOverrides, duration, seeds) {
 }
 
 function runTierTests(tierName, tier, opts) {
-    const { duration, marginDuration, lowerBotDuration, seeds } = opts;
+    const { duration, marginDuration, lowerBotDuration, seeds, vpW = 390, vpH = 844 } = opts;
     const profile = BOT_PROFILES[tierName];
     const results = [];
 
@@ -78,7 +78,8 @@ function runTierTests(tierName, tier, opts) {
         tierName,
         tier,
         duration,
-        seeds
+        seeds,
+        vpW, vpH
     );
     const steadyPass = steady.survivalRate >= 0.6 && steady.meanDensity < 0.70;
     console.log(
@@ -95,7 +96,8 @@ function runTierTests(tierName, tier, opts) {
         tierName,
         { ...tier, spawnRate: marginRate },
         marginDuration,
-        seeds
+        seeds,
+        vpW, vpH
     );
     const densityIncrease = margin.meanDensity - steady.meanDensity;
     const marginPass = margin.survivalRate <= 0.4 || margin.meanDensity > 0.65 || densityIncrease > 0.10;
@@ -114,7 +116,8 @@ function runTierTests(tierName, tier, opts) {
             'CALM',
             tier,
             lowerBotDuration,
-            seeds
+            seeds,
+            vpW, vpH
         );
         const densityGap = lower.meanDensity - steady.meanDensity;
         const lowerPass = lower.survivalRate <= 0.6 || densityGap > 0.05;
@@ -140,22 +143,30 @@ if (require.main === module) {
     const args = process.argv.slice(2);
     const fast = args.includes('--fast');
     const tierFilter = args.includes('--tier') ? args[args.indexOf('--tier') + 1] : null;
+    let vpW = 390, vpH = 844;
+    if (args.includes('--viewport')) {
+        const [w, h] = args[args.indexOf('--viewport') + 1].split('x').map(Number);
+        vpW = w; vpH = h;
+    }
 
     const opts = fast ? {
         duration: 120000,
         marginDuration: 120000,
         lowerBotDuration: 120000,
         seeds: [42, 137, 256],
+        vpW, vpH,
     } : {
         duration: 600000,
         marginDuration: 600000,
         lowerBotDuration: 300000,
         seeds: [42, 137, 256, 314, 999],
+        vpW, vpH,
     };
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`  CHAIN REACTION — Difficulty Regression Test`);
     console.log(`  Mode: ${fast ? 'FAST (2min, 3 seeds)' : 'FULL (10min, 5 seeds)'}`);
+    console.log(`  Viewport: ${vpW}x${vpH}`);
     console.log(`  Source: game-core.js CONTINUOUS_TIERS + BOT_PROFILES`);
     console.log(`${'='.repeat(60)}\n`);
 

@@ -134,6 +134,15 @@ class Game {
         this.H = height;
         this.cfg = { ...DEFAULTS, ...config };
         this.rng = rng;
+
+        // Spatial scale: normalize all px-dimensional physics to reference viewport
+        const REF_AREA = 390 * 844;
+        this.spatialScale = Math.sqrt((this.W * this.H) / REF_AREA);
+
+        // Scale spatial constants by s
+        this.cfg.SCREEN_MARGIN = (config.SCREEN_MARGIN || DEFAULTS.SCREEN_MARGIN) * this.spatialScale;
+        this.cfg.MIN_DOT_DISTANCE = (config.MIN_DOT_DISTANCE || DEFAULTS.MIN_DOT_DISTANCE) * this.spatialScale;
+
         this.recalcRadius(0);
 
         // Events: filled during step(), drained by consumer
@@ -177,8 +186,8 @@ class Game {
 
     /** Recalculate explosion radius for current viewport + optional round scaling. */
     recalcRadius(round) {
-        const refDim = Math.min(this.W, this.H, 800);
-        let r = Math.max(this.cfg.EXPLOSION_RADIUS_MIN_PX, refDim * this.cfg.EXPLOSION_RADIUS_PCT);
+        const REF_RADIUS = 39; // 390 * 0.10 at reference viewport
+        let r = REF_RADIUS * this.spatialScale;
         if (round > 0) r *= Math.max(0.85, 1.0 - (round - 1) * 0.01);
         this.explosionRadius = r;
         return r;
@@ -294,11 +303,12 @@ class Game {
             // Gravity dots pull nearby dots
             if (d.type === 'gravity') {
                 const pullR = this.explosionRadius * 2.5;
-                const pullF = 0.012;
+                const pullF = 0.012 * this.spatialScale;
+                const deadzone = 5 * this.spatialScale;
                 for (const o of this.dots) {
                     if (o === d || !o.active) continue;
                     const dist = Math.hypot(o.x - d.x, o.y - d.y);
-                    if (dist < pullR && dist > 5) {
+                    if (dist < pullR && dist > deadzone) {
                         const f = pullF * this.slowMo / (dist / this.explosionRadius);
                         o.vx += (d.x - o.x) / dist * f;
                         o.vy += (d.y - o.y) / dist * f;
@@ -336,12 +346,13 @@ class Game {
                 // Gravity-type explosions pull nearby dots
                 if (e.dotType === 'gravity') {
                     const pullR = e.maxRadius * 2.5;
+                    const deadzone = 5 * this.spatialScale;
                     for (let i = 0; i < this.dots.length; i++) {
                         const dot = this.dots[i];
                         if (!dot.active || e.caught.has(i)) continue;
                         const dist = Math.hypot(dot.x - e.x, dot.y - e.y);
-                        if (dist < pullR && dist > 5) {
-                            const f = 0.025 * this.slowMo / (dist / e.maxRadius);
+                        if (dist < pullR && dist > deadzone) {
+                            const f = 0.025 * this.spatialScale * this.slowMo / (dist / e.maxRadius);
                             dot.vx += (e.x - dot.x) / dist * f;
                             dot.vy += (e.y - dot.y) / dist * f;
                         }
@@ -467,7 +478,7 @@ class Game {
     _generateDots(count, speedMin, speedMax, typeWeights) {
         this.dots = [];
         let attempts = 0;
-        const topMargin = this.cfg.SCREEN_MARGIN + 50;
+        const topMargin = this.cfg.SCREEN_MARGIN + 50 * this.spatialScale;
         while (this.dots.length < count && attempts < 5000) {
             const x = this.cfg.SCREEN_MARGIN + this.rng() * (this.W - this.cfg.SCREEN_MARGIN * 2);
             const y = topMargin + this.rng() * (this.H - topMargin - this.cfg.SCREEN_MARGIN);
@@ -478,7 +489,7 @@ class Game {
             if (valid) {
                 const type = this._pickType(typeWeights);
                 const a = this.rng() * Math.PI * 2;
-                const spd = (speedMin + this.rng() * (speedMax - speedMin)) * (DOT_TYPES[type] || DOT_TYPES.standard).speedMult;
+                const spd = (speedMin + this.rng() * (speedMax - speedMin)) * (DOT_TYPES[type] || DOT_TYPES.standard).speedMult * this.spatialScale;
                 this.dots.push({
                     x, y,
                     vx: Math.cos(a) * spd,
@@ -600,7 +611,7 @@ class Game {
         const margin = this.cfg.SCREEN_MARGIN;
         const type = this._pickType(cfg.dotTypes);
         const typeDef = DOT_TYPES[type] || DOT_TYPES.standard;
-        const speed = (cfg.speedMin + this.rng() * (cfg.speedMax - cfg.speedMin)) * typeDef.speedMult;
+        const speed = (cfg.speedMin + this.rng() * (cfg.speedMax - cfg.speedMin)) * typeDef.speedMult * this.spatialScale;
 
         const edge = Math.floor(this.rng() * 4);
         const spread = Math.PI * 0.4;
@@ -750,8 +761,8 @@ const Bots = {
                         for (const o of dots) {
                             if (o === d || !o.active) continue;
                             const dist = Math.hypot(o.x - d.x, o.y - d.y);
-                            if (dist < pullR && dist > 5) {
-                                const f = 0.012 / (dist / r);
+                            if (dist < pullR && dist > 5 * game.spatialScale) {
+                                const f = 0.012 * game.spatialScale / (dist / r);
                                 o.vx += (d.x - o.x) / dist * f;
                                 o.vy += (d.y - o.y) / dist * f;
                             }
