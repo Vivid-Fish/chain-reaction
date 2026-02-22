@@ -1,32 +1,6 @@
 #!/bin/bash
-# Auto-bump patch version in engine.js on every commit
-# Format: vMAJOR.MINOR → vMAJOR.(MINOR+1)
+# Validate conventional commit format on staged changes
+# Actual version bump happens in commit-msg hook (which has access to the message)
 
-ENGINE="engine.js"
-
-# Only bump if engine.js or index.html are staged (actual game changes)
-if ! git diff --cached --name-only | grep -qE '^(engine\.js|index\.html|server\.js)$'; then
-    exit 0
-fi
-
-# Extract current version
-CURRENT=$(grep -oP "BUILD_VERSION = 'v\K[0-9]+\.[0-9]+" "$ENGINE")
-if [ -z "$CURRENT" ]; then
-    echo "Warning: Could not find BUILD_VERSION in $ENGINE"
-    exit 0
-fi
-
-MAJOR=$(echo "$CURRENT" | cut -d. -f1)
-MINOR=$(echo "$CURRENT" | cut -d. -f2)
-NEW_MINOR=$((MINOR + 1))
-NEW_VERSION="v${MAJOR}.${NEW_MINOR}"
-TODAY=$(date +%Y-%m-%d)
-
-# Update version and date
-sed -i "s/BUILD_VERSION = 'v[0-9]*\.[0-9]*'/BUILD_VERSION = '${NEW_VERSION}'/" "$ENGINE"
-sed -i "s/BUILD_DATE = '[0-9-]*'/BUILD_DATE = '${TODAY}'/" "$ENGINE"
-
-# Re-stage engine.js with the version bump
-git add "$ENGINE"
-
-echo "Auto-bumped version: v${CURRENT} → ${NEW_VERSION} (${TODAY})"
+# Nothing to validate at pre-commit stage — just ensure hook chain works
+exit 0

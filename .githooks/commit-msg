@@ -1,0 +1,60 @@
+#!/bin/bash
+# Auto-bump semver in engine.js based on conventional commit message
+#
+# feat!: or BREAKING CHANGE → major bump (v13.1.0 → v14.0.0)
+# feat:                      → minor bump (v13.1.0 → v13.2.0)
+# everything else            → patch bump (v13.1.0 → v13.1.1)
+#
+# Only bumps when game files are in the commit (engine.js, index.html, server.js)
+
+ENGINE="engine.js"
+MSG_FILE="$1"
+MSG=$(head -1 "$MSG_FILE")
+
+# Skip merges and amends that already have a version bump
+if echo "$MSG" | grep -qE '^Merge |^Auto-bump'; then
+    exit 0
+fi
+
+# Only bump if game files are staged
+if ! git diff --cached --name-only | grep -qE '^(engine\.js|index\.html|server\.js)$'; then
+    exit 0
+fi
+
+# Extract current version
+CURRENT=$(grep -oP "BUILD_VERSION = 'v\K[0-9]+\.[0-9]+\.[0-9]+" "$ENGINE")
+if [ -z "$CURRENT" ]; then
+    echo "Warning: Could not find BUILD_VERSION in $ENGINE"
+    exit 0
+fi
+
+MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+MINOR=$(echo "$CURRENT" | cut -d. -f2)
+PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+# Determine bump type from conventional commit message
+if echo "$MSG" | grep -qE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE'; then
+    MAJOR=$((MAJOR + 1))
+    MINOR=0
+    PATCH=0
+    BUMP="major"
+elif echo "$MSG" | grep -qE '^feat(\(.+\))?:'; then
+    MINOR=$((MINOR + 1))
+    PATCH=0
+    BUMP="minor"
+else
+    PATCH=$((PATCH + 1))
+    BUMP="patch"
+fi
+
+NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+TODAY=$(date +%Y-%m-%d)
+
+# Update version and date in engine.js
+sed -i "s/BUILD_VERSION = 'v[0-9]*\.[0-9]*\.[0-9]*'/BUILD_VERSION = '${NEW_VERSION}'/" "$ENGINE"
+sed -i "s/BUILD_DATE = '[0-9-]*'/BUILD_DATE = '${TODAY}'/" "$ENGINE"
+
+# Re-stage engine.js
+git add "$ENGINE"
+
+echo "[$BUMP] v${CURRENT} → ${NEW_VERSION} (${TODAY})"
