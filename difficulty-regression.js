@@ -67,7 +67,7 @@ const CALIBRATED_TIERS = {
     },
     IMPOSSIBLE: {
         bot: 'oracle',
-        spawnRate: 2.1,
+        spawnRate: 2.2,
         speedMin: 0.8, speedMax: 1.6,
         dotTypes: { standard: 0.30, gravity: 0.30, volatile: 0.40 },
         tapCooldown: 1500,

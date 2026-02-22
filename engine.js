@@ -27,7 +27,7 @@
 // CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v14.1.0';
+const BUILD_VERSION = 'v14.2.0';
 const BUILD_DATE = '2026-02-22';
 
 // Dot types — physics modifiers
@@ -1167,7 +1167,7 @@ const CONTINUOUS_TIERS = {
     FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
     SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
     TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
-    IMPOSSIBLE:    { spawnRate: 1.90, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8 },
+    IMPOSSIBLE:    { spawnRate: 2.20, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8 },
 };
 
 /** Pick dot type from weights (e.g. {standard:0.7, gravity:0.2, volatile:0.1}) */
