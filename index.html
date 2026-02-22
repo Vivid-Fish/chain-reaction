@@ -131,11 +131,12 @@
     let gameMode = localStorage.getItem('cr_game_mode') || 'rounds'; // 'rounds' | 'continuous'
     let selectedTier = localStorage.getItem('cr_continuous_tier') || 'FLOW';
     const TIER_ORDER = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE'];
+    const TIER_LABELS = { CALM: 'Calm', FLOW: 'Flow', SURGE: 'Surge', TRANSCENDENCE: 'Transcendence' };
     const TIER_DESCRIPTIONS = {
-        CALM: 'Breathe. Watch. Let the chains unfold.',
-        FLOW: 'Find your rhythm. Build your melody.',
-        SURGE: 'The field is alive. Keep up.',
-        TRANSCENDENCE: 'Everything. All at once.',
+        CALM: 'Slow pace. No rush. Learn the feel.',
+        FLOW: 'Steady rhythm. Time your taps.',
+        SURGE: 'Fast and dense. Stay sharp.',
+        TRANSCENDENCE: 'Tight space. Every tap counts.',
     };
     let tiersVisited = JSON.parse(localStorage.getItem('cr_tiers_visited') || '{}');
     let modeSwipeOffset = 0;   // current horizontal offset (px)
@@ -1569,33 +1570,31 @@
         ctx.font = `200 ${Math.min(11, subSize * 0.7)}px Inter, system-ui, sans-serif`;
         ctx.letterSpacing = '3px';
         ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.fillText('CONTINUOUS', cx, titleY + titleSize * 0.8);
+        ctx.fillText('ENDLESS', cx, titleY + titleSize * 0.8);
         ctx.letterSpacing = '0px';
 
-        // Tier name
+        // Difficulty label
         const tierNameY = titleY + titleSize * 0.8 + subSize * 1.8;
         ctx.font = `300 ${Math.min(28, W * 0.06)}px Inter, system-ui, sans-serif`;
         ctx.letterSpacing = '4px';
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText(selectedTier, cx, tierNameY);
+        ctx.fillText(TIER_LABELS[selectedTier], cx, tierNameY);
         ctx.letterSpacing = '0px';
 
-        // First-encounter description
-        if (!tiersVisited[selectedTier]) {
-            ctx.font = `300 ${Math.min(13, subSize * 0.8)}px Inter, system-ui, sans-serif`;
-            ctx.fillStyle = 'rgba(255,255,255,0.35)';
-            ctx.fillText(TIER_DESCRIPTIONS[selectedTier], cx, tierNameY + 28 * s);
-        }
+        // Description (always shown — explains what this difficulty means)
+        ctx.font = `300 ${Math.min(13, subSize * 0.8)}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.fillText(TIER_DESCRIPTIONS[selectedTier], cx, tierNameY + 28 * s);
 
-        // Tier navigation hint
+        // Difficulty navigation hint
         const tierIdx = TIER_ORDER.indexOf(selectedTier);
         ctx.font = `200 ${9 * s}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = 'rgba(255,255,255,0.15)';
         if (tierIdx > 0) {
-            ctx.fillText('\u25B2 ' + TIER_ORDER[tierIdx - 1], cx, tierNameY - 32 * s);
+            ctx.fillText('\u25B2 ' + TIER_LABELS[TIER_ORDER[tierIdx - 1]], cx, tierNameY - 32 * s);
         }
         if (tierIdx < TIER_ORDER.length - 1) {
-            ctx.fillText(TIER_ORDER[tierIdx + 1] + ' \u25BC', cx, tierNameY + (tiersVisited[selectedTier] ? 28 : 48) * s);
+            ctx.fillText(TIER_LABELS[TIER_ORDER[tierIdx + 1]] + ' \u25BC', cx, tierNameY + 48 * s);
         }
 
         // Tap prompt
@@ -1662,15 +1661,15 @@
         ctx.fillStyle = 'rgba(255,255,255,0.35)';
         ctx.fillText(`${mins}:${secs.toString().padStart(2, '0')}`, W / 2, 50 * s);
 
-        // Tier label (top right, subtle)
+        // Difficulty label (top right, subtle)
         ctx.textAlign = 'right';
         ctx.font = `200 ${10 * s | 0}px Inter, system-ui, sans-serif`;
         ctx.letterSpacing = '2px';
         ctx.fillStyle = 'rgba(255,255,255,0.15)';
-        ctx.fillText(selectedTier, W - 12 * s, 16 * s);
+        ctx.fillText(TIER_LABELS[selectedTier], W - 12 * s, 16 * s);
         ctx.letterSpacing = '0px';
 
-        // Density bar (left side, vertical)
+        // Pressure bar (left side, vertical) — shows how full the field is
         if (currentTier) {
             const density = getDensity(currentTier);
             const barH = H * 0.3;
@@ -1682,15 +1681,22 @@
             ctx.fillStyle = 'rgba(255,255,255,0.06)';
             ctx.fillRect(barX, barY, barW, barH);
 
-            // Fill (bottom up)
+            // Fill (bottom up) — color shifts from blue to orange to red
             const fillH = barH * Math.min(1, density);
             const densityHue = density >= 0.8 ? 0 : density >= 0.6 ? 30 : 200;
-            ctx.fillStyle = `hsla(${densityHue}, 70%, 60%, 0.5)`;
+            const densityAlpha = density >= 0.8 ? 0.7 : 0.5;
+            ctx.fillStyle = `hsla(${densityHue}, 70%, 60%, ${densityAlpha})`;
             ctx.fillRect(barX, barY + barH - fillH, barW, fillH);
 
+            // Danger zone — shaded region above 80%
+            const dangerH = barH * 0.2;
+            const dangerPulse = density >= 0.8 ? 0.08 + 0.06 * Math.sin(performance.now() * 0.006) : 0.03;
+            ctx.fillStyle = `rgba(255, 60, 60, ${dangerPulse})`;
+            ctx.fillRect(barX - 1, barY, barW + 2, dangerH);
+
             // Critical line at 80%
-            const critY = barY + barH * 0.2;
-            ctx.strokeStyle = 'rgba(255, 80, 80, 0.3)';
+            const critY = barY + dangerH;
+            ctx.strokeStyle = `rgba(255, 80, 80, ${density >= 0.7 ? 0.5 : 0.2})`;
             ctx.lineWidth = 1;
             ctx.setLineDash([3, 3]);
             ctx.beginPath();
@@ -1699,11 +1705,15 @@
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Density text
-            ctx.textAlign = 'left';
-            ctx.font = `200 ${8 * s | 0}px Inter, system-ui, sans-serif`;
-            ctx.fillStyle = 'rgba(255,255,255,0.2)';
-            ctx.fillText(`${(density * 100) | 0}%`, barX, barY + barH + 6 * s);
+            // Label
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `200 ${7 * s | 0}px Inter, system-ui, sans-serif`;
+            ctx.fillStyle = `rgba(255,255,255,${density >= 0.6 ? 0.35 : 0.15})`;
+            ctx.translate(barX + barW / 2, barY + barH + 14 * s);
+            ctx.fillText('pressure', 0, 0);
+            ctx.restore();
         }
 
         // Cooldown ring at last tap position
@@ -1731,14 +1741,44 @@
             ctx.fillText(`x${currentMultiplier}`, W / 2, 72 * s);
         }
 
-        // Overflow warning
-        if (overflowTimer > 2000) {
-            const warningAlpha = 0.2 + 0.3 * Math.sin(performance.now() * 0.01);
+        // Overflow warning — progressive urgency
+        if (overflowTimer > 0 && !overflowTriggered) {
+            const pct = Math.min(1, overflowTimer / 10000); // 0→1 over 10s
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.font = `600 ${14 * s | 0}px Inter, system-ui, sans-serif`;
-            ctx.fillStyle = `rgba(255, 80, 80, ${warningAlpha})`;
-            ctx.fillText('OVERFLOW', W / 2, H - 40 * s);
+
+            if (overflowTimer < 3000) {
+                // Phase 1 (0-3s): gentle "too many dots" hint
+                const a = 0.15 + 0.1 * Math.sin(performance.now() * 0.004);
+                ctx.font = `300 ${12 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = `rgba(255, 160, 80, ${a})`;
+                ctx.fillText('clear some dots...', W / 2, H - 40 * s);
+            } else if (overflowTimer < 7000) {
+                // Phase 2 (3-7s): countdown becomes visible
+                const secsLeft = Math.ceil((10000 - overflowTimer) / 1000);
+                const a = 0.3 + 0.2 * Math.sin(performance.now() * 0.008);
+                ctx.font = `500 ${14 * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = `rgba(255, 100, 60, ${a})`;
+                ctx.fillText(`overflowing in ${secsLeft}s`, W / 2, H - 40 * s);
+            } else {
+                // Phase 3 (7-10s): urgent, pulsing fast
+                const secsLeft = Math.ceil((10000 - overflowTimer) / 1000);
+                const a = 0.5 + 0.4 * Math.sin(performance.now() * 0.015);
+                const sz = 16 + 2 * Math.sin(performance.now() * 0.012);
+                ctx.font = `700 ${sz * s | 0}px Inter, system-ui, sans-serif`;
+                ctx.fillStyle = `rgba(255, 60, 40, ${a})`;
+                ctx.fillText(`${secsLeft}`, W / 2, H - 40 * s);
+            }
+
+            // Edge vignette that intensifies with overflow progress
+            if (pct > 0.2) {
+                const vigAlpha = (pct - 0.2) * 0.15;
+                const grad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H) * 0.3, W/2, H/2, Math.min(W,H) * 0.7);
+                grad.addColorStop(0, 'rgba(255,0,0,0)');
+                grad.addColorStop(1, `rgba(255,30,10,${vigAlpha})`);
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, W, H);
+            }
         }
 
         // Build info
@@ -1772,7 +1812,7 @@
         ctx.font = `200 ${11 * s | 0}px Inter, system-ui, sans-serif`;
         ctx.letterSpacing = '3px';
         ctx.fillStyle = `rgba(255,255,255,${t * 0.3})`;
-        ctx.fillText(selectedTier, W / 2, H * 0.28);
+        ctx.fillText(TIER_LABELS[selectedTier], W / 2, H * 0.28);
         ctx.letterSpacing = '0px';
 
         if (t > 0.3) {
