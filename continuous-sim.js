@@ -136,6 +136,7 @@ function runContinuous(opts) {
             tierConfig,
             botProfile: skillKey,
             viewport: { w: width, h: height },
+            duration: stats.duration,
             events: replayEvents,
         };
     }

@@ -14,6 +14,10 @@
             user-select: none;
             -webkit-user-select: none;
             cursor: default;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
         }
         canvas { display: block; }
     </style>
@@ -30,6 +34,10 @@
     //
     // Supports both round-based and continuous replays.
     // Load via: ?file=replay.json (static file) or /replay/{sessionId} (API)
+    //
+    // Continuous replays are deterministic: same seed → same spawning.
+    // Only tap events are recorded. Scrubbing re-creates the game from seed
+    // and fast-forwards (~0.3s for 90s of gameplay).
     // =========================================================================
 
     const canvas = document.getElementById('game');
@@ -58,19 +66,93 @@
 
     let uiButtons = [];
 
-    // Game instance for physics — replaced on replay load for continuous mode
+    // Game instance for physics — replaced on replay load
     let game = new Game(400, 700, {}, Math.random);
 
     // =====================================================================
-    // RESIZE
+    // RESIZE — continuous replays use fixed viewport, CSS-scaled
     // =====================================================================
     function resize() {
-        engineResize(canvas);
-        game.W = W;
-        game.H = H;
+        if (isContinuous && replayData) {
+            // Fixed viewport matching the replay — CSS scales to screen
+            const vp = replayData.viewport;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = vp.w * dpr;
+            canvas.height = vp.h * dpr;
+            // Fill viewport maintaining aspect ratio
+            const screenAR = window.innerWidth / window.innerHeight;
+            const replayAR = vp.w / vp.h;
+            if (screenAR > replayAR) {
+                canvas.style.height = '100vh';
+                canvas.style.width = `${window.innerHeight * replayAR}px`;
+            } else {
+                canvas.style.width = '100vw';
+                canvas.style.height = `${window.innerWidth / replayAR}px`;
+            }
+            W = vp.w;
+            H = vp.h;
+            refDim = Math.min(W, H, 800);
+            const screenMin = Math.min(W, H);
+            DOT_RADIUS = Math.max(6, screenMin * 0.014);
+            DOT_GLOW_SIZE = Math.max(28, screenMin * 0.06);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        } else {
+            engineResize(canvas);
+            game.W = W;
+            game.H = H;
+        }
     }
     window.addEventListener('resize', resize);
     resize();
+
+    // =====================================================================
+    // COORDINATE MAPPING — screen coords → game coords for input
+    // =====================================================================
+    function screenToGame(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left) / rect.width * W,
+            y: (clientY - rect.top) / rect.height * H,
+        };
+    }
+
+    // =====================================================================
+    // SEEK — re-create game from seed and fast-forward to target time
+    // =====================================================================
+    function seekTo(targetTime) {
+        if (!isContinuous || !replayData) return;
+
+        targetTime = Math.max(0, Math.min(targetTime, totalDuration));
+
+        // Re-create deterministic game from seed
+        const vp = replayData.viewport;
+        game = new Game(vp.w, vp.h, {}, createRNG(replayData.seed));
+        game.startContinuous(replayData.tierConfig);
+
+        // Fast-forward: step + apply taps
+        const DT = 16.67;
+        eventIdx = 0;
+        while (game.time < targetTime && !game.overflowed) {
+            while (eventIdx < replayEvents.length && replayEvents[eventIdx].t <= game.time) {
+                const ev = replayEvents[eventIdx];
+                if (ev.type === 'tap') game.tap(ev.data.x, ev.data.y);
+                eventIdx++;
+            }
+            game.step(DT);
+            game.events = [];
+        }
+        // Apply any remaining taps at the exact target time
+        while (eventIdx < replayEvents.length && replayEvents[eventIdx].t <= targetTime) {
+            const ev = replayEvents[eventIdx];
+            if (ev.type === 'tap') game.tap(ev.data.x, ev.data.y);
+            eventIdx++;
+        }
+
+        replayTime = targetTime;
+        engineResetVisuals();
+        replayGameState = game.overflowed ? 'ended' : 'playing';
+        lastFrameTime = performance.now();
+    }
 
     // =====================================================================
     // REPLAY EVENT PROCESSING
@@ -79,7 +161,6 @@
         if (ev.type === 'round_start') {
             currentRound = ev.data.round;
             game.setupRound(ev.data.round);
-            // Replace generated dots with recorded positions
             game.dots = ev.data.dots.map(d => ({
                 x: d.x, y: d.y, vx: d.vx, vy: d.vy,
                 active: true, type: d.type || 'standard', bloomTimer: 0,
@@ -104,26 +185,29 @@
     // UPDATE + DRAW
     // =====================================================================
     function update(dt) {
+        // Stop stepping if overflowed or ended
+        if (replayGameState === 'ended') {
+            engineUpdateVisuals(game);
+            return;
+        }
+
         game.step(dt);
 
-        // Process game-core events for visual effects
         engineProcessEvents(game.events, game);
         game.events = [];
         engineUpdateVisuals(game);
 
-        // Fever decay when chain done
         if (feverIntensity > 0 && game.explosions.length === 0) {
             feverIntensity = Math.max(0, feverIntensity - 0.008);
         }
 
-        // Track resolving → done transition
         if (replayGameState === 'resolving' && game.gameState !== 'resolving') {
             replayGameState = 'playing';
         }
 
-        // Continuous: check overflow
         if (isContinuous && game.overflowed && replayGameState !== 'ended') {
             replayGameState = 'ended';
+            playing = false;
             spawnCelebration('OVERFLOW', 0, 1.6);
         }
     }
@@ -166,7 +250,6 @@
         const s = Math.max(1, Math.min(W, H) / 600);
 
         if (isContinuous) {
-            // Continuous mode HUD
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
 
@@ -178,7 +261,6 @@
             ctx.fillText(tierName.toUpperCase(), W/2, 14 * s);
             ctx.letterSpacing = '0px';
 
-            // Time
             const secs = Math.floor(replayTime / 1000);
             const mins = Math.floor(secs / 60);
             const remSecs = secs % 60;
@@ -186,7 +268,6 @@
             ctx.fillStyle = 'rgba(255,255,255,0.85)';
             ctx.fillText(`${mins}:${remSecs.toString().padStart(2, '0')}`, W/2, 28 * s);
 
-            // Density bar
             const density = game.density();
             if (density > 0) {
                 const barW = 80 * s, barH = 4 * s;
@@ -202,7 +283,6 @@
                 ctx.fillText(`${(density * 100).toFixed(0)}%`, W/2, barY + barH + 4 * s);
             }
 
-            // Chain count
             if (game.chainCount > 0) {
                 ctx.font = `700 ${14 * s | 0}px Inter, system-ui, sans-serif`;
                 ctx.save();
@@ -213,14 +293,12 @@
                 ctx.restore();
             }
 
-            // Score
             if (game.score > 0) {
                 ctx.font = `300 ${11 * s | 0}px Inter, system-ui, sans-serif`;
                 ctx.fillStyle = 'rgba(255,255,255,0.35)';
                 ctx.fillText(`Score: ${game.score.toLocaleString()}`, W/2, 110 * s);
             }
 
-            // Bot label
             const botNames = { CALM: 'Dumb', FLOW: 'Average', SURGE: 'Good', TRANSCENDENCE: 'Pro', IMPOSSIBLE: 'Inhuman' };
             const botName = botNames[replayData.botProfile] || replayData.botProfile;
             ctx.font = `400 ${9 * s | 0}px Inter, system-ui, sans-serif`;
@@ -228,7 +306,6 @@
             ctx.textAlign = 'left';
             ctx.fillText(`BOT: ${botName}`, 10 * s, 14 * s);
         } else if (currentRound > 0) {
-            // Round mode HUD
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
 
@@ -287,15 +364,15 @@
         uiButtons.push({ id: 'back', ...backRect });
 
         if (!loading && !errorMsg) {
-            const playLabel = playing ? 'Pause' : 'Play';
-            const playRect = drawPill(ctx, W/2 - 55 * s, btnY, playLabel, playing, 120);
+            const playLabel = playing ? 'Pause' : (replayGameState === 'ended' ? 'Restart' : 'Play');
+            const playRect = drawPill(ctx, W/2 - 75 * s, btnY, playLabel, playing, 120);
             uiButtons.push({ id: 'playpause', ...playRect });
 
-            const speeds = [1, 2, 4];
-            const speedLabels = ['1x', '2x', '4x'];
+            const speeds = [1, 2, 4, 8, 16];
+            const speedLabels = ['1x', '2x', '4x', '8x', '16x'];
             for (let i = 0; i < speeds.length; i++) {
-                const sx = W/2 + (i * 40 - 10) * s;
-                const rect = drawPill(ctx, sx, btnY, speedLabels[i], speed === speeds[i], 55);
+                const sx = W/2 + (i * 32 - 30) * s;
+                const rect = drawPill(ctx, sx, btnY, speedLabels[i], speed === speeds[i], 45);
                 uiButtons.push({ id: `speed_${speeds[i]}`, ...rect });
             }
 
@@ -320,13 +397,15 @@
         const barY = H - 48 * s;
         const barX = 12 * s;
         const barW = W - 24 * s;
-        const barH = 3 * s;
+        const barH = 5 * s;
 
+        // Track
         ctx.fillStyle = 'rgba(255,255,255,0.08)';
         ctx.beginPath();
         ctx.roundRect(barX, barY, barW, barH, barH / 2);
         ctx.fill();
 
+        // Fill
         const progress = Math.min(1, replayTime / totalDuration);
         if (progress > 0) {
             ctx.fillStyle = 'rgba(100, 180, 255, 0.4)';
@@ -335,20 +414,38 @@
             ctx.fill();
         }
 
+        // Tap markers
+        ctx.fillStyle = 'rgba(255, 255, 100, 0.25)';
+        for (const ev of replayEvents) {
+            if (ev.type !== 'tap') continue;
+            const tx = barX + (ev.t / totalDuration) * barW;
+            ctx.fillRect(tx - 0.5, barY - 1, 1, barH + 2);
+        }
+
+        // Playhead
         const headX = barX + barW * progress;
         ctx.beginPath();
-        ctx.arc(headX, barY + barH / 2, 4 * s, 0, Math.PI * 2);
+        ctx.arc(headX, barY + barH / 2, 5 * s, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
         ctx.fill();
+
+        // Clickable region for scrubbing
+        uiButtons.push({ id: 'progressbar', x: barX, y: barY - 10 * s, w: barW, h: barH + 20 * s });
     }
 
     // =====================================================================
     // MAIN LOOP
     // =====================================================================
     function loop(now) {
-        if (playing && replayEvents.length > 0 && !loading && !errorMsg) {
+        if (playing && replayEvents.length > 0 && !loading && !errorMsg && replayGameState !== 'ended') {
             const dt = (now - lastFrameTime) * speed;
             replayTime += dt;
+
+            // Cap at total duration
+            if (replayTime >= totalDuration) {
+                replayTime = totalDuration;
+                playing = false;
+            }
 
             while (eventIdx < replayEvents.length && replayEvents[eventIdx].t <= replayTime) {
                 processEvent(replayEvents[eventIdx]);
@@ -375,15 +472,13 @@
         try {
             let data;
             if (file) {
-                // Load from static file: ?file=replays/surge-137.json
                 const res = await fetch(file);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 data = await res.json();
             } else {
-                // Load from API: /replay/{sessionId}
                 const pathParts = window.location.pathname.split('/');
                 const sessionId = pathParts[pathParts.length - 1];
-                if (!sessionId) { loading = false; errorMsg = 'No replay ID in URL. Use ?file=replay.json'; return; }
+                if (!sessionId) { loading = false; errorMsg = 'No replay ID. Use ?file=replay.json'; return; }
                 const res = await fetch(`/api/replay/${sessionId}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 data = await res.json();
@@ -393,19 +488,14 @@
             replayEvents = data.events || [];
             if (replayEvents.length === 0) { loading = false; errorMsg = 'Replay has no events'; return; }
 
-            // Detect continuous mode
             isContinuous = data.mode === 'continuous';
 
             if (isContinuous) {
-                // Deterministic replay: same seed → same spawning
                 const vp = data.viewport || { w: 390, h: 844 };
                 game = new Game(vp.w, vp.h, {}, createRNG(data.seed));
                 game.startContinuous(data.tierConfig);
-                game.W = W;
-                game.H = H;
                 replayGameState = 'playing';
-
-                totalDuration = replayEvents[replayEvents.length - 1].t + 5000; // pad 5s after last tap
+                totalDuration = data.duration || replayEvents[replayEvents.length - 1].t + 5000;
                 document.title = `Replay — ${data.tier} · seed ${data.seed}`;
             } else {
                 totalDuration = replayEvents[replayEvents.length - 1].t;
@@ -413,6 +503,9 @@
                 const name = data.player_name || (data.is_bot ? 'Bot' : 'Anonymous');
                 document.title = `Replay — ${name} R${data.peak_round}`;
             }
+
+            // Apply correct viewport for continuous replays
+            resize();
 
             loading = false;
             playing = true;
@@ -426,10 +519,10 @@
     // =====================================================================
     // INPUT
     // =====================================================================
-    function hitTestButtons(x, y) {
+    function hitTestButtons(gx, gy) {
         for (const btn of uiButtons) {
-            if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
-                return btn.id;
+            if (gx >= btn.x && gx <= btn.x + btn.w && gy >= btn.y && gy <= btn.y + btn.h) {
+                return btn;
             }
         }
         return null;
@@ -437,26 +530,68 @@
 
     canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
-        const x = e.clientX, y = e.clientY;
-        const hit = hitTestButtons(x, y);
+        const { x: gx, y: gy } = screenToGame(e.clientX, e.clientY);
+        const hit = hitTestButtons(gx, gy);
 
-        if (hit === 'back') { window.location.href = '/'; return; }
-        if (hit === 'playpause') {
-            playing = !playing;
+        if (!hit) return;
+        if (hit.id === 'back') { window.location.href = '/'; return; }
+        if (hit.id === 'playpause') {
+            if (replayGameState === 'ended') {
+                // Restart
+                seekTo(0);
+                playing = true;
+            } else {
+                playing = !playing;
+            }
             if (playing) lastFrameTime = performance.now();
             return;
         }
-        if (hit && hit.startsWith('speed_')) {
-            speed = parseInt(hit.split('_')[1]);
+        if (hit.id && hit.id.startsWith('speed_')) {
+            speed = parseInt(hit.id.split('_')[1]);
+            return;
+        }
+        if (hit.id === 'progressbar') {
+            const frac = Math.max(0, Math.min(1, (gx - hit.x) / hit.w));
+            seekTo(frac * totalDuration);
             return;
         }
     });
 
+    // Drag scrubbing on progress bar
+    let scrubbing = false;
+    let scrubBtn = null;
+    canvas.addEventListener('pointermove', e => {
+        if (!scrubbing) return;
+        e.preventDefault();
+        const { x: gx } = screenToGame(e.clientX, e.clientY);
+        const frac = Math.max(0, Math.min(1, (gx - scrubBtn.x) / scrubBtn.w));
+        seekTo(frac * totalDuration);
+    });
+    canvas.addEventListener('pointerdown', e => {
+        const { x: gx, y: gy } = screenToGame(e.clientX, e.clientY);
+        const hit = hitTestButtons(gx, gy);
+        if (hit && hit.id === 'progressbar') {
+            scrubbing = true;
+            scrubBtn = hit;
+        }
+    });
+    canvas.addEventListener('pointerup', () => { scrubbing = false; });
+    canvas.addEventListener('pointercancel', () => { scrubbing = false; });
+
     document.addEventListener('keydown', e => {
-        if (e.key === ' ') { e.preventDefault(); playing = !playing; if (playing) lastFrameTime = performance.now(); }
+        if (e.key === ' ') {
+            e.preventDefault();
+            if (replayGameState === 'ended') { seekTo(0); playing = true; }
+            else { playing = !playing; }
+            if (playing) lastFrameTime = performance.now();
+        }
         if (e.key === '1') speed = 1;
         if (e.key === '2') speed = 2;
         if (e.key === '4') speed = 4;
+        if (e.key === '8') speed = 8;
+        if (e.key === '0') speed = 16;
+        if (e.key === 'ArrowLeft') seekTo(replayTime - 5000);
+        if (e.key === 'ArrowRight') seekTo(replayTime + 5000);
         if (e.key === 'Escape') window.location.href = '/';
     });
 
