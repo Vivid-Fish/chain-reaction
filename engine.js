@@ -16,7 +16,7 @@
 // RENDERING CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v16.5.0';
+const BUILD_VERSION = 'v17.0.1';
 const BUILD_DATE = '2026-02-23';
 
 // Dot rendering
