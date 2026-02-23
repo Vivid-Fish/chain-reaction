@@ -53,12 +53,15 @@ const DEFAULTS = {
 
 // Calibrated via calibrate-continuous.js (600s sessions, 5 seeds).
 // Browser rates set at ~90% of oracle survival threshold (see DESIGN.md).
+// spawnDensityScale: positive feedback — spawn rate increases with board density.
+// effectiveRate = baseRate * (1 + density * spawnDensityScale)
+// This creates inevitable death: more dots → faster spawning → even more dots.
 const CONTINUOUS_TIERS = {
-    CALM:          { spawnRate: 0.65, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8 },
-    FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8 },
-    SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8 },
-    TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8 },
-    IMPOSSIBLE:    { spawnRate: 2.20, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8 },
+    CALM:          { spawnRate: 0.65, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
+    FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
+    SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8, spawnDensityScale: 1.0 },
+    TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
+    IMPOSSIBLE:    { spawnRate: 2.20, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
 };
 
 // =====================================================================
@@ -267,6 +270,17 @@ class Game {
             this._lastTapTime = this.time;
             this.totalTaps++;
             this.totalDots = this.activeDotCount();
+
+            // H2: Radius decay per tap
+            if (this._contCfg.radiusDecayPerTap) {
+                this.explosionRadius *= (1 - this._contCfg.radiusDecayPerTap);
+                // Floor at 50% of base radius
+                const baseRadius = 39 * this.spatialScale;
+                if (this.explosionRadius < baseRadius * 0.5) {
+                    this.explosionRadius = baseRadius * 0.5;
+                }
+            }
+
             // Reset per-tap chain tracking for correct multiplier/celebration
             this.chainCount = 0;
             this.currentMultiplier = 1;
@@ -283,7 +297,18 @@ class Game {
         this.time += dt;
 
         // Continuous: spawn new dots
-        if (this._continuous) this._spawnTick(dt);
+        if (this._continuous) {
+            this._spawnTick(dt);
+
+            // H2: Radius regeneration over time
+            if (this._contCfg && this._contCfg.radiusRegenRate) {
+                const baseRadius = 39 * this.spatialScale;
+                if (this.explosionRadius < baseRadius) {
+                    this.explosionRadius += this._contCfg.radiusRegenRate * baseRadius * (dt / 1000);
+                    if (this.explosionRadius > baseRadius) this.explosionRadius = baseRadius;
+                }
+            }
+        }
 
         // Process pending explosions
         for (let i = this.pendingExplosions.length - 1; i >= 0; i--) {
@@ -321,6 +346,20 @@ class Game {
             if (d.x > this.W - margin) { d.vx = -Math.abs(d.vx); d.x = this.W - margin; }
             if (d.y < margin) { d.vy = Math.abs(d.vy); d.y = margin; }
             if (d.y > this.H - margin) { d.vy = -Math.abs(d.vy); d.y = this.H - margin; }
+
+            // H1: Dot aging — dots accelerate over their lifetime
+            // Creates tradeoff: clear early (small chains) vs wait (bigger chains, faster dots)
+            if (this._contCfg && this._contCfg.agingRate && d.age !== undefined) {
+                d.age += dt;
+                const ageFactor = 1 + this._contCfg.agingRate * (d.age / 1000);
+                const speed = Math.hypot(d.vx, d.vy);
+                if (speed > 0) {
+                    const targetSpeed = d.baseSpeed * ageFactor;
+                    const scale = targetSpeed / speed;
+                    d.vx *= scale;
+                    d.vy *= scale;
+                }
+            }
         }
 
         // Update explosions: grow/hold/shrink + collision detection
@@ -448,6 +487,8 @@ class Game {
             meanDensity: avg(densities),
             maxDensity: max(densities),
             densitySamples: this.densityHistory.length,
+            densityHistory: this.densityHistory,
+            chainLengths: this.chainLengths,
         };
     }
 
@@ -498,6 +539,8 @@ class Game {
                     active: true,
                     bloomTimer: 0,
                     type,
+                    age: 0,
+                    baseSpeed: spd,
                 });
             }
             attempts++;
@@ -597,7 +640,15 @@ class Game {
     // Continuous mode: spawn dots at screen edges
     _spawnTick(dt) {
         const cfg = this._contCfg;
-        const rate = cfg.spawnRate + (cfg.spawnAccel || 0) * (this.time / 30000);
+        let rate = cfg.spawnRate + (cfg.spawnAccel || 0) * (this.time / 30000);
+
+        // H6: Density-scaled spawn rate — positive feedback loop
+        // Higher density → faster spawning → more dots → higher density
+        if (cfg.spawnDensityScale) {
+            const density = this.density();
+            rate *= (1 + density * cfg.spawnDensityScale);
+        }
+
         this._spawnAccum += rate * (dt / 1000);
 
         while (this._spawnAccum >= 1 && this.activeDotCount() < cfg.maxDots) {
@@ -641,7 +692,7 @@ class Game {
                 break;
         }
 
-        this.dots.push({ x, y, vx, vy, active: true, bloomTimer: 0, type });
+        this.dots.push({ x, y, vx, vy, active: true, bloomTimer: 0, type, age: 0, baseSpeed: speed });
         this.totalDotsSpawned++;
     }
 

@@ -16,8 +16,8 @@
 // RENDERING CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v16.2.0';
-const BUILD_DATE = '2026-02-22';
+const BUILD_VERSION = 'v16.3.0';
+const BUILD_DATE = '2026-02-23';
 
 // Dot rendering
 let DOT_RADIUS = 5;

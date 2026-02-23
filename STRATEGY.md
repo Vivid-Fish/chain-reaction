@@ -272,6 +272,50 @@ Apply winning design to game.js, test in browser, deploy.
 
 **Assessment:** Game self-stabilizes. No positive feedback. Skilled player survives indefinitely. Oracle is broken. IMPOSSIBLE is mislabeled.
 
+### H6: Density-Scaled Spawn Rate (WINNER)
+
+`effectiveSpawnRate = baseRate * (1 + density * k)`
+
+| k | IMPOSSIBLE mortality | Density slope | Escalation | Skill disc | Flags |
+|---|---|---|---|---|---|
+| 0 (baseline) | 20% | 4.5 | 25.6% | 3.85x | 1 (LOW_MORTALITY) |
+| 0.3 | 80% (FLOW) | 10.5 | 40.5% | 2.48x | 1 |
+| **0.4** | **95% (FLOW), 90% (IMP)** | **14-16** | **49-52%** | **1.8-2.3x** | **0** |
+| 0.5 | 100% (all) | 15-19 | 52-53% | 1.7-2.3x | 0 |
+| 1.0 | 100% | 29-32 | 66-69% | 1.2-1.6x | 1 |
+
+**k=0.4 is the sweet spot.** Zero quality flags at FLOW and IMPOSSIBLE. Mortality jumps from 20% to 90-95%. Density trend slope triples. Skill discrimination preserved at 1.8-2.3x.
+
+SURGE (5.8/s base rate, 2500ms cooldown) is resistant — still 55% mortality at k=0.4 because the enormous chain lengths (41 avg) overcome the positive feedback. SURGE needs a separate fix (likely reduce maxDots or cooldown).
+
+### H1: Dot Aging (FAILED)
+
+`dot.speed *= (1 + agingRate * age/1000)` per step.
+
+All values tested (0.05-1.0) made the game EASIER, not harder. Mortality dropped to 0%. Fast-moving old dots spread out and don't cluster, preventing overflow. The mechanism that makes chains harder (fast dots) is the same mechanism that prevents overflow (dispersed dots).
+
+**Key insight:** The inverse difficulty curve is robust against speed changes. Faster dots = less clustering = lower density = easier survival. Speed is not the right lever.
+
+### H2: Radius Decay Per Tap (PARTIAL)
+
+`radius *= (1 - decayPerTap)` on each tap, regenerates over time.
+
+| Decay | IMPOSSIBLE mortality | Density slope | Skill disc | BE ratio | Flags |
+|---|---|---|---|---|---|
+| 0.03 | 100% | 23.5 | 1.48x | 1.14x | 1 |
+| 0.05 | 100% | 29.1 | 1.33x | 0.87x | 1 |
+| 0.08 | 100% | 32.2 | 1.24x | 0.74x | 2 |
+
+Creates mortality but destroys skill discrimination. Everyone dies regardless of skill because radius shrinks to the point where chains can't propagate. Too blunt — the mechanic removes agency rather than creating tradeoffs.
+
+### Combination Tests
+
+H6 (k=0.4) alone is sufficient. It achieves the primary goal (games end) while preserving the secondary goals (skill matters, drama exists). Other mechanics either failed (H1), were too blunt (H2), or weren't needed on top of H6.
+
+### Decision: Ship H6 with k=0.4
+
+The `spawnDensityScale` parameter will be added to each tier's config. It creates the missing positive feedback loop: more dots → faster spawning → even more dots → inevitable overflow. This is the Tetris-like crisis curve the game was missing.
+
 ---
 
 *Last updated: 2026-02-23*

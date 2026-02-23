@@ -37,7 +37,7 @@ const CONTINUOUS_DEFAULTS = {
 
 /** Map flat config (with tapCooldown) to game-core tier config format */
 function toTierConfig(cfg) {
-    return {
+    const tier = {
         spawnRate: cfg.spawnRate || 2.5,
         spawnAccel: cfg.spawnAccel || 0,
         cooldown: cfg.tapCooldown || cfg.cooldown || 2000,
@@ -48,6 +48,12 @@ function toTierConfig(cfg) {
         overflowDensity: cfg.overflowDensity || 0.8,
         overflowDuration: cfg.overflowDuration || 10000,
     };
+    // Pass through experimental config keys
+    if (cfg.spawnDensityScale) tier.spawnDensityScale = cfg.spawnDensityScale;
+    if (cfg.agingRate) tier.agingRate = cfg.agingRate;
+    if (cfg.radiusDecayPerTap) tier.radiusDecayPerTap = cfg.radiusDecayPerTap;
+    if (cfg.radiusRegenRate) tier.radiusRegenRate = cfg.radiusRegenRate;
+    return tier;
 }
 
 /** Backward-compat class: new ContinuousSimulation(w, h, config, seed) */
