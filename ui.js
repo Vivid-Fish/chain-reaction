@@ -365,8 +365,10 @@ function drawRoundsStartPage(offsetX) {
         const skillRect = drawPill(ctx, cx + 60 * s, btnY, `Skill: ${skillName}`, false, 55);
         uiButtons.push({ id: 'bot_skill', ...skillRect });
     } else {
-        const watchRect = drawPill(ctx, cx, btnY, 'Watch Bot', false, 55);
+        const watchRect = drawPill(ctx, cx - 55 * s, btnY, 'Watch Bot', false, 55);
         uiButtons.push({ id: 'watch', ...watchRect });
+        const pvpRect = drawPill(ctx, cx + 55 * s, btnY, 'PvP', false, 0);
+        uiButtons.push({ id: 'pvp', ...pvpRect });
     }
 }
 
@@ -456,8 +458,10 @@ function drawContinuousStartPage(offsetX) {
         const skillRect = drawPill(ctx, cx + 60 * s, btnY, `Skill: ${skillName}`, false, 55);
         uiButtons.push({ id: 'bot_skill', ...skillRect });
     } else {
-        const watchRect = drawPill(ctx, cx, btnY, 'Watch Bot', false, 55);
+        const watchRect = drawPill(ctx, cx - 55 * s, btnY, 'Watch Bot', false, 55);
         uiButtons.push({ id: 'watch', ...watchRect });
+        const pvpRect = drawPill(ctx, cx + 55 * s, btnY, 'PvP', false, 0);
+        uiButtons.push({ id: 'pvp', ...pvpRect });
     }
 }
 
@@ -961,6 +965,7 @@ function handleButtonHit(x, y) {
         }
         return true;
     }
+    if (hit === 'pvp') { window.location.href = 'pvp.html'; return true; }
     if (hit === 'replay') { downloadReplay(); return true; }
     if (hit === 'resume' && resumeCheckpoint) {
         audio.init();

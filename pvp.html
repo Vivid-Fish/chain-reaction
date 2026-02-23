@@ -272,7 +272,12 @@ function spawnGarbage(game, state) {
     const tier = CONTINUOUS_TIERS[selectedTier];
     const garbageCount = state.garbageQueue.getReady(game.time);
     for (let i = 0; i < garbageCount && game.activeDotCount() < tier.maxDots; i++) {
+        const prevLen = game.dots.length;
         game._spawnOneDot();
+        // Mark newly spawned dot as garbage for visual differentiation
+        if (game.dots.length > prevLen) {
+            game.dots[game.dots.length - 1].isGarbage = true;
+        }
     }
 }
 
@@ -295,23 +300,49 @@ const TYPE_HUES = { standard: 210, gravity: 270, volatile: 30, poison: 120 };
 
 function drawDot(d, game) {
     if (!d.active) return;
-    const hue = TYPE_HUES[d.type] || (195 - (d.y / game.H) * 180);
     const r = Math.max(4, Math.min(game.W, game.H) * 0.012);
 
-    // Glow
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, r * 3, 0, Math.PI * 2);
-    const glow = ctx.createRadialGradient(d.x, d.y, r * 0.5, d.x, d.y, r * 3);
-    glow.addColorStop(0, `hsla(${hue}, 80%, 60%, 0.3)`);
-    glow.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
-    ctx.fillStyle = glow;
-    ctx.fill();
+    if (d.isGarbage) {
+        // Garbage dots: desaturated, reddish, with warning ring
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, r * 2.5, 0, Math.PI * 2);
+        const glow = ctx.createRadialGradient(d.x, d.y, r * 0.3, d.x, d.y, r * 2.5);
+        glow.addColorStop(0, 'rgba(255, 80, 60, 0.25)');
+        glow.addColorStop(1, 'rgba(255, 80, 60, 0)');
+        ctx.fillStyle = glow;
+        ctx.fill();
 
-    // Core
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = `hsl(${hue}, 80%, 65%)`;
-    ctx.fill();
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'hsl(0, 30%, 50%)';
+        ctx.fill();
+
+        // Dashed warning ring
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, r * 1.6, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 80, 60, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    } else {
+        const hue = TYPE_HUES[d.type] || (195 - (d.y / game.H) * 180);
+
+        // Glow
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, r * 3, 0, Math.PI * 2);
+        const glow = ctx.createRadialGradient(d.x, d.y, r * 0.5, d.x, d.y, r * 3);
+        glow.addColorStop(0, `hsla(${hue}, 80%, 60%, 0.3)`);
+        glow.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = glow;
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `hsl(${hue}, 80%, 65%)`;
+        ctx.fill();
+    }
 
     // Bloom flash
     if (d.bloomTimer > 0) {
@@ -559,6 +590,11 @@ function drawMenu() {
     } else {
         ctx.fillText('Left = P1    Right = P2', W / 2, startY + fontSize * 2);
     }
+
+    // Back to solo link
+    ctx.font = `300 ${fontSize * 0.8}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.fillText('\u2190 Solo Mode', W / 2, H - fontSize * 1.5);
 }
 
 function drawGameOver() {
@@ -603,6 +639,10 @@ function drawGameOver() {
     ctx.font = `700 ${fontSize * 1.2}px Inter`;
     ctx.fillStyle = '#fff';
     ctx.fillText('TAP TO REMATCH', W / 2, H * 0.78);
+
+    ctx.font = `300 ${fontSize * 0.8}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillText('or tap here for menu', W / 2, H * 0.85);
 }
 
 function draw() {
@@ -681,6 +721,12 @@ function handleTap(x, y) {
             }
         }
 
+        // Back to solo link (bottom of menu)
+        if (y > H - fontSize * 3) {
+            window.location.href = 'index.html';
+            return;
+        }
+
         // Start match on tap below selectors
         if (y > H * 0.65) {
             startMatch();
@@ -689,7 +735,11 @@ function handleTap(x, y) {
     }
 
     if (pvpState === 'gameover') {
-        startMatch();
+        if (y > H * 0.82) {
+            pvpState = 'menu';
+        } else {
+            startMatch();
+        }
         return;
     }
 
