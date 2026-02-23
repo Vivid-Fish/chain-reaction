@@ -44,7 +44,8 @@ const PVP_CONFIG = {
 // STATE
 // =========================================================================
 
-let W, H, playerW;
+let W, H, playerW, playerH;
+let isStacked = false; // true = portrait (top/bottom), false = landscape (left/right)
 let gameA, gameB;
 let stateA, stateB; // per-player state
 let pvpState = 'menu'; // 'menu' | 'playing' | 'gameover'
@@ -118,22 +119,31 @@ function calcGarbage(chainLength, divisor) {
 function resize() {
     W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
-    playerW = Math.floor((W - PVP_CONFIG.dividerWidth) / 2);
 
+    // Portrait phones: stack vertically. Landscape/desktop: side-by-side.
+    isStacked = W < 600 && W < H;
+
+    if (isStacked) {
+        playerW = W;
+        playerH = Math.floor((H - PVP_CONFIG.dividerWidth) / 2);
+    } else {
+        playerW = Math.floor((W - PVP_CONFIG.dividerWidth) / 2);
+        playerH = H;
+    }
+
+    const REF_AREA = 390 * 844;
     if (gameA) {
         gameA.W = playerW;
-        gameA.H = H;
-        const REF_AREA = 390 * 844;
-        gameA.spatialScale = Math.sqrt((playerW * H) / REF_AREA);
+        gameA.H = playerH;
+        gameA.spatialScale = Math.sqrt((playerW * playerH) / REF_AREA);
         gameA.cfg.SCREEN_MARGIN = 16 * gameA.spatialScale;
         gameA.cfg.MIN_DOT_DISTANCE = 25 * gameA.spatialScale;
         gameA.recalcRadius(0);
     }
     if (gameB) {
         gameB.W = playerW;
-        gameB.H = H;
-        const REF_AREA = 390 * 844;
-        gameB.spatialScale = Math.sqrt((playerW * H) / REF_AREA);
+        gameB.H = playerH;
+        gameB.spatialScale = Math.sqrt((playerW * playerH) / REF_AREA);
         gameB.cfg.SCREEN_MARGIN = 16 * gameB.spatialScale;
         gameB.cfg.MIN_DOT_DISTANCE = 25 * gameB.spatialScale;
         gameB.recalcRadius(0);
@@ -154,8 +164,8 @@ function startMatch() {
         spawnDensityScale: tier.spawnDensityScale || 0,
     };
 
-    gameA = new Game(playerW, H, {}, Math.random);
-    gameB = new Game(playerW, H, {}, Math.random);
+    gameA = new Game(playerW, playerH, {}, Math.random);
+    gameB = new Game(playerW, playerH, {}, Math.random);
     gameA.startContinuous(tierCfg);
     gameB.startContinuous(tierCfg);
 
@@ -256,7 +266,7 @@ function processChains(attacker, attackerState, defender, defenderState) {
             for (let i = 0; i < chainLen; i++) {
                 attackerState.particles.push({
                     x: Math.random() * playerW,
-                    y: Math.random() * H,
+                    y: Math.random() * playerH,
                     vx: (Math.random() - 0.5) * 2,
                     vy: -Math.random() * 3 - 1,
                     life: 30 + Math.random() * 30,
@@ -406,12 +416,12 @@ function drawExplosion(e) {
     ctx.stroke();
 }
 
-function drawPlayer(game, state, offsetX) {
+function drawPlayer(game, state, offsetX, offsetY) {
     ctx.save();
     ctx.beginPath();
-    ctx.rect(offsetX, 0, playerW, H);
+    ctx.rect(offsetX, offsetY, playerW, playerH);
     ctx.clip();
-    ctx.translate(offsetX, 0);
+    ctx.translate(offsetX, offsetY);
 
     // Background
     const density = game.density();
@@ -419,7 +429,7 @@ function drawPlayer(game, state, offsetX) {
     const bgG = Math.floor(4 + density * 5);
     const bgB = Math.floor(15 + density * 10);
     ctx.fillStyle = `rgb(${bgR}, ${bgG}, ${bgB})`;
-    ctx.fillRect(0, 0, playerW, H);
+    ctx.fillRect(0, 0, playerW, playerH);
 
     // Dots
     for (const d of game.dots) drawDot(d, game);
@@ -437,7 +447,7 @@ function drawPlayer(game, state, offsetX) {
     }
 
     // HUD
-    const fontSize = Math.max(12, playerW * 0.04);
+    const fontSize = Math.max(12, Math.min(playerW, playerH) * 0.04);
 
     // Player label
     ctx.font = `900 ${fontSize * 1.5}px Inter`;
@@ -451,28 +461,28 @@ function drawPlayer(game, state, offsetX) {
     ctx.fillText(game.score.toLocaleString(), playerW / 2, fontSize * 3.5);
 
     // Density bar
-    const barW = playerW * 0.8;
-    const barH = 6;
-    const barX = (playerW - barW) / 2;
-    const barY = H - 40;
+    const dbW = playerW * 0.8;
+    const dbH = 6;
+    const dbX = (playerW - dbW) / 2;
+    const dbY = playerH - 40;
 
     ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillRect(dbX, dbY, dbW, dbH);
 
     const densityColor = density > 0.7 ? '#f44' : density > 0.5 ? '#fa4' : '#4f4';
     ctx.fillStyle = densityColor;
-    ctx.fillRect(barX, barY, barW * Math.min(1, density), barH);
+    ctx.fillRect(dbX, dbY, dbW * Math.min(1, density), dbH);
 
     // Density text
     ctx.font = `400 ${fontSize * 0.7}px Inter`;
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.textAlign = 'center';
-    ctx.fillText(`${(density * 100).toFixed(0)}%`, playerW / 2, barY - 4);
+    ctx.fillText(`${(density * 100).toFixed(0)}%`, playerW / 2, dbY - 4);
 
     // Pending garbage indicator
     const pending = state.garbageQueue.pendingTotal();
     if (pending > 0) {
-        const garbageBarH = Math.min(H * 0.3, pending * 8);
+        const garbageBarH = Math.min(playerH * 0.3, pending * 8);
         ctx.fillStyle = 'rgba(255, 60, 60, 0.4)';
         ctx.fillRect(playerW - 12, 0, 12, garbageBarH);
 
@@ -487,7 +497,7 @@ function drawPlayer(game, state, offsetX) {
     if (cdRemaining > 0) {
         const cdFrac = cdRemaining / (CONTINUOUS_TIERS[selectedTier].cooldown || 2000);
         ctx.fillStyle = `rgba(255, 255, 255, ${0.15 * cdFrac})`;
-        ctx.fillRect(0, H - 4, playerW * (1 - cdFrac), 4);
+        ctx.fillRect(0, playerH - 4, playerW * (1 - cdFrac), 4);
     }
 
     // Chain info
@@ -497,16 +507,19 @@ function drawPlayer(game, state, offsetX) {
         ctx.font = `400 ${fontSize * 0.7}px Inter`;
         ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.textAlign = 'left';
-        ctx.fillText(`Chain: ${lastChain} | Best: ${maxChain}`, 10, H - 50);
+        ctx.fillText(`Chain: ${lastChain} | Best: ${maxChain}`, 10, playerH - 50);
     }
 
     ctx.restore();
 }
 
 function drawDivider() {
-    const x = playerW;
     ctx.fillStyle = '#222';
-    ctx.fillRect(x, 0, PVP_CONFIG.dividerWidth, H);
+    if (isStacked) {
+        ctx.fillRect(0, playerH, W, PVP_CONFIG.dividerWidth);
+    } else {
+        ctx.fillRect(playerW, 0, PVP_CONFIG.dividerWidth, H);
+    }
 }
 
 function drawMenu() {
@@ -607,9 +620,9 @@ function drawMenu() {
     ctx.font = `400 ${fontSize * 0.8}px Inter`;
     ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
     if (vsMode === 'bot') {
-        ctx.fillText('You play the left side', W / 2, startY + fontSize * 2);
+        ctx.fillText(isStacked ? 'You play the bottom half' : 'You play the left side', W / 2, startY + fontSize * 2);
     } else {
-        ctx.fillText('Left = P1    Right = P2', W / 2, startY + fontSize * 2);
+        ctx.fillText(isStacked ? 'Top = P2    Bottom = P1' : 'Left = P1    Right = P2', W / 2, startY + fontSize * 2);
     }
 
     // Back to solo link
@@ -677,8 +690,15 @@ function draw() {
     ctx.fillRect(0, 0, W, H);
 
     // Draw both players
-    drawPlayer(gameA, stateA, 0);
-    drawPlayer(gameB, stateB, playerW + PVP_CONFIG.dividerWidth);
+    if (isStacked) {
+        // Stacked: P1 on bottom (human), Bot/P2 on top
+        drawPlayer(gameB, stateB, 0, 0);
+        drawPlayer(gameA, stateA, 0, playerH + PVP_CONFIG.dividerWidth);
+    } else {
+        // Side-by-side: P1 on left, Bot/P2 on right
+        drawPlayer(gameA, stateA, 0, 0);
+        drawPlayer(gameB, stateB, playerW + PVP_CONFIG.dividerWidth, 0);
+    }
     drawDivider();
 
     if (pvpState === 'gameover') {
@@ -765,16 +785,23 @@ function handleTap(x, y) {
     }
 
     if (pvpState === 'playing') {
-        if (x < playerW) {
-            // Player 1 tap (always human)
-            if (gameA.canTap()) {
-                gameA.tap(x, y);
+        if (isStacked) {
+            // Stacked: P1 is bottom half, P2/bot is top half
+            if (y > playerH + PVP_CONFIG.dividerWidth) {
+                // Player 1 tap
+                const localY = y - playerH - PVP_CONFIG.dividerWidth;
+                if (gameA.canTap()) gameA.tap(x, localY);
+            } else if (y < playerH && vsMode === '2p') {
+                // Player 2 tap — only in 2P local mode
+                if (gameB.canTap()) gameB.tap(x, y);
             }
-        } else if (x > playerW + PVP_CONFIG.dividerWidth && vsMode === '2p') {
-            // Player 2 tap — only in 2P local mode
-            const localX = x - playerW - PVP_CONFIG.dividerWidth;
-            if (gameB.canTap()) {
-                gameB.tap(localX, y);
+        } else {
+            // Side-by-side: P1 is left half, P2/bot is right half
+            if (x < playerW) {
+                if (gameA.canTap()) gameA.tap(x, y);
+            } else if (x > playerW + PVP_CONFIG.dividerWidth && vsMode === '2p') {
+                const localX = x - playerW - PVP_CONFIG.dividerWidth;
+                if (gameB.canTap()) gameB.tap(localX, y);
             }
         }
     }
