@@ -262,7 +262,7 @@ function build() {
                 cursor: pointer; backdrop-filter: blur(4px);
             }
             .lab-toggle:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
-            @media (min-width: 700px) { .lab-toggle { display: none; } }
+            /* Always visible — backtick also works on desktop */
         </style>
         <div class="lab-header">
             <span>LAB</span>

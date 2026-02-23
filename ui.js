@@ -206,9 +206,9 @@ function drawUI() {
     // Build info
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
-    ctx.font = `300 ${9 * s | 0}px Inter, system-ui, sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillText(`${BUILD_VERSION} · ${BUILD_DATE}`, W - 8 * s, H - 6 * s);
+    ctx.font = `400 ${11 * s | 0}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillText(`${BUILD_VERSION}`, W - 8 * s, H - 6 * s);
 }
 
 // =====================================================================
@@ -610,9 +610,9 @@ function drawContinuousHUD(s) {
 
     // Build info
     ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-    ctx.font = `300 ${9 * s | 0}px Inter, system-ui, sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillText(`${BUILD_VERSION} · ${BUILD_DATE}`, W - 8 * s, H - 6 * s);
+    ctx.font = `400 ${11 * s | 0}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillText(`${BUILD_VERSION}`, W - 8 * s, H - 6 * s);
 }
 
 // =====================================================================
