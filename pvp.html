@@ -176,6 +176,7 @@ function startMatch() {
         label: 'P1',
         color: '#4af',
         particles: [],
+        floats: [],  // floating text notifications
     };
     stateB = {
         garbageQueue: new GarbageQueue(),
@@ -184,6 +185,7 @@ function startMatch() {
         label: vsMode === 'bot' ? 'BOT' : 'P2',
         color: '#f64',
         particles: [],
+        floats: [],
     };
 
     // Set up bot if vs bot mode
@@ -228,9 +230,11 @@ function update() {
     spawnGarbage(gameA, stateA);
     spawnGarbage(gameB, stateB);
 
-    // Update particles
+    // Update particles and floats
     updateParticles(stateA.particles);
     updateParticles(stateB.particles);
+    updateFloats(stateA.floats);
+    updateFloats(stateB.floats);
 
     // Check game over
     if (gameA.overflowed) {
@@ -255,11 +259,48 @@ function processChains(attacker, attackerState, defender, defenderState) {
             const capped = Math.min(surplus, PVP_CONFIG.maxPendingGarbage - defenderState.garbageQueue.pendingTotal());
             if (capped > 0) {
                 defenderState.garbageQueue.queue(capped, attacker.time + PVP_CONFIG.garbageDelay);
+                // Attack notification on attacker's side
+                attackerState.floats.push({
+                    text: `+${capped} ATTACK`,
+                    x: playerW / 2,
+                    y: playerH * 0.5,
+                    life: 60,
+                    maxLife: 60,
+                    color: '#f64',
+                    size: 1.2,
+                });
             }
+        }
+
+        // Offset notification
+        if (rawGarbage > 0 && rawGarbage > surplus) {
+            const cancelled = rawGarbage - surplus;
+            attackerState.floats.push({
+                text: `OFFSET ${cancelled}`,
+                x: playerW / 2,
+                y: playerH * 0.4,
+                life: 45,
+                maxLife: 45,
+                color: '#4f4',
+                size: 0.9,
+            });
         }
 
         attackerState.prevChainCount = attacker.chainLengths.length;
         attackerState.score = attacker.score;
+
+        // Chain length notification
+        if (chainLen >= 5) {
+            attackerState.floats.push({
+                text: `${chainLen} CHAIN`,
+                x: playerW / 2,
+                y: playerH * 0.6,
+                life: 50,
+                maxLife: 50,
+                color: chainLen >= 15 ? '#ff0' : '#fff',
+                size: chainLen >= 15 ? 1.5 : 1.0,
+            });
+        }
 
         // Spawn particles for chain
         if (chainLen >= 3) {
@@ -320,6 +361,15 @@ function updateParticles(particles) {
         p.vy += 0.05;
         p.life--;
         if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function updateFloats(floats) {
+    for (let i = floats.length - 1; i >= 0; i--) {
+        const f = floats[i];
+        f.y -= 0.8;  // Float upward
+        f.life--;
+        if (f.life <= 0) floats.splice(i, 1);
     }
 }
 
@@ -444,6 +494,22 @@ function drawPlayer(game, state, offsetX, offsetY) {
         ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
         ctx.fill();
+    }
+
+    // Floating text notifications
+    for (const f of state.floats) {
+        const alpha = f.life / f.maxLife;
+        const scale = 1 + (1 - alpha) * 0.3; // grow slightly as they fade
+        const fSize = Math.max(12, Math.min(playerW, playerH) * 0.04) * f.size * scale;
+        ctx.font = `900 ${fSize | 0}px Inter`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = f.color.replace(')', `, ${alpha})`).replace('rgb', 'rgba').replace('#', '');
+        // Handle hex colors
+        const r = parseInt(f.color.slice(1,2).repeat(2), 16) || 255;
+        const g = parseInt(f.color.slice(2,3).repeat(2), 16) || 255;
+        const b = parseInt(f.color.slice(3,4).repeat(2), 16) || 255;
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.fillText(f.text, f.x, f.y);
     }
 
     // HUD
