@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Chain Reaction — PvP</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; user-select: none; }
+body { background: #04040f; overflow: hidden; font-family: 'Inter', sans-serif; }
+canvas { display: block; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+<canvas id="pvp"></canvas>
+<script src="game-core.js"></script>
+<script>
+'use strict';
+
+// =========================================================================
+// CHAIN REACTION — Local PvP Mode
+//
+// Split-screen 2-player mode. Each player taps their half of the screen.
+// Chains generate garbage dots sent to the opponent's board.
+// First player to overflow loses.
+// =========================================================================
+
+const canvas = document.getElementById('pvp');
+const ctx = canvas.getContext('2d');
+
+// =========================================================================
+// PVP CONFIG
+// =========================================================================
+
+const PVP_CONFIG = {
+    garbageDivisor: 7,
+    garbageDelay: 3000,
+    maxPendingGarbage: 30,
+    tier: 'FLOW',
+    dividerWidth: 4,
+};
+
+// =========================================================================
+// STATE
+// =========================================================================
+
+let W, H, playerW;
+let gameA, gameB;
+let stateA, stateB; // per-player state
+let pvpState = 'menu'; // 'menu' | 'playing' | 'gameover'
+let winner = null;
+let selectedTier = 'FLOW';
+
+const TIERS = Object.keys(CONTINUOUS_TIERS);
+
+// =========================================================================
+// GARBAGE QUEUE
+// =========================================================================
+
+class GarbageQueue {
+    constructor() {
+        this.pending = [];
+        this.totalSent = 0;
+        this.totalReceived = 0;
+        this.totalOffset = 0;
+    }
+
+    queue(amount, spawnTime) {
+        if (amount <= 0) return;
+        this.pending.push({ amount, spawnTime });
+        this.totalSent += amount;
+    }
+
+    offset(chainGarbage) {
+        let remaining = chainGarbage;
+        for (let i = 0; i < this.pending.length && remaining > 0; i++) {
+            const cancel = Math.min(this.pending[i].amount, remaining);
+            this.pending[i].amount -= cancel;
+            remaining -= cancel;
+            this.totalOffset += cancel;
+        }
+        this.pending = this.pending.filter(p => p.amount > 0);
+        return remaining;
+    }
+
+    getReady(currentTime) {
+        let total = 0;
+        this.pending = this.pending.filter(p => {
+            if (currentTime >= p.spawnTime) {
+                total += p.amount;
+                return false;
+            }
+            return true;
+        });
+        this.totalReceived += total;
+        return total;
+    }
+
+    pendingTotal() {
+        return this.pending.reduce((a, p) => a + p.amount, 0);
+    }
+}
+
+function calcGarbage(chainLength, divisor) {
+    if (chainLength < 2) return 0;
+    return Math.floor(chainLength * chainLength / divisor);
+}
+
+// =========================================================================
+// INITIALIZATION
+// =========================================================================
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    playerW = Math.floor((W - PVP_CONFIG.dividerWidth) / 2);
+
+    if (gameA) {
+        gameA.W = playerW;
+        gameA.H = H;
+        const REF_AREA = 390 * 844;
+        gameA.spatialScale = Math.sqrt((playerW * H) / REF_AREA);
+        gameA.cfg.SCREEN_MARGIN = 16 * gameA.spatialScale;
+        gameA.cfg.MIN_DOT_DISTANCE = 25 * gameA.spatialScale;
+        gameA.recalcRadius(0);
+    }
+    if (gameB) {
+        gameB.W = playerW;
+        gameB.H = H;
+        const REF_AREA = 390 * 844;
+        gameB.spatialScale = Math.sqrt((playerW * H) / REF_AREA);
+        gameB.cfg.SCREEN_MARGIN = 16 * gameB.spatialScale;
+        gameB.cfg.MIN_DOT_DISTANCE = 25 * gameB.spatialScale;
+        gameB.recalcRadius(0);
+    }
+}
+
+function startMatch() {
+    const tier = CONTINUOUS_TIERS[selectedTier];
+    const tierCfg = {
+        spawnRate: tier.spawnRate,
+        spawnAccel: 0,
+        cooldown: tier.cooldown,
+        maxDots: tier.maxDots,
+        speedMin: tier.speedMin,
+        speedMax: tier.speedMax,
+        dotTypes: tier.dotTypes,
+        overflowDensity: tier.overflowDensity,
+        spawnDensityScale: tier.spawnDensityScale || 0,
+    };
+
+    gameA = new Game(playerW, H, {}, Math.random);
+    gameB = new Game(playerW, H, {}, Math.random);
+    gameA.startContinuous(tierCfg);
+    gameB.startContinuous(tierCfg);
+
+    stateA = {
+        garbageQueue: new GarbageQueue(),
+        prevChainCount: 0,
+        score: 0,
+        label: 'P1',
+        color: '#4af',
+        particles: [],
+    };
+    stateB = {
+        garbageQueue: new GarbageQueue(),
+        prevChainCount: 0,
+        score: 0,
+        label: 'P2',
+        color: '#f64',
+        particles: [],
+    };
+
+    pvpState = 'playing';
+    winner = null;
+}
+
+// =========================================================================
+// GAME LOOP
+// =========================================================================
+
+const DT = 16.67;
+
+function update() {
+    if (pvpState !== 'playing') return;
+
+    gameA.step(DT);
+    gameB.step(DT);
+    gameA.events = [];
+    gameB.events = [];
+
+    // Check chain completions and send garbage
+    processChains(gameA, stateA, gameB, stateB);
+    processChains(gameB, stateB, gameA, stateA);
+
+    // Spawn ready garbage
+    spawnGarbage(gameA, stateA);
+    spawnGarbage(gameB, stateB);
+
+    // Update particles
+    updateParticles(stateA.particles);
+    updateParticles(stateB.particles);
+
+    // Check game over
+    if (gameA.overflowed) {
+        pvpState = 'gameover';
+        winner = 'P2';
+    } else if (gameB.overflowed) {
+        pvpState = 'gameover';
+        winner = 'P1';
+    }
+}
+
+function processChains(attacker, attackerState, defender, defenderState) {
+    if (attacker.chainLengths.length > attackerState.prevChainCount) {
+        const chainLen = attacker.chainLengths[attacker.chainLengths.length - 1];
+        const rawGarbage = calcGarbage(chainLen, PVP_CONFIG.garbageDivisor);
+
+        // Offset own incoming garbage first
+        const surplus = attackerState.garbageQueue.offset(rawGarbage);
+
+        // Send surplus to defender
+        if (surplus > 0) {
+            const capped = Math.min(surplus, PVP_CONFIG.maxPendingGarbage - defenderState.garbageQueue.pendingTotal());
+            if (capped > 0) {
+                defenderState.garbageQueue.queue(capped, attacker.time + PVP_CONFIG.garbageDelay);
+            }
+        }
+
+        attackerState.prevChainCount = attacker.chainLengths.length;
+        attackerState.score = attacker.score;
+
+        // Spawn particles for chain
+        if (chainLen >= 3) {
+            for (let i = 0; i < chainLen; i++) {
+                attackerState.particles.push({
+                    x: Math.random() * playerW,
+                    y: Math.random() * H,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: -Math.random() * 3 - 1,
+                    life: 30 + Math.random() * 30,
+                    maxLife: 60,
+                    size: 2 + Math.random() * 3,
+                });
+            }
+        }
+    }
+}
+
+function spawnGarbage(game, state) {
+    const tier = CONTINUOUS_TIERS[selectedTier];
+    const garbageCount = state.garbageQueue.getReady(game.time);
+    for (let i = 0; i < garbageCount && game.activeDotCount() < tier.maxDots; i++) {
+        game._spawnOneDot();
+    }
+}
+
+function updateParticles(particles) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+// =========================================================================
+// RENDERING
+// =========================================================================
+
+const TYPE_HUES = { standard: 210, gravity: 270, volatile: 30, poison: 120 };
+
+function drawDot(d, game) {
+    if (!d.active) return;
+    const hue = TYPE_HUES[d.type] || (195 - (d.y / game.H) * 180);
+    const r = Math.max(4, Math.min(game.W, game.H) * 0.012);
+
+    // Glow
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, r * 3, 0, Math.PI * 2);
+    const glow = ctx.createRadialGradient(d.x, d.y, r * 0.5, d.x, d.y, r * 3);
+    glow.addColorStop(0, `hsla(${hue}, 80%, 60%, 0.3)`);
+    glow.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+    ctx.fillStyle = glow;
+    ctx.fill();
+
+    // Core
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `hsl(${hue}, 80%, 65%)`;
+    ctx.fill();
+
+    // Bloom flash
+    if (d.bloomTimer > 0) {
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, r * 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${d.bloomTimer / 12 * 0.5})`;
+        ctx.fill();
+        d.bloomTimer--;
+    }
+}
+
+function drawExplosion(e) {
+    if (e.radius <= 0) return;
+    const hue = TYPE_HUES[e.dotType] || 210;
+
+    // Outer glow
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius * 1.5, 0, Math.PI * 2);
+    const outerGlow = ctx.createRadialGradient(e.x, e.y, e.radius * 0.3, e.x, e.y, e.radius * 1.5);
+    outerGlow.addColorStop(0, `hsla(${hue}, 70%, 50%, 0.15)`);
+    outerGlow.addColorStop(1, `hsla(${hue}, 70%, 50%, 0)`);
+    ctx.fillStyle = outerGlow;
+    ctx.fill();
+
+    // Core
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.radius);
+    grad.addColorStop(0, `hsla(${hue}, 60%, 70%, 0.3)`);
+    grad.addColorStop(0.7, `hsla(${hue}, 70%, 50%, 0.15)`);
+    grad.addColorStop(1, `hsla(${hue}, 80%, 40%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Ring
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsla(${hue}, 80%, 60%, ${e.phase === 'shrink' ? 0.2 : 0.4})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+}
+
+function drawPlayer(game, state, offsetX) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(offsetX, 0, playerW, H);
+    ctx.clip();
+    ctx.translate(offsetX, 0);
+
+    // Background
+    const density = game.density();
+    const bgR = Math.floor(4 + density * 20);
+    const bgG = Math.floor(4 + density * 5);
+    const bgB = Math.floor(15 + density * 10);
+    ctx.fillStyle = `rgb(${bgR}, ${bgG}, ${bgB})`;
+    ctx.fillRect(0, 0, playerW, H);
+
+    // Dots
+    for (const d of game.dots) drawDot(d, game);
+
+    // Explosions
+    for (const e of game.explosions) drawExplosion(e);
+
+    // Particles
+    for (const p of state.particles) {
+        const alpha = p.life / p.maxLife;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+        ctx.fill();
+    }
+
+    // HUD
+    const fontSize = Math.max(12, playerW * 0.04);
+
+    // Player label
+    ctx.font = `900 ${fontSize * 1.5}px Inter`;
+    ctx.fillStyle = state.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(state.label, playerW / 2, fontSize * 2);
+
+    // Score
+    ctx.font = `700 ${fontSize}px Inter`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(game.score.toLocaleString(), playerW / 2, fontSize * 3.5);
+
+    // Density bar
+    const barW = playerW * 0.8;
+    const barH = 6;
+    const barX = (playerW - barW) / 2;
+    const barY = H - 40;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(barX, barY, barW, barH);
+
+    const densityColor = density > 0.7 ? '#f44' : density > 0.5 ? '#fa4' : '#4f4';
+    ctx.fillStyle = densityColor;
+    ctx.fillRect(barX, barY, barW * Math.min(1, density), barH);
+
+    // Density text
+    ctx.font = `400 ${fontSize * 0.7}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${(density * 100).toFixed(0)}%`, playerW / 2, barY - 4);
+
+    // Pending garbage indicator
+    const pending = state.garbageQueue.pendingTotal();
+    if (pending > 0) {
+        const garbageBarH = Math.min(H * 0.3, pending * 8);
+        ctx.fillStyle = 'rgba(255, 60, 60, 0.4)';
+        ctx.fillRect(playerW - 12, 0, 12, garbageBarH);
+
+        ctx.font = `900 ${fontSize * 0.8}px Inter`;
+        ctx.fillStyle = '#f44';
+        ctx.textAlign = 'right';
+        ctx.fillText(`+${pending}`, playerW - 16, garbageBarH + fontSize);
+    }
+
+    // Cooldown indicator
+    const cdRemaining = game.cooldownRemaining();
+    if (cdRemaining > 0) {
+        const cdFrac = cdRemaining / (CONTINUOUS_TIERS[selectedTier].cooldown || 2000);
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.15 * cdFrac})`;
+        ctx.fillRect(0, H - 4, playerW * (1 - cdFrac), 4);
+    }
+
+    // Chain info
+    if (game.chainLengths.length > 0) {
+        const lastChain = game.chainLengths[game.chainLengths.length - 1];
+        const maxChain = Math.max(...game.chainLengths);
+        ctx.font = `400 ${fontSize * 0.7}px Inter`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Chain: ${lastChain} | Best: ${maxChain}`, 10, H - 50);
+    }
+
+    ctx.restore();
+}
+
+function drawDivider() {
+    const x = playerW;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(x, 0, PVP_CONFIG.dividerWidth, H);
+}
+
+function drawMenu() {
+    ctx.fillStyle = '#04040f';
+    ctx.fillRect(0, 0, W, H);
+
+    const fontSize = Math.max(16, W * 0.03);
+
+    // Title
+    ctx.font = `900 ${fontSize * 2.5}px Inter`;
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText('CHAIN REACTION', W / 2, H * 0.2);
+
+    ctx.font = `200 ${fontSize * 1.2}px Inter`;
+    ctx.fillStyle = '#4af';
+    ctx.fillText('P V P', W / 2, H * 0.2 + fontSize * 3);
+
+    // Tier selector
+    ctx.font = `400 ${fontSize}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillText('SELECT TIER', W / 2, H * 0.4);
+
+    const tierY = H * 0.48;
+    const tierSpacing = fontSize * 3;
+    const totalWidth = TIERS.length * tierSpacing;
+    const startX = (W - totalWidth) / 2 + tierSpacing / 2;
+
+    for (let i = 0; i < TIERS.length; i++) {
+        const x = startX + i * tierSpacing;
+        const selected = TIERS[i] === selectedTier;
+
+        ctx.font = `${selected ? 900 : 400} ${fontSize * (selected ? 1.1 : 0.9)}px Inter`;
+        ctx.fillStyle = selected ? '#fff' : 'rgba(255, 255, 255, 0.3)';
+        ctx.fillText(TIERS[i].substring(0, 4), x, tierY);
+
+        if (selected) {
+            ctx.fillStyle = '#4af';
+            ctx.fillRect(x - tierSpacing * 0.3, tierY + 8, tierSpacing * 0.6, 3);
+        }
+    }
+
+    // Start prompt
+    ctx.font = `700 ${fontSize * 1.5}px Inter`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText('TAP TO START', W / 2, H * 0.7);
+
+    ctx.font = `400 ${fontSize * 0.8}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillText('Left side = P1    Right side = P2', W / 2, H * 0.78);
+}
+
+function drawGameOver() {
+    // Dim the boards
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, W, H);
+
+    const fontSize = Math.max(16, W * 0.03);
+
+    ctx.font = `900 ${fontSize * 3}px Inter`;
+    ctx.fillStyle = winner === 'P1' ? stateA.color : stateB.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${winner} WINS`, W / 2, H * 0.35);
+
+    // Stats
+    ctx.font = `400 ${fontSize}px Inter`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(
+        `P1: ${gameA.score.toLocaleString()} pts | P2: ${gameB.score.toLocaleString()} pts`,
+        W / 2, H * 0.45
+    );
+
+    const timeS = (Math.min(gameA.time, gameB.time) / 1000).toFixed(1);
+    ctx.fillText(`Duration: ${timeS}s`, W / 2, H * 0.52);
+
+    const gA = stateA.garbageQueue;
+    const gB = stateB.garbageQueue;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.font = `400 ${fontSize * 0.8}px Inter`;
+    ctx.fillText(
+        `Garbage: P1 sent ${gB.totalReceived + gB.totalOffset} | P2 sent ${gA.totalReceived + gA.totalOffset}`,
+        W / 2, H * 0.58
+    );
+    const totalGarbage = gA.totalSent + gB.totalSent;
+    const totalOffset = gA.totalOffset + gB.totalOffset;
+    ctx.fillText(
+        `Offset rate: ${totalGarbage > 0 ? (totalOffset / totalGarbage * 100).toFixed(0) : 0}%`,
+        W / 2, H * 0.63
+    );
+
+    ctx.font = `700 ${fontSize * 1.2}px Inter`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText('TAP TO REMATCH', W / 2, H * 0.78);
+}
+
+function draw() {
+    if (pvpState === 'menu') {
+        drawMenu();
+        return;
+    }
+
+    // Clear
+    ctx.fillStyle = '#04040f';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw both players
+    drawPlayer(gameA, stateA, 0);
+    drawPlayer(gameB, stateB, playerW + PVP_CONFIG.dividerWidth);
+    drawDivider();
+
+    if (pvpState === 'gameover') {
+        drawGameOver();
+    }
+}
+
+// =========================================================================
+// INPUT
+// =========================================================================
+
+function handleTap(x, y) {
+    if (pvpState === 'menu') {
+        // Check tier selection
+        const fontSize = Math.max(16, W * 0.03);
+        const tierY = H * 0.48;
+        const tierSpacing = fontSize * 3;
+        const totalWidth = TIERS.length * tierSpacing;
+        const startX = (W - totalWidth) / 2 + tierSpacing / 2;
+
+        if (Math.abs(y - tierY) < fontSize * 2) {
+            for (let i = 0; i < TIERS.length; i++) {
+                const tx = startX + i * tierSpacing;
+                if (Math.abs(x - tx) < tierSpacing * 0.5) {
+                    selectedTier = TIERS[i];
+                    return;
+                }
+            }
+        }
+
+        // Start match on any other tap
+        if (y > H * 0.55) {
+            startMatch();
+        }
+        return;
+    }
+
+    if (pvpState === 'gameover') {
+        startMatch();
+        return;
+    }
+
+    if (pvpState === 'playing') {
+        if (x < playerW) {
+            // Player 1 tap
+            if (gameA.canTap()) {
+                gameA.tap(x, y);
+            }
+        } else if (x > playerW + PVP_CONFIG.dividerWidth) {
+            // Player 2 tap — adjust x coordinate
+            const localX = x - playerW - PVP_CONFIG.dividerWidth;
+            if (gameB.canTap()) {
+                gameB.tap(localX, y);
+            }
+        }
+    }
+}
+
+canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    handleTap(e.clientX, e.clientY);
+});
+
+// =========================================================================
+// MAIN LOOP
+// =========================================================================
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
