@@ -348,6 +348,28 @@ class Game {
                 }
             }
 
+            // Same-type cohesion: dots steer weakly toward nearby same-type dots
+            if (this._contCfg && this._contCfg.cohesionForce > 0) {
+                const cRange = (this._contCfg.cohesionRange || 80) * this.spatialScale;
+                const cForce = this._contCfg.cohesionForce * this.spatialScale;
+                let cx = 0, cy = 0, count = 0;
+                for (const o of this.dots) {
+                    if (o === d || !o.active || o.type !== d.type) continue;
+                    const dist = Math.hypot(o.x - d.x, o.y - d.y);
+                    if (dist < cRange && dist > 1) {
+                        cx += o.x; cy += o.y; count++;
+                    }
+                }
+                if (count > 0) {
+                    cx /= count; cy /= count;
+                    const dist = Math.hypot(cx - d.x, cy - d.y);
+                    if (dist > 1) {
+                        d.vx += (cx - d.x) / dist * cForce * this.slowMo;
+                        d.vy += (cy - d.y) / dist * cForce * this.slowMo;
+                    }
+                }
+            }
+
             if (d.x < margin) { d.vx = Math.abs(d.vx); d.x = margin; }
             if (d.x > this.W - margin) { d.vx = -Math.abs(d.vx); d.x = this.W - margin; }
             if (d.y < margin) { d.vy = Math.abs(d.vy); d.y = margin; }
@@ -655,6 +677,23 @@ class Game {
             rate *= (1 + density * cfg.spawnDensityScale);
         }
 
+        // Wave spawn mode: dots arrive in bursts from edges
+        if (cfg.waveSpawn) {
+            const interval = cfg.waveInterval || 3000;
+            const size = cfg.waveSize || 6;
+            if (!this._waveTimer) this._waveTimer = 0;
+            this._waveTimer += dt;
+            if (this._waveTimer >= interval && this.activeDotCount() + size <= cfg.maxDots) {
+                this._waveTimer = 0;
+                const edge = Math.floor(this.rng() * 4);
+                const type = this._pickType(cfg.dotTypes);
+                for (let i = 0; i < size; i++) {
+                    this._spawnOneDot(edge, type);
+                }
+            }
+            return;
+        }
+
         this._spawnAccum += rate * (dt / 1000);
 
         while (this._spawnAccum >= 1 && this.activeDotCount() < cfg.maxDots) {
@@ -664,14 +703,14 @@ class Game {
         if (this._spawnAccum > 3) this._spawnAccum = 3;
     }
 
-    _spawnOneDot() {
+    _spawnOneDot(forceEdge, forceType) {
         const cfg = this._contCfg;
         const margin = this.cfg.SCREEN_MARGIN;
-        const type = this._pickType(cfg.dotTypes);
+        const type = forceType || this._pickType(cfg.dotTypes);
         const typeDef = DOT_TYPES[type] || DOT_TYPES.standard;
         const speed = (cfg.speedMin + this.rng() * (cfg.speedMax - cfg.speedMin)) * typeDef.speedMult * this.spatialScale;
 
-        const edge = Math.floor(this.rng() * 4);
+        const edge = forceEdge != null ? forceEdge : Math.floor(this.rng() * 4);
         const spread = Math.PI * 0.4;
         let x, y, vx, vy;
 
