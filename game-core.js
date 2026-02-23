@@ -253,8 +253,8 @@ class Game {
 
     canTap() {
         if (!this._continuous) return this.gameState === 'playing';
-        return this.gameState === 'playing' &&
-               (this.time - this._lastTapTime) >= this._contCfg.cooldown;
+        // Continuous: only cooldown gates tapping — chains resolve in background
+        return (this.time - this._lastTapTime) >= this._contCfg.cooldown;
     }
 
     cooldownRemaining() {
@@ -281,12 +281,18 @@ class Game {
                 }
             }
 
+            // Finalize previous chain if one is still resolving
+            if (this.chainCount > 0) {
+                this.chainLengths.push(this.chainCount);
+                this.totalDotsCaught += this.chainCount;
+                this.events.push({ type: 'chainEnd', chainLength: this.chainCount });
+            }
             // Reset per-tap chain tracking for correct multiplier/celebration
             this.chainCount = 0;
             this.currentMultiplier = 1;
             this.lastCelebration = 0;
         }
-        if (this.gameState !== 'playing') return false;
+        if (this.gameState !== 'playing' && this.gameState !== 'resolving') return false;
         this.gameState = 'resolving';
         this.explosions.push(this._createExplosion(x, y, 0));
         return true;
@@ -1042,8 +1048,11 @@ class BotRunner {
     /** Advance bot by dt ms. Returns {x, y} if bot wants to tap, null otherwise. */
     update(dt) {
         const game = this.game;
-        if (game.gameState !== 'playing') return null;
-        if (game._continuous && !game.canTap()) return null;
+        if (game._continuous) {
+            if (!game.canTap()) return null;
+        } else {
+            if (game.gameState !== 'playing') return null;
+        }
 
         // Scan phase: find a target
         if (!this.target) {
