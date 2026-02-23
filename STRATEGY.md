@@ -308,9 +308,84 @@ All values tested (0.05-1.0) made the game EASIER, not harder. Mortality dropped
 
 Creates mortality but destroys skill discrimination. Everyone dies regardless of skill because radius shrinks to the point where chains can't propagate. Too blunt — the mechanic removes agency rather than creating tradeoffs.
 
+### H3: Poison Dots (FAILED)
+
+Dots that spawn extra dots when caught in a chain. `spawnOnCatch: 3` per poison dot.
+
+| Poison % | IMPOSSIBLE survival | Skill disc (smart vs blind) | Effect |
+|----------|--------------------|-----------------------------|--------|
+| 10% | 0% | 1.04x | Negligible |
+| 15% | 0% | 1.04x | Negligible |
+| 20% | 0% | 1.09x | Negligible |
+
+**Why it fails:** Chain cascades are spatially uncontrollable. The player's decision is WHERE to tap, but once the chain starts, it catches everything in range regardless. A "smart" bot that avoids tapping near poison dots performs identically to a "blind" bot (1.03-1.09x discrimination). The penalty (spawning dots at board edges) is too diffuse to create immediate tactical consequences.
+
+**Key insight:** Any mechanic that modifies what happens DURING a cascade doesn't create player choices, because the player has no control over the cascade. Meaningful choices must affect the TAP decision itself — when, where, and what kind of tap.
+
+### H4: Combo Timer (FAILED)
+
+Combo window after each chain end. Score multiplied for rapid successive clears.
+
+| Combo Window | FLOW Score Disc | IMPOSSIBLE Score Disc | Effect |
+|-------------|----------------|----------------------|--------|
+| none | 1.39x (eager>patient) | 0.81x (patient>eager) | Baseline |
+| 3000ms | 1.40x | 0.81x | Negligible |
+| 5000ms | 1.41x | 0.82x | Negligible |
+
+**Why it fails:** The strategic difference between eager (tap ASAP) and patient (wait for clusters) play already exists without combo — it's the tap timing. The combo bonus is marginal compared to base chain score. At FLOW, eager play is inherently better (1.39x) because frequent taps keep density controlled. At IMPOSSIBLE, patience wins because you need bigger chains to overcome spawn rate. The combo timer adds <2% on top of these existing dynamics.
+
+### H8: Tap Energy Budget (PARTIAL — different outcome than other failures)
+
+Energy pool: tap costs energy, regenerates over time. Two variants tested:
+
+**H8a: Radius scales with energy (50% at min → 100% at full)**
+
+| Config (IMPOSSIBLE) | Eager | Balanced | Patient | Life Disc | Score Disc |
+|---------------------|-------|----------|---------|-----------|------------|
+| energy-50-15-20 | 29.9s, 3.2 chain | 34.5s, 4.5 chain | 51.9s, 7.8 chain | 1.74x | 6.77x |
+| energy-40-15-20 | 51.4s, 5.9 chain | 55.6s, 6.6 chain | 62.8s, 7.6 chain | 1.22x | 1.53x |
+
+**Why patient dominates:** Full-energy tap = full radius = 2.4x longer chains. No incentive to tap early because the radius advantage overwhelms timing pressure.
+
+**What's interesting:** The 6.77x score discrimination is the highest of any mechanic tested. Energy management MATTERS — a player who taps at the wrong time is severely punished. But it's a lesson (always wait for full energy) not a decision (should I tap now or wait?).
+
+**H8b: Fixed radius, energy enables burst tapping**
+
+All burst sizes (x1, x2, x3) produce nearly identical outcomes (1.00-1.31x). Burst tapping is just a different cooldown pattern — it doesn't change strategy.
+
+### Why H1/H2/H3/H4/H8 All Fail — Root Cause Analysis
+
+Six parameter-level hypotheses tested. One (H6) fixed mortality. Five failed to create depth. The pattern reveals a deep structural constraint:
+
+**The cascade is uncontrollable.** Once the player taps, the chain reaction follows physics. The player has zero agency over which dots get caught, where the cascade spreads, or how long it lasts. This means:
+
+1. **Any mechanic that modifies cascade behavior** (H1: dot speed, H3: poison dots, H2: radius changes) doesn't create player choices because the player can't control the cascade.
+
+2. **Any mechanic that rewards tap timing** (H4: combo, H8: energy) either has marginal effect or creates a dominant strategy rather than a tradeoff.
+
+3. **The only player decision is WHERE to tap.** And the answer is almost always "biggest cluster" because:
+   - The cascade amplifies any initial advantage (tap the densest spot → biggest chain)
+   - All dots are equivalent from a chain perspective
+   - There's no cost to big chains and no benefit to small ones
+   - Radius scaling (H8) makes this even MORE true — patient play always dominates
+
+**Conclusion: Parameter-level changes cannot create depth.** The game needs a structural change to its decision space. Possible directions:
+
+1. **Multi-tap placement**: Place 2+ taps before resolution. Creates combinatorial positioning decisions. Each tap can be evaluated for chain interaction, overlap avoidance, and complementary coverage.
+
+2. **Directed explosion**: Tap + drag to set chain propagation direction. Creates aim skill and spatial strategy. Some directions are better than others depending on dot distribution.
+
+3. **PvP mode**: Opponent's chains send dots to your board (like Puyo Puyo / Tetris 99). Creates external pressure, meta-game, and infinite depth through opponent modeling. The user specifically requested this.
+
+4. **Board zones**: Areas with different effects (multiplier zones, speed zones, gravity wells). Creates positional strategy. "Biggest cluster" is no longer always optimal if the zone matters.
+
+5. **Asymmetric dot interaction**: Dots that interact with each other before the player taps (e.g., dots form clusters naturally via attraction, player must break unfavorable clusters). Creates pre-tap board management.
+
+**Recommendation: Focus on PvP.** It's the only direction that creates infinite depth without adding mechanical complexity to the core tap-and-chain mechanic. The core mechanic is fine for competitive play — the depth comes from the opponent, not the ruleset.
+
 ### Combination Tests
 
-H6 (k=0.4) alone is sufficient. It achieves the primary goal (games end) while preserving the secondary goals (skill matters, drama exists). Other mechanics either failed (H1), were too blunt (H2), or weren't needed on top of H6.
+H6 (k=0.4) alone is sufficient. It achieves the primary goal (games end) while preserving the secondary goals (skill matters, drama exists). Other mechanics failed (H1, H2, H3, H4) because they operate within the single-decision framework.
 
 ### Decision: Ship H6 with k=0.4
 
