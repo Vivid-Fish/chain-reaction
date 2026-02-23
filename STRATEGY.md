@@ -393,4 +393,211 @@ The `spawnDensityScale` parameter will be added to each tier's config. It create
 
 ---
 
+## PvP Design: Chain Reaction Versus Mode
+
+### Why PvP is the Right Direction
+
+The research above proves that parameter-level single-player changes cannot create meaningful decision depth. The cascade is uncontrollable, the tap decision is greedy-optimal, and no config-driven tweak changes this.
+
+PvP solves this by adding an **external, unpredictable pressure source**: your opponent. The core tap-and-chain mechanic stays identical — all the depth comes from the interaction between two players' boards. This is exactly how Puyo Puyo, Tetris Attack, and Puzzle Bobble versus modes work: the single-player game is simple, the versus game is deep.
+
+### Prior Art Analysis
+
+| Game | Attack Mechanic | Defense | What Creates Depth |
+|------|----------------|---------|-------------------|
+| Puyo Puyo | Chain length → garbage puyos (exponential) | Offset: your chain cancels incoming garbage | Build timing, harassment, counter-building |
+| Tetris 99 | Line clears → garbage lines | None (just clear faster) | Targeting strategy, badge snowball |
+| Panel de Pon | Chains → garbage blocks | Garbage converts to usable panels | Skill chains, garbage tennis |
+| Puzzle Bobble VS | Orphaned bubbles → garbage | None (clear faster) | Shot economy, cascade setup |
+
+**Key insight from Puyo Puyo:** Offsetting (your chain cancels incoming garbage, surplus attacks back) is what makes PvP deep. Without it, versus mode is just parallel single-player with a timer.
+
+### Chain Reaction PvP Design
+
+#### Core Loop
+
+```
+Player A taps → chain reaction → dots caught → garbage sent to B
+                                               ↕ (offset)
+Player B taps → chain reaction → dots caught → garbage sent to A
+```
+
+#### Garbage System
+
+**Sending garbage:**
+Chains send "garbage dots" to the opponent's board. Formula:
+
+```
+garbageSent = floor(chainLength * chainLength / garbageDivisor)
+```
+
+Quadratic scaling means bigger chains are disproportionately rewarding:
+- 3-chain: 1 garbage dot
+- 5-chain: 3 garbage dots
+- 10-chain: 11 garbage dots
+- 20-chain: 44 garbage dots
+
+`garbageDivisor` is a tuning parameter (start at 9, adjust via bot-vs-bot simulation).
+
+**Receiving garbage:**
+Garbage dots spawn at random board edges (same as normal dots) but are visually distinct (gray/dark). They:
+- Move at normal speed
+- CAN be caught in chains (actionable, not just punitive)
+- DO propagate chain explosions (so they're useful if clustered)
+- Have reduced explosion radius (0.7x) when cascading
+- Do NOT trigger garbage sending when caught (prevents infinite loops)
+
+**Offsetting:**
+When garbage is queued against you (pending, not yet spawned), your chain's generated garbage first **cancels** incoming garbage 1:1. Only the surplus is actually sent/received.
+
+```
+Example:
+- Player A's chain would send 8 garbage to B
+- Player B has 5 pending garbage about to arrive
+- Offset: B's 5 incoming is cancelled. A receives 3 net garbage.
+Wait no — B's chain cancels B's incoming:
+- A sends 8 garbage (queued for B)
+- B fires a chain that would send 5 garbage
+- Offset: B's 5 cancels 5 of the 8 queued. Only 3 garbage actually spawns on B.
+- B's surplus (0) means nothing sent to A.
+```
+
+If B's chain exceeds the incoming: surplus goes to A as garbage.
+
+**Garbage timing:**
+Garbage doesn't spawn immediately. There's a 1-2 second delay (visual warning: pending garbage shown as a bar/counter). This gives the defender time to fire a counter-chain to offset.
+
+#### New Decisions Created
+
+1. **When to fire**: Small chain now (harass, reduce opponent's clean space) vs build toward bigger chain (exponential garbage)
+2. **Defense timing**: See incoming garbage → rush to fire any available chain to offset it
+3. **Board management**: Garbage dots clutter the board. Player must decide: chain them away (they're catchable) or work around them
+4. **Risk/reward**: More dots on your board → easier chains → more garbage sent. But also closer to overflow. This is the positive feedback the single-player game was missing.
+5. **Opponent reading**: Watch their density. If they're at 70% density, they're about to fire a big chain or die. If they're at 30%, they're building.
+
+#### Architecture
+
+```
+┌─────────┐    WebSocket    ┌──────────┐    WebSocket    ┌─────────┐
+│ Client A │ ◄────────────► │  Server  │ ◄────────────► │ Client B │
+│ (Game)   │                │ (Match)  │                │ (Game)   │
+└─────────┘                 └──────────┘                └─────────┘
+```
+
+**Server responsibilities:**
+- Match creation (lobby/queue)
+- Validate tap events (anti-cheat: check cooldown, position bounds)
+- Compute garbage from chain events
+- Manage offset queue
+- Broadcast garbage spawn events
+- Detect overflow (game over)
+
+**Client responsibilities:**
+- Full local Game instance (responsive gameplay)
+- Send tap events to server
+- Receive garbage spawn events, apply to local game
+- Render opponent's board (minimap or side-by-side)
+- Display pending garbage indicator
+
+**State sync:**
+- NOT full state sync (too expensive for 60fps physics)
+- Event-based: only taps and garbage spawns are synced
+- Each player's physics runs independently
+- Deterministic RNG per player ensures consistent replay
+
+**Bot-vs-bot simulation:**
+The existing sim infrastructure works for PvP:
+```javascript
+// Two Game instances, same DT loop
+while (!gameA.overflowed && !gameB.overflowed) {
+    gameA.step(DT); gameB.step(DT);
+
+    const tapA = botA.update(DT);
+    if (tapA) {
+        gameA.tap(tapA.x, tapA.y);
+        const chain = gameA.chainLengths[gameA.chainLengths.length - 1];
+        queueGarbage(gameB, chain, offsetQueueB);
+    }
+
+    // Same for B → A
+}
+```
+
+This means we can tune garbage parameters autonomously before building the real-time server.
+
+#### Implementation Plan
+
+**Phase 1: Headless PvP simulation** (no server, no UI)
+- `pvp-sim.js`: Two Game instances + BotRunners in a shared loop
+- Garbage system: send, queue, offset, spawn
+- Metrics: who wins, game length, garbage sent/received, offset rate
+- Bot ladder: greedy-vs-greedy, greedy-vs-humanSim, etc.
+
+**Phase 2: Tune garbage parameters**
+- Sweep `garbageDivisor` for balanced games
+- Test asymmetric skill (good vs bad bot) for fairness
+- Verify offset rate (should be 30-50% — too high means stalemate, too low means steamroll)
+
+**Phase 3: Browser PvP (local 2P)**
+- Split-screen or side-by-side rendering
+- Two touch zones (or keyboard + touch)
+- No server needed — both games in same browser
+
+**Phase 4: Online PvP**
+- WebSocket server (Node.js)
+- Matchmaking queue
+- Spectator mode (replay viewer already exists)
+
+#### Metrics for PvP Quality
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| Game length | Duration until one player overflows | 60-180s |
+| Offset rate | Garbage cancelled / garbage sent | 30-50% |
+| Comeback rate | % of games where losing player wins | 15-30% |
+| Skill discrimination | Win rate of better bot | 65-80% |
+| Garbage efficiency | Garbage sent per chain | Increases with chain length |
+| First-blood advantage | Win rate of first attacker | <65% |
+
+### PvP Simulation Results (Phase 1)
+
+**Implemented:** `pvp-sim.js` — headless PvP with garbage system, offset, bot ladder.
+
+#### Bot Ladder (garbageDivisor=9, garbageDelay=3000ms, tier=FLOW, 40 games/matchup)
+
+```
+             CALM    FLOW    SURGE   TRANS   IMPOSSIBLE
+CALM          ---     8%     10%      3%       5%
+FLOW          83%     ---    40%     33%      50%
+SURGE         90%    60%      ---    35%      48%
+TRANS         93%    57%     55%      ---     50%
+IMPOSSIBLE    95%    65%     63%     57%       ---
+```
+
+**Skill ordering is correct and monotonic.** Avg win rates: CALM 6.5% → FLOW 51.5% → SURGE 58.3% → TRANS 63.8% → IMPOSSIBLE 70.0%.
+
+#### Garbage Divisor Sweep (IMPOSSIBLE vs FLOW, delay=3000ms)
+
+| Divisor | IMPOSSIBLE WR | Game Length | Garbage/game | Offset% |
+|---------|--------------|------------|-------------|---------|
+| 3 | 70% | 40.8s | 216 | 44% |
+| 5 | 60% | 41.5s | 193 | 41% |
+| **7** | **63%** | **48.0s** | **204** | **35%** |
+| 9 | 77% | 46.4s | 175 | 34% |
+| 12 | 67% | 46.4s | 148 | 36% |
+| 15 | 60% | 49.3s | 161 | 31% |
+
+**Recommended: divisor 7, delay 3000ms.** Balanced game length (48s), healthy garbage economy (204/game), meaningful offset rate (35%).
+
+#### Close Match Dynamics (IMPOSSIBLE vs TRANSCENDENCE, divisor 9, delay 3000ms)
+
+- Win rate: 57% vs 43% (close, competitive)
+- Avg game length: 52.8s
+- **Offset rate: 41%** (significant counter-play between matched players)
+- Garbage sent nearly equal (114 vs 111)
+
+This confirms the garbage system creates the desired dynamics: close matches feature active offset play, while skill mismatches are decisive.
+
+---
+
 *Last updated: 2026-02-23*
