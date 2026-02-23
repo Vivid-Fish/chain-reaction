@@ -14,6 +14,7 @@ canvas { display: block; }
 <body>
 <canvas id="pvp"></canvas>
 <script src="game-core.js"></script>
+<script src="audio.js"></script>
 <script>
 'use strict';
 
@@ -198,6 +199,7 @@ function startMatch() {
 
     pvpState = 'playing';
     winner = null;
+    audio.init();
 }
 
 // =========================================================================
@@ -240,9 +242,11 @@ function update() {
     if (gameA.overflowed) {
         pvpState = 'gameover';
         winner = 'P2';
+        audio.playGameOver();
     } else if (gameB.overflowed) {
         pvpState = 'gameover';
         winner = 'P1';
+        audio.playCelebration(3);
     }
 }
 
@@ -288,6 +292,11 @@ function processChains(attacker, attackerState, defender, defenderState) {
 
         attackerState.prevChainCount = attacker.chainLengths.length;
         attackerState.score = attacker.score;
+
+        // Chain audio
+        for (let i = 0; i < Math.min(chainLen, 20); i++) {
+            audio.playChainNote(i, 0);
+        }
 
         // Chain length notification
         if (chainLen >= 5) {
@@ -854,20 +863,18 @@ function handleTap(x, y) {
         if (isStacked) {
             // Stacked: P1 is bottom half, P2/bot is top half
             if (y > playerH + PVP_CONFIG.dividerWidth) {
-                // Player 1 tap
                 const localY = y - playerH - PVP_CONFIG.dividerWidth;
-                if (gameA.canTap()) gameA.tap(x, localY);
+                if (gameA.canTap()) { gameA.tap(x, localY); audio.playTap(); }
             } else if (y < playerH && vsMode === '2p') {
-                // Player 2 tap — only in 2P local mode
-                if (gameB.canTap()) gameB.tap(x, y);
+                if (gameB.canTap()) { gameB.tap(x, y); audio.playTap(); }
             }
         } else {
             // Side-by-side: P1 is left half, P2/bot is right half
             if (x < playerW) {
-                if (gameA.canTap()) gameA.tap(x, y);
+                if (gameA.canTap()) { gameA.tap(x, y); audio.playTap(); }
             } else if (x > playerW + PVP_CONFIG.dividerWidth && vsMode === '2p') {
                 const localX = x - playerW - PVP_CONFIG.dividerWidth;
-                if (gameB.canTap()) gameB.tap(localX, y);
+                if (gameB.canTap()) { gameB.tap(localX, y); audio.playTap(); }
             }
         }
     }
