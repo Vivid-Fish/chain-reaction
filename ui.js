@@ -523,25 +523,20 @@ function drawContinuousHUD(s) {
         ctx.restore();
     }
 
-    // Cooldown ring at last tap position
-    if (lastTapTime > 0 && currentTier) {
+    // Cooldown bar — fixed at bottom of screen
+    if (continuousActive && lastTapTime > 0 && currentTier) {
         const now = performance.now();
         const elapsed = now - lastTapTime;
         const progress = Math.min(1, elapsed / currentTier.cooldown);
         if (progress < 1) {
-            const r = explosionRadius * 0.7;
-            // Background track (dim)
-            ctx.beginPath();
-            ctx.arc(lastTapX, lastTapY, r, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 4 * s;
-            ctx.stroke();
-            // Progress arc
-            ctx.beginPath();
-            ctx.arc(lastTapX, lastTapY, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
-            ctx.strokeStyle = progress > 0.8 ? 'rgba(100, 255, 160, 0.7)' : 'rgba(180, 220, 255, 0.6)';
-            ctx.lineWidth = 4 * s;
-            ctx.stroke();
+            const barH = 8 * s;
+            const y = H - barH;
+            // Dim track
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.fillRect(0, y, W, barH);
+            // Progress fill
+            ctx.fillStyle = progress > 0.8 ? 'rgba(100, 255, 160, 0.6)' : 'rgba(180, 220, 255, 0.45)';
+            ctx.fillRect(0, y, W * progress, barH);
         }
     }
 

@@ -572,7 +572,7 @@ function drawPlayer(game, state, offsetX, offsetY) {
     if (cdRemaining > 0) {
         const cdFrac = cdRemaining / (CONTINUOUS_TIERS[selectedTier].cooldown || 2000);
         const filled = playerW * (1 - cdFrac);
-        const barH = 6;
+        const barH = 8;
         // Dim track
         ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.fillRect(0, playerH - barH, playerW, barH);
