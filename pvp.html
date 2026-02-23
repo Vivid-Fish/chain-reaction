@@ -567,12 +567,18 @@ function drawPlayer(game, state, offsetX, offsetY) {
         ctx.fillText(`+${pending}`, playerW - 16, garbageBarH + fontSize);
     }
 
-    // Cooldown indicator
+    // Cooldown bar along bottom
     const cdRemaining = game.cooldownRemaining();
     if (cdRemaining > 0) {
         const cdFrac = cdRemaining / (CONTINUOUS_TIERS[selectedTier].cooldown || 2000);
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.15 * cdFrac})`;
-        ctx.fillRect(0, playerH - 4, playerW * (1 - cdFrac), 4);
+        const filled = playerW * (1 - cdFrac);
+        const barH = 6;
+        // Dim track
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.fillRect(0, playerH - barH, playerW, barH);
+        // Progress fill — turns green when nearly ready
+        ctx.fillStyle = cdFrac < 0.2 ? 'rgba(100, 255, 160, 0.6)' : 'rgba(180, 220, 255, 0.45)';
+        ctx.fillRect(0, playerH - barH, filled, barH);
     }
 
     // Chain info
