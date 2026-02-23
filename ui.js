@@ -523,21 +523,43 @@ function drawContinuousHUD(s) {
         ctx.restore();
     }
 
-    // Cooldown bar — fixed at bottom of screen
-    if (continuousActive && lastTapTime > 0 && currentTier) {
-        const now = performance.now();
-        const elapsed = now - lastTapTime;
-        const progress = Math.min(1, elapsed / currentTier.cooldown);
-        if (progress < 1) {
-            const barH = 8 * s;
-            const y = H - barH;
-            // Dim track
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.fillRect(0, y, W, barH);
-            // Progress fill
-            ctx.fillStyle = progress > 0.8 ? 'rgba(100, 255, 160, 0.6)' : 'rgba(180, 220, 255, 0.45)';
-            ctx.fillRect(0, y, W * progress, barH);
+    // Tap-blocked indicator: screen edge glow
+    // Shows during cooldown (continuous) or chain resolution (rounds)
+    const tapBlocked = continuousActive
+        ? (lastTapTime > 0 && currentTier && ((performance.now() - lastTapTime) < currentTier.cooldown))
+        : (gameState === 'resolving');
+    if (tapBlocked) {
+        let progress = 1, hue = 200;
+        if (continuousActive && currentTier) {
+            progress = Math.min(1, (performance.now() - lastTapTime) / currentTier.cooldown);
+            hue = progress > 0.8 ? 140 : 210;  // green when nearly ready
+        } else {
+            // Rounds: pulse gently while chain resolves
+            progress = 0.5 + 0.2 * Math.sin(performance.now() * 0.004);
+            hue = 30;  // warm amber for "chain active"
         }
+        const edgeW = 20 * s;
+        const alpha = (1 - progress) * 0.4 + 0.05;
+        ctx.save();
+        // Bottom edge glow
+        const gBot = ctx.createLinearGradient(0, H, 0, H - edgeW);
+        gBot.addColorStop(0, `hsla(${hue}, 80%, 60%, ${alpha})`);
+        gBot.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = gBot;
+        ctx.fillRect(0, H - edgeW, W * (continuousActive ? progress : 1), edgeW);
+        // Left edge glow
+        const gLeft = ctx.createLinearGradient(0, 0, edgeW, 0);
+        gLeft.addColorStop(0, `hsla(${hue}, 80%, 60%, ${alpha * 0.5})`);
+        gLeft.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = gLeft;
+        ctx.fillRect(0, 0, edgeW, H);
+        // Right edge glow
+        const gRight = ctx.createLinearGradient(W, 0, W - edgeW, 0);
+        gRight.addColorStop(0, `hsla(${hue}, 80%, 60%, ${alpha * 0.5})`);
+        gRight.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = gRight;
+        ctx.fillRect(W - edgeW, 0, edgeW, H);
+        ctx.restore();
     }
 
     // Multiplier display

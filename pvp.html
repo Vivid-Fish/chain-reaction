@@ -567,18 +567,20 @@ function drawPlayer(game, state, offsetX, offsetY) {
         ctx.fillText(`+${pending}`, playerW - 16, garbageBarH + fontSize);
     }
 
-    // Cooldown bar along bottom
+    // Cooldown edge glow
     const cdRemaining = game.cooldownRemaining();
     if (cdRemaining > 0) {
         const cdFrac = cdRemaining / (CONTINUOUS_TIERS[selectedTier].cooldown || 2000);
-        const filled = playerW * (1 - cdFrac);
-        const barH = 8;
-        // Dim track
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.fillRect(0, playerH - barH, playerW, barH);
-        // Progress fill — turns green when nearly ready
-        ctx.fillStyle = cdFrac < 0.2 ? 'rgba(100, 255, 160, 0.6)' : 'rgba(180, 220, 255, 0.45)';
-        ctx.fillRect(0, playerH - barH, filled, barH);
+        const progress = 1 - cdFrac;
+        const hue = progress > 0.8 ? 140 : 210;
+        const alpha = cdFrac * 0.4 + 0.05;
+        const edgeW = 14;
+        // Bottom glow fills as cooldown progresses
+        const gBot = ctx.createLinearGradient(0, playerH, 0, playerH - edgeW);
+        gBot.addColorStop(0, `hsla(${hue}, 80%, 60%, ${alpha})`);
+        gBot.addColorStop(1, `hsla(${hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = gBot;
+        ctx.fillRect(0, playerH - edgeW, playerW * progress, edgeW);
     }
 
     // Chain info
