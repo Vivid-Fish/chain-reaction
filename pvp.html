@@ -50,8 +50,13 @@ let stateA, stateB; // per-player state
 let pvpState = 'menu'; // 'menu' | 'playing' | 'gameover'
 let winner = null;
 let selectedTier = 'FLOW';
+let vsMode = 'bot'; // '2p' | 'bot'
+let botDifficulty = 'FLOW'; // bot skill key
+let botRunner = null;
+let botRng = null;
 
 const TIERS = Object.keys(CONTINUOUS_TIERS);
+const BOT_DIFFICULTIES = ['CALM', 'FLOW', 'SURGE', 'TRANSCENDENCE', 'IMPOSSIBLE'];
 
 // =========================================================================
 // GARBAGE QUEUE
@@ -166,10 +171,18 @@ function startMatch() {
         garbageQueue: new GarbageQueue(),
         prevChainCount: 0,
         score: 0,
-        label: 'P2',
+        label: vsMode === 'bot' ? 'BOT' : 'P2',
         color: '#f64',
         particles: [],
     };
+
+    // Set up bot if vs bot mode
+    if (vsMode === 'bot') {
+        botRng = createRNG(Date.now());
+        botRunner = new BotRunner(gameB, botDifficulty, botRng);
+    } else {
+        botRunner = null;
+    }
 
     pvpState = 'playing';
     winner = null;
@@ -188,6 +201,14 @@ function update() {
     gameB.step(DT);
     gameA.events = [];
     gameB.events = [];
+
+    // Bot plays on the right side
+    if (botRunner) {
+        const tap = botRunner.update(DT);
+        if (tap) {
+            gameB.tap(tap.x, tap.y);
+        }
+    }
 
     // Check chain completions and send garbage
     processChains(gameA, stateA, gameB, stateB);
@@ -440,24 +461,73 @@ function drawMenu() {
     ctx.fillStyle = '#04040f';
     ctx.fillRect(0, 0, W, H);
 
-    const fontSize = Math.max(16, W * 0.03);
+    const fontSize = Math.max(14, Math.min(W, H) * 0.028);
 
     // Title
     ctx.font = `900 ${fontSize * 2.5}px Inter`;
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
-    ctx.fillText('CHAIN REACTION', W / 2, H * 0.2);
+    ctx.fillText('CHAIN REACTION', W / 2, H * 0.12);
 
     ctx.font = `200 ${fontSize * 1.2}px Inter`;
     ctx.fillStyle = '#4af';
-    ctx.fillText('P V P', W / 2, H * 0.2 + fontSize * 3);
+    ctx.fillText('V E R S U S', W / 2, H * 0.12 + fontSize * 3);
+
+    // Mode selector: vs Bot | 2P Local
+    const modeY = H * 0.28;
+    ctx.font = `400 ${fontSize * 0.8}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.fillText('MODE', W / 2, modeY - fontSize);
+
+    const modes = [
+        { id: 'bot', label: 'VS BOT' },
+        { id: '2p', label: '2P LOCAL' },
+    ];
+    const modeSpacing = fontSize * 5;
+    for (let i = 0; i < modes.length; i++) {
+        const x = W / 2 + (i - 0.5) * modeSpacing;
+        const selected = modes[i].id === vsMode;
+        ctx.font = `${selected ? 900 : 400} ${fontSize * 1.1}px Inter`;
+        ctx.fillStyle = selected ? '#fff' : 'rgba(255, 255, 255, 0.25)';
+        ctx.fillText(modes[i].label, x, modeY);
+        if (selected) {
+            ctx.fillStyle = '#4af';
+            ctx.fillRect(x - modeSpacing * 0.25, modeY + 6, modeSpacing * 0.5, 3);
+        }
+    }
+
+    // Bot difficulty (only in bot mode)
+    if (vsMode === 'bot') {
+        const botY = H * 0.40;
+        ctx.font = `400 ${fontSize * 0.8}px Inter`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillText('BOT DIFFICULTY', W / 2, botY - fontSize);
+
+        const botSpacing = fontSize * 3;
+        const botTotalW = BOT_DIFFICULTIES.length * botSpacing;
+        const botStartX = (W - botTotalW) / 2 + botSpacing / 2;
+
+        for (let i = 0; i < BOT_DIFFICULTIES.length; i++) {
+            const x = botStartX + i * botSpacing;
+            const selected = BOT_DIFFICULTIES[i] === botDifficulty;
+            ctx.font = `${selected ? 900 : 400} ${fontSize * (selected ? 1.0 : 0.85)}px Inter`;
+            ctx.fillStyle = selected ? '#f64' : 'rgba(255, 255, 255, 0.25)';
+            ctx.fillText(BOT_DIFFICULTIES[i].substring(0, 4), x, botY);
+            if (selected) {
+                ctx.fillStyle = '#f64';
+                ctx.fillRect(x - botSpacing * 0.3, botY + 6, botSpacing * 0.6, 3);
+            }
+        }
+    }
 
     // Tier selector
-    ctx.font = `400 ${fontSize}px Inter`;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.fillText('SELECT TIER', W / 2, H * 0.4);
+    const tierLabelY = vsMode === 'bot' ? H * 0.52 : H * 0.40;
+    const tierY = tierLabelY + fontSize * 1.5;
 
-    const tierY = H * 0.48;
+    ctx.font = `400 ${fontSize * 0.8}px Inter`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.fillText('GAME TIER', W / 2, tierLabelY);
+
     const tierSpacing = fontSize * 3;
     const totalWidth = TIERS.length * tierSpacing;
     const startX = (W - totalWidth) / 2 + tierSpacing / 2;
@@ -466,24 +536,29 @@ function drawMenu() {
         const x = startX + i * tierSpacing;
         const selected = TIERS[i] === selectedTier;
 
-        ctx.font = `${selected ? 900 : 400} ${fontSize * (selected ? 1.1 : 0.9)}px Inter`;
-        ctx.fillStyle = selected ? '#fff' : 'rgba(255, 255, 255, 0.3)';
+        ctx.font = `${selected ? 900 : 400} ${fontSize * (selected ? 1.0 : 0.85)}px Inter`;
+        ctx.fillStyle = selected ? '#fff' : 'rgba(255, 255, 255, 0.25)';
         ctx.fillText(TIERS[i].substring(0, 4), x, tierY);
 
         if (selected) {
             ctx.fillStyle = '#4af';
-            ctx.fillRect(x - tierSpacing * 0.3, tierY + 8, tierSpacing * 0.6, 3);
+            ctx.fillRect(x - tierSpacing * 0.3, tierY + 6, tierSpacing * 0.6, 3);
         }
     }
 
     // Start prompt
+    const startY = H * 0.78;
     ctx.font = `700 ${fontSize * 1.5}px Inter`;
     ctx.fillStyle = '#fff';
-    ctx.fillText('TAP TO START', W / 2, H * 0.7);
+    ctx.fillText('TAP TO START', W / 2, startY);
 
     ctx.font = `400 ${fontSize * 0.8}px Inter`;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.fillText('Left side = P1    Right side = P2', W / 2, H * 0.78);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    if (vsMode === 'bot') {
+        ctx.fillText('You play the left side', W / 2, startY + fontSize * 2);
+    } else {
+        ctx.fillText('Left = P1    Right = P2', W / 2, startY + fontSize * 2);
+    }
 }
 
 function drawGameOver() {
@@ -494,9 +569,10 @@ function drawGameOver() {
     const fontSize = Math.max(16, W * 0.03);
 
     ctx.font = `900 ${fontSize * 3}px Inter`;
+    const winLabel = winner === 'P1' ? 'YOU WIN' : (vsMode === 'bot' ? 'BOT WINS' : 'P2 WINS');
     ctx.fillStyle = winner === 'P1' ? stateA.color : stateB.color;
     ctx.textAlign = 'center';
-    ctx.fillText(`${winner} WINS`, W / 2, H * 0.35);
+    ctx.fillText(winLabel, W / 2, H * 0.35);
 
     // Stats
     ctx.font = `400 ${fontSize}px Inter`;
@@ -555,14 +631,47 @@ function draw() {
 
 function handleTap(x, y) {
     if (pvpState === 'menu') {
-        // Check tier selection
-        const fontSize = Math.max(16, W * 0.03);
-        const tierY = H * 0.48;
+        const fontSize = Math.max(14, Math.min(W, H) * 0.028);
+
+        // Mode selector
+        const modeY = H * 0.28;
+        if (Math.abs(y - modeY) < fontSize * 1.5) {
+            const modeSpacing = fontSize * 5;
+            const modes = ['bot', '2p'];
+            for (let i = 0; i < modes.length; i++) {
+                const mx = W / 2 + (i - 0.5) * modeSpacing;
+                if (Math.abs(x - mx) < modeSpacing * 0.4) {
+                    vsMode = modes[i];
+                    return;
+                }
+            }
+        }
+
+        // Bot difficulty selector (only in bot mode)
+        if (vsMode === 'bot') {
+            const botY = H * 0.40;
+            if (Math.abs(y - botY) < fontSize * 1.5) {
+                const botSpacing = fontSize * 3;
+                const botTotalW = BOT_DIFFICULTIES.length * botSpacing;
+                const botStartX = (W - botTotalW) / 2 + botSpacing / 2;
+                for (let i = 0; i < BOT_DIFFICULTIES.length; i++) {
+                    const bx = botStartX + i * botSpacing;
+                    if (Math.abs(x - bx) < botSpacing * 0.5) {
+                        botDifficulty = BOT_DIFFICULTIES[i];
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Tier selector
+        const tierLabelY = vsMode === 'bot' ? H * 0.52 : H * 0.40;
+        const tierY = tierLabelY + fontSize * 1.5;
         const tierSpacing = fontSize * 3;
         const totalWidth = TIERS.length * tierSpacing;
         const startX = (W - totalWidth) / 2 + tierSpacing / 2;
 
-        if (Math.abs(y - tierY) < fontSize * 2) {
+        if (Math.abs(y - tierY) < fontSize * 1.5) {
             for (let i = 0; i < TIERS.length; i++) {
                 const tx = startX + i * tierSpacing;
                 if (Math.abs(x - tx) < tierSpacing * 0.5) {
@@ -572,8 +681,8 @@ function handleTap(x, y) {
             }
         }
 
-        // Start match on any other tap
-        if (y > H * 0.55) {
+        // Start match on tap below selectors
+        if (y > H * 0.65) {
             startMatch();
         }
         return;
@@ -586,12 +695,12 @@ function handleTap(x, y) {
 
     if (pvpState === 'playing') {
         if (x < playerW) {
-            // Player 1 tap
+            // Player 1 tap (always human)
             if (gameA.canTap()) {
                 gameA.tap(x, y);
             }
-        } else if (x > playerW + PVP_CONFIG.dividerWidth) {
-            // Player 2 tap — adjust x coordinate
+        } else if (x > playerW + PVP_CONFIG.dividerWidth && vsMode === '2p') {
+            // Player 2 tap — only in 2P local mode
             const localX = x - playerW - PVP_CONFIG.dividerWidth;
             if (gameB.canTap()) {
                 gameB.tap(localX, y);
