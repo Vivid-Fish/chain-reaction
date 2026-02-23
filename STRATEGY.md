@@ -228,29 +228,42 @@ Juice (screen shake, particles, sound) makes a game FEEL good. Depth (meaningful
 
 ---
 
-## Autonomous Work Plan
+## Autonomous Work Plan — Status
 
-### Phase 0: Build the Measurement Platform
-1. Fix the oracle bot (remove waitMs, use immediate evaluation with board-state heuristic)
-2. Implement Tier 1 metrics as a `quality.js` module
-3. Build `experiment.js` — runs a design variant through the full bot ladder + metrics pipeline
-4. Validate: current game should score poorly on density trend slope and mortality rate
+### Phase 0: Build the Measurement Platform — DONE
+- [x] Fix oracle bot (added ORACLE profile, fixed double-scaling)
+- [x] `quality.js` — 8 metrics + quality flags
+- [x] `experiment.js` — full pipeline with sweep mode
+- [x] Baseline validation: confirmed game scored poorly on mortality/density slope
 
-### Phase 1: Test Design Hypotheses
-For each hypothesis (H1-H6):
-1. Implement as a config-driven variant (no permanent code changes)
-2. Run through `experiment.js`
-3. Record results in this document
-4. Compare metrics against baseline and against each other
+### Phase 1: Test Design Hypotheses — DONE (6 tested)
+- [x] H1 (dot aging): FAILED — made game easier
+- [x] H2 (radius decay): PARTIAL — too blunt, destroys skill discrimination
+- [x] H3 (poison dots): FAILED — cascade is uncontrollable
+- [x] H4 (combo timer): FAILED — marginal effect
+- [x] **H6 (density-scaled spawn rate): WINNER** — shipped, creates mortality
+- [x] H8 (energy budget): PARTIAL — dominant strategy, no real tradeoff
 
-### Phase 2: Combine Winners
-Best-performing hypotheses get combined and tested together. Interaction effects may change individual results.
+### Phase 2: Combine Winners + Root Cause Analysis — DONE
+- H6 (k=0.4) alone is sufficient for mortality
+- Root cause: parameter-level changes can't create depth
+- Game needs structural change (PvP recommended)
 
-### Phase 3: Full Calibration
-Re-run the difficulty tier calibration with the new mechanics. Re-derive spawn rates, cooldowns, and tier parameters from the (now-correct) oracle threshold.
+### Phase 3: PvP Design + Implementation — IN PROGRESS
+- [x] PvP architecture designed (garbage system, offset, quadratic scaling)
+- [x] `pvp-sim.js` — headless PvP, bot ladder validates skill ordering
+- [x] Garbage parameter tuning: divisor=7, delay=3000ms
+- [x] `pvp.html` — browser local PvP (2P split-screen + VS BOT)
+- [x] Garbage dot visual differentiation (desaturated red with dashed warning ring)
+- [x] Navigation: PvP button on solo start screens, back-to-solo on PvP menu
+- [ ] Online PvP (WebSocket server) — future
+- [ ] PvP-specific bot strategies (opponent-aware play)
 
-### Phase 4: Browser Integration + Deploy
-Apply winning design to game.js, test in browser, deploy.
+### Phase 4: Browser Integration — DONE
+- [x] H6 deployed to production
+- [x] PvP mode deployed at /pvp.html
+- [x] VS BOT mode with difficulty selector
+- [x] Cross-page navigation (solo ↔ PvP)
 
 ---
 

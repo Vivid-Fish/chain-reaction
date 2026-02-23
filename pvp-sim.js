@@ -101,6 +101,29 @@ function calcGarbage(chainLength, divisor) {
     return Math.floor(chainLength * chainLength / divisor);
 }
 
+/** Find the densest cluster center on a board (for targeted garbage) */
+function findDensestCluster(game) {
+    const active = game.dots.filter(d => d.active);
+    if (active.length === 0) return null;
+
+    // Quick grid scan: find the cell with most dots nearby
+    const r = game.explosionRadius * 2;
+    let bestX = game.W / 2, bestY = game.H / 2, bestCount = 0;
+
+    const stepX = game.W / 6;
+    const stepY = game.H / 6;
+    for (let gx = stepX; gx < game.W; gx += stepX) {
+        for (let gy = stepY; gy < game.H; gy += stepY) {
+            let count = 0;
+            for (const d of active) {
+                if (Math.abs(d.x - gx) < r && Math.abs(d.y - gy) < r) count++;
+            }
+            if (count > bestCount) { bestCount = count; bestX = gx; bestY = gy; }
+        }
+    }
+    return { x: bestX, y: bestY, count: bestCount };
+}
+
 // =========================================================================
 // PVP MATCH
 // =========================================================================
@@ -215,15 +238,21 @@ function runPvpMatch(opts) {
             prevChainCountB = gameB.chainLengths.length;
         }
 
-        // Spawn ready garbage on each board
+        // Spawn ready garbage on each board (targeted toward densest cluster)
         const garbageForA = queueA.getReady(gameA.time);
-        for (let i = 0; i < garbageForA && gameA.activeDotCount() < tierConfig.maxDots; i++) {
-            gameA._spawnOneDot(); // Garbage dots spawn like normal dots
+        if (garbageForA > 0) {
+            const target = findDensestCluster(gameA);
+            for (let i = 0; i < garbageForA && gameA.activeDotCount() < tierConfig.maxDots; i++) {
+                gameA._spawnGarbageDot(target ? target.x : null, target ? target.y : null);
+            }
         }
 
         const garbageForB = queueB.getReady(gameB.time);
-        for (let i = 0; i < garbageForB && gameB.activeDotCount() < tierConfig.maxDots; i++) {
-            gameB._spawnOneDot();
+        if (garbageForB > 0) {
+            const target = findDensestCluster(gameB);
+            for (let i = 0; i < garbageForB && gameB.activeDotCount() < tierConfig.maxDots; i++) {
+                gameB._spawnGarbageDot(target ? target.x : null, target ? target.y : null);
+            }
         }
     }
 

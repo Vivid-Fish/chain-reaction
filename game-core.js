@@ -696,6 +696,41 @@ class Game {
         this.totalDotsSpawned++;
     }
 
+    /**
+     * Spawn a garbage dot aimed toward a target position.
+     * Spawns from the nearest edge, aimed at (tx, ty) with some spread.
+     * Falls back to random edge spawn if no target given.
+     */
+    _spawnGarbageDot(tx, ty) {
+        if (tx == null || ty == null) return this._spawnOneDot();
+
+        const cfg = this._contCfg;
+        const margin = this.cfg.SCREEN_MARGIN;
+        const speed = (cfg.speedMin + this.rng() * (cfg.speedMax - cfg.speedMin)) * this.spatialScale;
+        const spread = Math.PI * 0.3;
+
+        // Pick the nearest edge to the target
+        const dTop = ty, dBot = this.H - ty, dLeft = tx, dRight = this.W - tx;
+        const minDist = Math.min(dTop, dBot, dLeft, dRight);
+
+        let x, y;
+        if (minDist === dTop) { x = tx + (this.rng() - 0.5) * 60 * this.spatialScale; y = margin; }
+        else if (minDist === dBot) { x = tx + (this.rng() - 0.5) * 60 * this.spatialScale; y = this.H - margin; }
+        else if (minDist === dLeft) { x = margin; y = ty + (this.rng() - 0.5) * 60 * this.spatialScale; }
+        else { x = this.W - margin; y = ty + (this.rng() - 0.5) * 60 * this.spatialScale; }
+
+        x = Math.max(margin, Math.min(this.W - margin, x));
+        y = Math.max(margin, Math.min(this.H - margin, y));
+
+        // Aim toward target with spread
+        const angle = Math.atan2(ty - y, tx - x) + (this.rng() - 0.5) * spread;
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
+
+        this.dots.push({ x, y, vx, vy, active: true, bloomTimer: 8, type: 'standard', age: 0, baseSpeed: speed });
+        this.totalDotsSpawned++;
+    }
+
     _checkOverflow() {
         const d = this.density();
         const Dcrit = this._contCfg.overflowDensity;
