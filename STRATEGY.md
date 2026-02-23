@@ -249,21 +249,26 @@ Juice (screen shake, particles, sound) makes a game FEEL good. Depth (meaningful
 - Root cause: parameter-level changes can't create depth
 - Game needs structural change (PvP recommended)
 
-### Phase 3: PvP Design + Implementation — IN PROGRESS
+### Phase 3: PvP Design + Implementation — DONE (local PvP complete)
 - [x] PvP architecture designed (garbage system, offset, quadratic scaling)
 - [x] `pvp-sim.js` — headless PvP, bot ladder validates skill ordering
-- [x] Garbage parameter tuning: divisor=7, delay=3000ms
+- [x] Garbage parameter tuning: divisor=7-9, delay=3000ms
 - [x] `pvp.html` — browser local PvP (2P split-screen + VS BOT)
 - [x] Garbage dot visual differentiation (desaturated red with dashed warning ring)
 - [x] Navigation: PvP button on solo start screens, back-to-solo on PvP menu
+- [x] Targeted garbage spawning (aims at defender's densest cluster)
+- [x] Responsive layout: portrait phones stack vertically, landscape/desktop side-by-side
+- [x] Floating text notifications: chain length, attack, offset feedback
+- [x] Strategic analysis: patience (minCluster=5) generates 35% more garbage but balanced risk
 - [ ] Online PvP (WebSocket server) — future
-- [ ] PvP-specific bot strategies (opponent-aware play)
+- [ ] PvP audio integration
 
 ### Phase 4: Browser Integration — DONE
 - [x] H6 deployed to production
 - [x] PvP mode deployed at /pvp.html
 - [x] VS BOT mode with difficulty selector
 - [x] Cross-page navigation (solo ↔ PvP)
+- [x] Mobile-responsive PvP layout
 
 ---
 
