@@ -82,18 +82,37 @@ const EXPERIMENTS = {
         min: 0.5, max: 2.5, step: 0.1, value: 1.3,
     },
 
-    // === EXPERIMENTAL (board structure) ===
-    'Same-Type Cohesion': {
+    // === SCHOOLING (Boids flocking) ===
+    'Cohesion': {
         key: 'cohesionForce', target: 'tier',
-        min: 0, max: 0.02, step: 0.001, value: 0,
+        min: 0, max: 0.03, step: 0.001, value: 0,
     },
-    'Cohesion Range': {
+    'Alignment': {
+        key: 'alignmentForce', target: 'tier',
+        min: 0, max: 0.15, step: 0.005, value: 0,
+    },
+    'Separation': {
+        key: 'separationForce', target: 'tier',
+        min: 0, max: 0.5, step: 0.01, value: 0,
+    },
+    'Flock Range': {
         key: 'cohesionRange', target: 'tier',
-        min: 0, max: 200, step: 10, value: 80,
+        min: 30, max: 200, step: 5, value: 80,
     },
+    // === TEMPERATURE (spatial speed gradient) ===
+    'Temperature': {
+        key: 'temperatureStrength', target: 'tier',
+        min: 0, max: 1.0, step: 0.05, value: 0,
+    },
+    // === MASS (dots grow with age) ===
+    'Mass Growth': {
+        key: 'massGrowth', target: 'tier',
+        min: 0, max: 2.0, step: 0.1, value: 0,
+    },
+    // === WAVE SPAWN ===
     'Wave Spawn': {
         key: 'waveSpawn', target: 'tier',
-        min: 0, max: 1, step: 1, value: 0,  // boolean: 0=off, 1=on
+        min: 0, max: 1, step: 1, value: 0,
     },
     'Wave Size': {
         key: 'waveSize', target: 'tier',
@@ -110,7 +129,8 @@ const GROUPS = {
     'Feel':  ['Explosion Radius', 'Hold Duration', 'Cascade Stagger', 'Cooldown'],
     'Spawn': ['Spawn Rate', 'Max Dots', 'Speed Min', 'Speed Max', 'Density Feedback'],
     'Types': ['Gravity Pull Force', 'Gravity Pull Range', 'Volatile Radius Mult', 'Volatile Speed Mult'],
-    'Lab':   ['Same-Type Cohesion', 'Cohesion Range', 'Wave Spawn', 'Wave Size', 'Wave Interval'],
+    'School': ['Cohesion', 'Alignment', 'Separation', 'Flock Range'],
+    'Lab':   ['Temperature', 'Mass Growth', 'Wave Spawn', 'Wave Size', 'Wave Interval'],
 };
 
 let panel = null;

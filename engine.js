@@ -16,7 +16,7 @@
 // RENDERING CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v17.1.0';
+const BUILD_VERSION = 'v17.2.0';
 const BUILD_DATE = '2026-02-23';
 
 // Dot rendering
@@ -418,7 +418,8 @@ function drawDot(ctx, dot) {
     if (!dot.active && dot.bloomTimer <= 0) return;
     const hue = getDotHue(dot);
     const pulse = Math.sin(dot._pulsePhase) * 0.2 + 0.8;
-    const r = DOT_RADIUS * pulse;
+    const massMult = dot._massMult || 1;
+    const r = DOT_RADIUS * pulse * Math.sqrt(massMult);
     const a = dot._alpha;
 
     // Bloom (detonation flash)

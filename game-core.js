@@ -348,25 +348,99 @@ class Game {
                 }
             }
 
-            // Same-type cohesion: dots steer weakly toward nearby same-type dots
-            if (this._contCfg && this._contCfg.cohesionForce > 0) {
+            // === FLOCKING: Cohesion + Alignment + Separation (Boids) ===
+            // Cohesion: steer toward centroid of nearby same-type dots
+            // Alignment (Schooling): match velocity of nearby same-type dots
+            // Separation: avoid getting too close to any neighbor
+            if (this._contCfg && (this._contCfg.cohesionForce > 0 || this._contCfg.alignmentForce > 0 || this._contCfg.separationForce > 0)) {
                 const cRange = (this._contCfg.cohesionRange || 80) * this.spatialScale;
-                const cForce = this._contCfg.cohesionForce * this.spatialScale;
-                let cx = 0, cy = 0, count = 0;
+                const cForce = (this._contCfg.cohesionForce || 0) * this.spatialScale;
+                const aForce = (this._contCfg.alignmentForce || 0) * this.spatialScale;
+                const sForce = (this._contCfg.separationForce || 0) * this.spatialScale;
+                const sepDist = 20 * this.spatialScale;  // separation radius
+
+                let cx = 0, cy = 0, avx = 0, avy = 0, sx = 0, sy = 0;
+                let cCount = 0, sCount = 0;
+
                 for (const o of this.dots) {
-                    if (o === d || !o.active || o.type !== d.type) continue;
-                    const dist = Math.hypot(o.x - d.x, o.y - d.y);
+                    if (o === d || !o.active) continue;
+                    const dx = o.x - d.x, dy = o.y - d.y;
+                    const dist = Math.hypot(dx, dy);
+
+                    // Separation: repel from ALL nearby dots (any type)
+                    if (sForce > 0 && dist < sepDist && dist > 1) {
+                        sx -= dx / dist / dist;  // inverse-square repulsion
+                        sy -= dy / dist / dist;
+                        sCount++;
+                    }
+
+                    // Cohesion + Alignment: same-type only
+                    if (o.type !== d.type) continue;
                     if (dist < cRange && dist > 1) {
-                        cx += o.x; cy += o.y; count++;
+                        cx += o.x; cy += o.y;
+                        avx += o.vx; avy += o.vy;
+                        cCount++;
                     }
                 }
-                if (count > 0) {
-                    cx /= count; cy /= count;
+
+                // Apply cohesion (steer toward centroid)
+                if (cCount > 0 && cForce > 0) {
+                    cx /= cCount; cy /= cCount;
                     const dist = Math.hypot(cx - d.x, cy - d.y);
                     if (dist > 1) {
                         d.vx += (cx - d.x) / dist * cForce * this.slowMo;
                         d.vy += (cy - d.y) / dist * cForce * this.slowMo;
                     }
+                }
+
+                // Apply alignment (match average velocity of same-type neighbors)
+                if (cCount > 0 && aForce > 0) {
+                    avx /= cCount; avy /= cCount;
+                    d.vx += (avx - d.vx) * aForce * this.slowMo;
+                    d.vy += (avy - d.vy) * aForce * this.slowMo;
+                }
+
+                // Apply separation (push away from too-close neighbors)
+                if (sCount > 0 && sForce > 0) {
+                    d.vx += sx * sForce * this.slowMo;
+                    d.vy += sy * sForce * this.slowMo;
+                }
+            }
+
+            // === TEMPERATURE: speed varies by board position ===
+            // Edges = cold (slow), center = hot (fast)
+            if (this._contCfg && this._contCfg.temperatureStrength > 0) {
+                const tStr = this._contCfg.temperatureStrength;
+                // Distance from center, normalized 0-1
+                const nx = (d.x - this.W / 2) / (this.W / 2);
+                const ny = (d.y - this.H / 2) / (this.H / 2);
+                const edgeness = Math.max(Math.abs(nx), Math.abs(ny));  // 0 at center, 1 at edge
+                // Target speed multiplier: center=1+tStr, edge=1-tStr*0.5
+                const speedMult = 1 + tStr * (1 - edgeness * 1.5);
+                const speed = Math.hypot(d.vx, d.vy);
+                if (speed > 0.1) {
+                    const targetSpeed = d.baseSpeed * Math.max(0.3, speedMult);
+                    const blend = 0.02 * this.slowMo;  // gentle lerp
+                    const newSpeed = speed + (targetSpeed - speed) * blend;
+                    d.vx *= newSpeed / speed;
+                    d.vy *= newSpeed / speed;
+                }
+            }
+
+            // === MASS: dots grow with age ===
+            if (this._contCfg && this._contCfg.massGrowth > 0 && d.age !== undefined) {
+                const growth = this._contCfg.massGrowth;
+                const ageSec = d.age / 1000;
+                // Size multiplier: grows logarithmically, caps at 3x
+                d._massMult = Math.min(3.0, 1 + Math.log1p(ageSec * growth));
+                // Heavier dots slow down proportionally
+                const speed = Math.hypot(d.vx, d.vy);
+                if (speed > 0.1 && d._massMult > 1.01) {
+                    const targetSpeed = d.baseSpeed / Math.sqrt(d._massMult);
+                    const blend = 0.01 * this.slowMo;
+                    const newSpeed = speed + (targetSpeed - speed) * blend;
+                    d.vx *= newSpeed / speed;
+                    d.vy *= newSpeed / speed;
                 }
             }
 
