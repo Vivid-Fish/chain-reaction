@@ -523,6 +523,34 @@ function drawContinuousHUD(s) {
         ctx.restore();
     }
 
+    // Momentum indicator
+    if (game.momentum > 0) {
+        const mx = W - 16 * s;
+        const my = H * 0.35;
+        const mh = H * 0.3;
+        const mw = 4 * s;
+        const mFill = Math.min(1, game.momentum / 10);
+
+        // Background
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(mx - mw, my, mw, mh);
+
+        // Fill (gold)
+        const fillH = mh * mFill;
+        const mPulse = game.momentum >= 5 ? 0.15 * Math.sin(performance.now() * 0.006) : 0;
+        ctx.fillStyle = `hsla(45, 80%, ${55 + mPulse * 100}%, ${0.5 + mFill * 0.3})`;
+        ctx.fillRect(mx - mw, my + mh - fillH, mw, fillH);
+
+        // Label
+        ctx.save();
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = `600 ${9 * s | 0}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = `rgba(255,220,100,${0.4 + mFill * 0.4})`;
+        ctx.translate(mx - mw / 2, my + mh + 14 * s);
+        ctx.fillText(`x${game.momentum}`, 0, 0);
+        ctx.restore();
+    }
+
     // Tap-blocked indicator: screen edge glow
     // Shows during cooldown (continuous) or chain resolution (rounds)
     const tapBlocked = continuousActive

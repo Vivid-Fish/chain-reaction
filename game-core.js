@@ -58,10 +58,10 @@ const DEFAULTS = {
 // This creates inevitable death: more dots → faster spawning → even more dots.
 const CONTINUOUS_TIERS = {
     CALM:          { spawnRate: 0.65, cooldown: 1500, maxDots:  80, speedMin: 0.4, speedMax: 0.8, dotTypes: {standard:1.0}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
-    FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
-    SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8, spawnDensityScale: 1.0 },
-    TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
-    IMPOSSIBLE:    { spawnRate: 2.20, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8, spawnDensityScale: 0.4 },
+    FLOW:          { spawnRate: 3.60, cooldown: 2000, maxDots:  90, speedMin: 0.5, speedMax: 1.0, dotTypes: {standard:0.85, gravity:0.15}, overflowDensity: 0.8, spawnDensityScale: 0.4, cohesionForce: 0.008, alignmentForce: 0.03, separationForce: 0.15, cohesionRange: 80 },
+    SURGE:         { spawnRate: 5.80, cooldown: 2500, maxDots: 100, speedMin: 0.6, speedMax: 1.2, dotTypes: {standard:0.70, gravity:0.20, volatile:0.10}, overflowDensity: 0.8, spawnDensityScale: 1.0, cohesionForce: 0.008, alignmentForce: 0.03, separationForce: 0.15, cohesionRange: 80 },
+    TRANSCENDENCE: { spawnRate: 3.00, cooldown: 2000, maxDots:  60, speedMin: 0.7, speedMax: 1.4, dotTypes: {standard:0.50, gravity:0.25, volatile:0.25}, overflowDensity: 0.8, spawnDensityScale: 0.4, cohesionForce: 0.010, alignmentForce: 0.04, separationForce: 0.15, cohesionRange: 80 },
+    IMPOSSIBLE:    { spawnRate: 2.20, cooldown: 1500, maxDots:  40, speedMin: 0.8, speedMax: 1.6, dotTypes: {standard:0.30, gravity:0.30, volatile:0.40}, overflowDensity: 0.8, spawnDensityScale: 0.4, cohesionForce: 0.010, alignmentForce: 0.04, separationForce: 0.15, cohesionRange: 80 },
 };
 
 // =====================================================================
@@ -249,6 +249,11 @@ class Game {
         this.time = 0;
         this.totalDots = 0;
         this._hitLog = [];
+
+        // Momentum: consecutive chain streak
+        this.momentum = 0;
+        this._lastChainEndTime = -Infinity;
+        this._lastChainLength = 0;
     }
 
     canTap() {
@@ -285,7 +290,20 @@ class Game {
             if (this.chainCount > 0) {
                 this.chainLengths.push(this.chainCount);
                 this.totalDotsCaught += this.chainCount;
-                this.events.push({ type: 'chainEnd', chainLength: this.chainCount });
+
+                // Momentum tracking (same logic as step() chainEnd)
+                const graceMs = (this._contCfg.cooldown || 1500) + 2000;
+                if (this.chainCount >= 3 && (this.time - this._lastChainEndTime) < graceMs) {
+                    this.momentum = Math.min(10, this.momentum + 1);
+                } else if (this.chainCount >= 3) {
+                    this.momentum = 1;
+                } else {
+                    this.momentum = 0;
+                }
+                this._lastChainEndTime = this.time;
+                this._lastChainLength = this.chainCount;
+
+                this.events.push({ type: 'chainEnd', chainLength: this.chainCount, momentum: this.momentum });
             }
             // Reset per-tap chain tracking for correct multiplier/celebration
             this.chainCount = 0;
@@ -502,10 +520,18 @@ class Game {
                 }
 
                 // Catch dots within radius
+                const typedChains = this._contCfg && this._contCfg.typedChains;
                 for (let i = 0; i < this.dots.length; i++) {
                     const dot = this.dots[i];
                     if (!dot.active || e.caught.has(i)) continue;
                     if (Math.hypot(dot.x - e.x, dot.y - e.y) <= e.radius) {
+                        // Type-filtered cascades: gen 0 catches all, gen 1+ same-type only
+                        if (typedChains && e.generation > 0 && dot.type !== e.dotType) {
+                            // Off-type: shatter (score but no cascade)
+                            e.caught.add(i);
+                            this._shatterDot(dot, i, e.generation, e);
+                            continue;
+                        }
                         e.caught.add(i);
                         this._detonateDot(dot, i, e.generation, e);
                     }
@@ -530,7 +556,24 @@ class Game {
                 if (this.chainCount > 0) {
                     this.chainLengths.push(this.chainCount);
                     this.totalDotsCaught += this.chainCount;
-                    this.events.push({ type: 'chainEnd', chainLength: this.chainCount });
+
+                    // Momentum: chain of 3+ within grace window builds streak
+                    const graceMs = (this._contCfg.cooldown || 1500) + 2000;
+                    if (this.chainCount >= 3 && (this.time - this._lastChainEndTime) < graceMs) {
+                        this.momentum = Math.min(10, this.momentum + 1);
+                    } else if (this.chainCount >= 3) {
+                        this.momentum = 1; // First good chain starts streak
+                    } else {
+                        this.momentum = 0; // Weak chain breaks streak
+                    }
+                    this._lastChainEndTime = this.time;
+                    this._lastChainLength = this.chainCount;
+
+                    this.events.push({
+                        type: 'chainEnd',
+                        chainLength: this.chainCount,
+                        momentum: this.momentum,
+                    });
                 }
                 this.gameState = 'playing';
             } else {
@@ -737,6 +780,28 @@ class Game {
             time: this.time + delay,
             dotType: dot.type || 'standard',
         });
+    }
+
+    _shatterDot(dot, dotIndex, generation, explosion) {
+        // Off-type dot caught during typed chain: scores but spawns no cascade
+        if (this.scheduledDetonations.has(dotIndex)) return;
+        this.scheduledDetonations.add(dotIndex);
+        dot.active = false;
+        dot.bloomTimer = 8;
+
+        const points = 5 * (generation + 1); // Half points for shatter
+        this.score += points;
+
+        const typeHues = { standard: 210, gravity: 270, volatile: 30 };
+        const hue = typeHues[dot.type] || 210;
+
+        this.events.push({
+            type: 'dotShattered',
+            x: dot.x, y: dot.y,
+            dotIndex, generation, points,
+            hue, dotType: dot.type,
+        });
+        // No pendingExplosions push — shattered dots don't cascade
     }
 
     // Continuous mode: spawn dots at screen edges

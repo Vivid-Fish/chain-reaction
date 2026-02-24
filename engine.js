@@ -16,7 +16,7 @@
 // RENDERING CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v17.2.0';
+const BUILD_VERSION = 'v17.3.0';
 const BUILD_DATE = '2026-02-23';
 
 // Dot rendering
@@ -660,7 +660,7 @@ function drawExplosion(ctx, e) {
 // =====================================================================
 // CONNECTIONS — soft auras + lines between chainable dots
 // =====================================================================
-function drawConnections(ctx, gameDots, gameState) {
+function drawConnections(ctx, gameDots, gameState, typedChains) {
     if (gameState !== 'playing' && gameState !== 'resolving') return;
     const now = performance.now();
     const pulse = Math.sin(now * 0.003) * 0.12 + 0.88;
@@ -679,6 +679,8 @@ function drawConnections(ctx, gameDots, gameState) {
         for (let j = i + 1; j < gameDots.length; j++) {
             const b = gameDots[j];
             if (!b.active) continue;
+            // When typed chains active, only show connections between same-type dots
+            if (typedChains && a.type !== b.type) continue;
             const dist = Math.hypot(a.x - b.x, a.y - b.y);
             if (dist <= r) {
                 a._neighbors++;
@@ -767,11 +769,30 @@ function engineProcessEvents(events, game) {
                 spawnFloatingText(W/2, H * 0.25, `x${ev.mult}!`, 50);
                 break;
 
+            case 'dotShattered':
+                // Off-type dot caught during typed chain: small pop, no cascade
+                for (let i = 0; i < 4; i++) {
+                    const a = Math.random() * Math.PI * 2;
+                    const spd = 2 + Math.random() * 3;
+                    particles.spawn(ev.x, ev.y, Math.cos(a)*spd, Math.sin(a)*spd,
+                        12 + Math.random()*8, ev.hue, 1.5 + Math.random(), 0.90, 0.05);
+                }
+                spawnFloatingText(ev.x, ev.y - 10, `+${ev.points}`, ev.hue);
+                break;
+
+            case 'chainEnd':
+                // Momentum feedback
+                if (ev.momentum >= 3) {
+                    spawnFloatingText(W/2, H * 0.20,
+                        `MOMENTUM x${ev.momentum}`, 50);
+                }
+                break;
+
             case 'celebration':
                 spawnCelebration(ev.text, ev.hue, ev.scale);
                 break;
         }
-        // Other event types (chainEnd, overflow, roundDone) are handled by game.js
+        // Other event types (overflow, roundDone) are handled by game.js
     }
 }
 
@@ -872,7 +893,8 @@ function engineDrawScene(ctx, game, gameState, supernovaActive) {
     ctx.save();
     ctx.translate(shakeX, shakeY);
 
-    drawConnections(ctx, game.dots, gameState);
+    const typedChains = game._contCfg && game._contCfg.typedChains;
+    drawConnections(ctx, game.dots, gameState, typedChains);
     drawChainLines(ctx);
     for (const e of game.explosions) drawExplosion(ctx, e);
     particles.draw(ctx);

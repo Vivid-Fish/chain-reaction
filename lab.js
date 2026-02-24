@@ -109,6 +109,11 @@ const EXPERIMENTS = {
         key: 'massGrowth', target: 'tier',
         min: 0, max: 2.0, step: 0.1, value: 0,
     },
+    // === TYPE-FILTERED CHAINS ===
+    'Typed Chains': {
+        key: 'typedChains', target: 'tier',
+        min: 0, max: 1, step: 1, value: 0,
+    },
     // === WAVE SPAWN ===
     'Wave Spawn': {
         key: 'waveSpawn', target: 'tier',
@@ -130,6 +135,7 @@ const GROUPS = {
     'Spawn': ['Spawn Rate', 'Max Dots', 'Speed Min', 'Speed Max', 'Density Feedback'],
     'Types': ['Gravity Pull Force', 'Gravity Pull Range', 'Volatile Radius Mult', 'Volatile Speed Mult'],
     'School': ['Cohesion', 'Alignment', 'Separation', 'Flock Range'],
+    'Rules': ['Typed Chains'],
     'Lab':   ['Temperature', 'Mass Growth', 'Wave Spawn', 'Wave Size', 'Wave Interval'],
 };
 
