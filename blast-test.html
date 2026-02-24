@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Blast Legibility Test — Chain Reaction</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
+        body {
+            background: #04040f;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            color: #fff;
+        }
+        canvas { display: block; }
+        #overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #overlay.active { pointer-events: auto; }
+        .prompt-box {
+            background: rgba(0,0,0,0.85);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 16px;
+            padding: 24px 32px;
+            text-align: center;
+            max-width: 340px;
+            backdrop-filter: blur(8px);
+        }
+        .prompt-box h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #e8e8ff;
+        }
+        .prompt-box p {
+            font-size: 14px;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+        .btn {
+            padding: 12px 28px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.1s;
+            font-family: inherit;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-tighter {
+            background: linear-gradient(135deg, #4a9eff, #2a6fd4);
+            color: #fff;
+        }
+        .btn-spread {
+            background: linear-gradient(135deg, #ff6b4a, #d42a2a);
+            color: #fff;
+        }
+        .result-text {
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .result-text.show { opacity: 1; }
+        .result-correct { color: #4ade80; }
+        .result-wrong { color: #f87171; }
+        #hud {
+            position: fixed;
+            top: 16px; left: 16px; right: 16px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 5;
+            pointer-events: none;
+        }
+        .hud-item {
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 13px;
+            color: rgba(255,255,255,0.7);
+        }
+        .hud-item strong { color: #fff; font-weight: 600; }
+        #accuracy-bar {
+            position: fixed;
+            bottom: 16px; left: 16px; right: 16px;
+            z-index: 5;
+            pointer-events: none;
+        }
+        .trial-dots {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+        }
+        .trial-dot {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.15);
+            transition: background 0.3s;
+        }
+        .trial-dot.correct { background: #4ade80; }
+        .trial-dot.wrong { background: #f87171; }
+        .trial-dot.current { background: rgba(255,255,255,0.5); box-shadow: 0 0 8px rgba(255,255,255,0.3); }
+        #start-screen {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            background: rgba(4,4,15,0.95);
+        }
+        #start-screen h1 { font-size: 24px; margin-bottom: 12px; }
+        #start-screen p { font-size: 14px; color: rgba(255,255,255,0.6); max-width: 320px; text-align: center; line-height: 1.6; margin-bottom: 24px; }
+        #start-screen .btn { background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; font-size: 18px; padding: 14px 40px; }
+        #results-screen {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            background: rgba(4,4,15,0.95);
+        }
+        #results-screen h1 { font-size: 24px; margin-bottom: 8px; }
+        #results-screen .big-number { font-size: 64px; font-weight: 700; margin: 16px 0; }
+        #results-screen .pass { color: #4ade80; }
+        #results-screen .fail { color: #f87171; }
+        #results-screen p { font-size: 14px; color: rgba(255,255,255,0.6); max-width: 360px; text-align: center; line-height: 1.6; margin-bottom: 8px; }
+        .crosshair {
+            position: fixed;
+            width: 40px; height: 40px;
+            border: 2px solid rgba(255,255,255,0.8);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 8;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        .crosshair::before, .crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255,255,255,0.6);
+        }
+        .crosshair::before { top: 50%; left: -8px; right: -8px; height: 1px; }
+        .crosshair::after { left: 50%; top: -8px; bottom: -8px; width: 1px; }
+        .highlight-ring {
+            position: fixed;
+            border: 2px dashed rgba(255, 220, 50, 0.7);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 8;
+            transform: translate(-50%, -50%);
+            display: none;
+            box-shadow: 0 0 12px rgba(255, 220, 50, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+        <div class="hud-item">Trial <strong id="trial-num">0</strong>/20</div>
+        <div class="hud-item">Accuracy <strong id="accuracy">—</strong></div>
+    </div>
+
+    <div id="accuracy-bar">
+        <div class="trial-dots" id="trial-dots"></div>
+    </div>
+
+    <div class="crosshair" id="crosshair"></div>
+    <div class="highlight-ring" id="highlight-ring"></div>
+
+    <div id="overlay">
+        <div class="prompt-box" id="prompt-box" style="display:none">
+            <h2>After the explosion...</h2>
+            <p>Will the <span style="color:#ffdc32">highlighted cluster</span> be <strong>tighter</strong> or more <strong>spread out</strong>?</p>
+            <div class="buttons">
+                <button class="btn btn-tighter" id="btn-tighter">TIGHTER</button>
+                <button class="btn btn-spread" id="btn-spread">SPREAD OUT</button>
+            </div>
+            <div class="result-text" id="result-text"></div>
+        </div>
+    </div>
+
+    <div id="start-screen">
+        <h1>Blast Legibility Test</h1>
+        <p>Explosions push nearby dots. Can you learn to predict where they'll go?<br><br>
+        You'll see a crosshair (tap point) and a highlighted cluster. Predict whether the cluster gets <strong>tighter</strong> or more <strong>spread out</strong> after the explosion.</p>
+        <button class="btn" id="btn-start">Start (20 trials)</button>
+    </div>
+
+    <div id="results-screen">
+        <h1>Results</h1>
+        <div class="big-number" id="final-accuracy">0%</div>
+        <p id="results-detail"></p>
+        <p id="results-verdict"></p>
+        <br>
+        <button class="btn" style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff" id="btn-retry">Try Again</button>
+    </div>
+
+    <script src="game-core.js"></script>
+    <script src="engine.js"></script>
+    <script>
+    // =====================================================================
+    // BLAST LEGIBILITY TEST
+    // Standalone test: 20 trials, binary prediction (tighter/spread out)
+    // =====================================================================
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const TOTAL_TRIALS = 20;
+    const WARMUP_FRAMES = 300; // 5 seconds at 60fps
+    const RESULT_SHOW_FRAMES = 90; // 1.5s to show result
+
+    let W, H;
+    let game;
+    let testState = 'start'; // start | warmup | prompt | resolving | result | done
+    let trial = 0;
+    let results = []; // { correct: bool }
+    let warmupCounter = 0;
+    let resultCounter = 0;
+    let tapPoint = null;
+    let clusterDots = []; // indices of highlighted cluster dots
+    let clusterPreSpread = 0; // avg pairwise distance before
+    let lastAnswer = null;
+    let settleCounter = 0;
+
+    function resize() {
+        W = canvas.width = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+        engineResize(canvas);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function newGame() {
+        game = new Game(W, H, {}, Math.random);
+        game.startContinuous({
+            spawnRate: 4.0,
+            cooldown: 500,
+            maxDots: 50,
+            speedMin: 0.3,
+            speedMax: 0.6,
+            dotTypes: { standard: 0.7, gravity: 0.2, volatile: 0.1 },
+            overflowDensity: 999,
+            spawnDensityScale: 0,
+            blastK: 0.8,
+            blastN: 1.5,
+            blastRangeMult: 2.0,
+            blastMaxForce: 3.0,
+            cohesionForce: 0.005,
+            alignmentForce: 0.02,
+            separationForce: 0.12,
+            cohesionRange: 70,
+        });
+        engineResetVisuals();
+    }
+
+    // Find a good tap point and cluster for a trial
+    function setupTrial() {
+        const active = game.dots.filter(d => d.active);
+        if (active.length < 10) return false;
+
+        // Find clusters of 3-6 same-type dots that are NOT directly on the tap point
+        // Strategy: pick a random dot, find its cluster, then pick a tap point nearby but offset
+        let bestCluster = null;
+        let bestScore = -1;
+
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const seed = active[Math.floor(Math.random() * active.length)];
+            const nearby = active.filter(d =>
+                d !== seed && d.type === seed.type &&
+                Math.hypot(d.x - seed.x, d.y - seed.y) < game.explosionRadius * 1.5
+            );
+            if (nearby.length >= 2 && nearby.length <= 6) {
+                const cluster = [seed, ...nearby];
+                // Score: prefer clusters not too close to edges
+                const cx = cluster.reduce((s, d) => s + d.x, 0) / cluster.length;
+                const cy = cluster.reduce((s, d) => s + d.y, 0) / cluster.length;
+                const edgeDist = Math.min(cx, W - cx, cy, H - cy);
+                if (edgeDist > 50 && cluster.length > bestScore) {
+                    bestCluster = cluster;
+                    bestScore = cluster.length;
+                }
+            }
+        }
+
+        if (!bestCluster) return false;
+
+        // Pick tap point: within blast range of cluster but not inside it
+        const cx = bestCluster.reduce((s, d) => s + d.x, 0) / bestCluster.length;
+        const cy = bestCluster.reduce((s, d) => s + d.y, 0) / bestCluster.length;
+
+        // Offset tap point from cluster center
+        const angle = Math.random() * Math.PI * 2;
+        const dist = game.explosionRadius * (0.8 + Math.random() * 0.8);
+        const tx = Math.max(30, Math.min(W - 30, cx + Math.cos(angle) * dist));
+        const ty = Math.max(30, Math.min(H - 30, cy + Math.sin(angle) * dist));
+
+        tapPoint = { x: tx, y: ty };
+        clusterDots = bestCluster.map(d => game.dots.indexOf(d));
+
+        // Compute pre-blast spread (avg pairwise distance)
+        clusterPreSpread = computeSpread(bestCluster);
+
+        return true;
+    }
+
+    function computeSpread(dots) {
+        if (dots.length < 2) return 0;
+        let total = 0, count = 0;
+        for (let i = 0; i < dots.length; i++) {
+            for (let j = i + 1; j < dots.length; j++) {
+                total += Math.hypot(dots[i].x - dots[j].x, dots[i].y - dots[j].y);
+                count++;
+            }
+        }
+        return total / count;
+    }
+
+    function showPrompt() {
+        const crosshair = document.getElementById('crosshair');
+        crosshair.style.left = tapPoint.x + 'px';
+        crosshair.style.top = tapPoint.y + 'px';
+        crosshair.style.display = 'block';
+
+        // Highlight ring around cluster
+        const cDots = clusterDots.map(i => game.dots[i]).filter(d => d.active);
+        const cx = cDots.reduce((s, d) => s + d.x, 0) / cDots.length;
+        const cy = cDots.reduce((s, d) => s + d.y, 0) / cDots.length;
+        const maxDist = Math.max(...cDots.map(d => Math.hypot(d.x - cx, d.y - cy)));
+        const ring = document.getElementById('highlight-ring');
+        const ringR = maxDist + 20;
+        ring.style.left = cx + 'px';
+        ring.style.top = cy + 'px';
+        ring.style.width = (ringR * 2) + 'px';
+        ring.style.height = (ringR * 2) + 'px';
+        ring.style.display = 'block';
+
+        document.getElementById('prompt-box').style.display = 'block';
+        document.getElementById('result-text').classList.remove('show');
+        document.getElementById('overlay').classList.add('active');
+    }
+
+    function hidePrompt() {
+        document.getElementById('crosshair').style.display = 'none';
+        document.getElementById('highlight-ring').style.display = 'none';
+        document.getElementById('prompt-box').style.display = 'none';
+        document.getElementById('overlay').classList.remove('active');
+    }
+
+    function handleAnswer(answer) {
+        lastAnswer = answer;
+        hidePrompt();
+        // Fire the explosion
+        game.tap(tapPoint.x, tapPoint.y);
+        testState = 'resolving';
+    }
+
+    document.getElementById('btn-tighter').addEventListener('click', () => handleAnswer('tighter'));
+    document.getElementById('btn-spread').addEventListener('click', () => handleAnswer('spread'));
+
+    function checkResult() {
+        // Compute post-blast spread
+        const cDots = clusterDots.map(i => game.dots[i]).filter(d => d.active);
+        if (cDots.length < 2) {
+            // Most cluster dots were caught — treat as "tighter" (collapsed)
+            const correct = lastAnswer === 'tighter';
+            showResult(correct);
+            return;
+        }
+        const postSpread = computeSpread(cDots);
+        const actuallyTighter = postSpread < clusterPreSpread;
+        const correct = (lastAnswer === 'tighter' && actuallyTighter) ||
+                       (lastAnswer === 'spread' && !actuallyTighter);
+        showResult(correct);
+    }
+
+    function showResult(correct) {
+        results.push({ correct });
+        const el = document.getElementById('result-text');
+        el.textContent = correct ? 'CORRECT' : 'WRONG';
+        el.className = 'result-text show ' + (correct ? 'result-correct' : 'result-wrong');
+        document.getElementById('prompt-box').style.display = 'block';
+        document.getElementById('overlay').classList.add('active');
+
+        // Update HUD
+        updateHUD();
+
+        resultCounter = RESULT_SHOW_FRAMES;
+        testState = 'result';
+    }
+
+    function updateHUD() {
+        document.getElementById('trial-num').textContent = trial;
+        const correct = results.filter(r => r.correct).length;
+        const total = results.length;
+        document.getElementById('accuracy').textContent = total > 0 ? Math.round(correct / total * 100) + '%' : '—';
+
+        // Trial dots
+        const container = document.getElementById('trial-dots');
+        container.innerHTML = '';
+        for (let i = 0; i < TOTAL_TRIALS; i++) {
+            const dot = document.createElement('div');
+            dot.className = 'trial-dot';
+            if (i < results.length) {
+                dot.classList.add(results[i].correct ? 'correct' : 'wrong');
+            } else if (i === results.length) {
+                dot.classList.add('current');
+            }
+            container.appendChild(dot);
+        }
+    }
+
+    function showResults() {
+        testState = 'done';
+        const total = results.length;
+        const correct = results.filter(r => r.correct).length;
+        const pct = Math.round(correct / total * 100);
+
+        // Trials 11-20 accuracy
+        const late = results.slice(10);
+        const lateCorrect = late.filter(r => r.correct).length;
+        const latePct = late.length > 0 ? Math.round(lateCorrect / late.length * 100) : 0;
+
+        const el = document.getElementById('final-accuracy');
+        el.textContent = pct + '%';
+        el.className = 'big-number ' + (latePct >= 65 ? 'pass' : 'fail');
+
+        const early = results.slice(0, 10);
+        const earlyCorrect = early.filter(r => r.correct).length;
+        const earlyPct = early.length > 0 ? Math.round(earlyCorrect / early.length * 100) : 0;
+
+        document.getElementById('results-detail').innerHTML =
+            `Trials 1-10: <strong>${earlyPct}%</strong> (${earlyCorrect}/${early.length})<br>` +
+            `Trials 11-20: <strong>${latePct}%</strong> (${lateCorrect}/${late.length})`;
+
+        const verdict = latePct >= 65
+            ? 'PASS — Blast physics is learnable. The billiards design is viable.'
+            : latePct >= 55
+            ? 'MARGINAL — Some learning detected. Consider tuning blast parameters.'
+            : 'FAIL — Physics too chaotic or too subtle. Consider reducing dot count or increasing blast force.';
+        document.getElementById('results-verdict').textContent = verdict;
+
+        document.getElementById('results-screen').style.display = 'flex';
+        hidePrompt();
+    }
+
+    document.getElementById('btn-start').addEventListener('click', () => {
+        document.getElementById('start-screen').style.display = 'none';
+        trial = 0;
+        results = [];
+        newGame();
+        updateHUD();
+        warmupCounter = WARMUP_FRAMES;
+        testState = 'warmup';
+    });
+
+    document.getElementById('btn-retry').addEventListener('click', () => {
+        document.getElementById('results-screen').style.display = 'none';
+        trial = 0;
+        results = [];
+        newGame();
+        updateHUD();
+        warmupCounter = WARMUP_FRAMES;
+        testState = 'warmup';
+    });
+
+    function loop() {
+        if (testState === 'start' || testState === 'done') {
+            // Still render the background
+            if (game) {
+                game.step(16.67);
+                engineProcessEvents(game.events, game);
+                game.events = [];
+                engineUpdateVisuals(game);
+            }
+            engineDrawScene(ctx, game || { dots: [], explosions: [], explosionRadius: 40, gameState: 'playing', _contCfg: null }, 'playing', false);
+            requestAnimationFrame(loop);
+            return;
+        }
+
+        if (testState === 'warmup') {
+            game.step(16.67);
+            engineProcessEvents(game.events, game);
+            game.events = [];
+            engineUpdateVisuals(game);
+            engineDrawScene(ctx, game, 'playing', false);
+            warmupCounter--;
+            if (warmupCounter <= 0) {
+                trial++;
+                if (setupTrial()) {
+                    testState = 'prompt';
+                    showPrompt();
+                } else {
+                    // Not enough dots yet, keep warming up
+                    warmupCounter = 60;
+                }
+            }
+            requestAnimationFrame(loop);
+            return;
+        }
+
+        if (testState === 'prompt') {
+            // Paused — just render current state, don't step physics
+            engineDrawScene(ctx, game, 'playing', false);
+            requestAnimationFrame(loop);
+            return;
+        }
+
+        if (testState === 'resolving') {
+            game.step(16.67);
+            engineProcessEvents(game.events, game);
+            game.events = [];
+            engineUpdateVisuals(game);
+            engineDrawScene(ctx, game, 'playing', false);
+
+            // Wait for chain to fully resolve (no active explosions)
+            if (game.explosions.length === 0 && game.pendingExplosions.length === 0) {
+                // Give a few extra frames for blast displacement to settle
+                if (!settleCounter) settleCounter = 15;
+                settleCounter--;
+                if (settleCounter <= 0) {
+                    settleCounter = 0;
+                    checkResult();
+                }
+            }
+            requestAnimationFrame(loop);
+            return;
+        }
+
+        if (testState === 'result') {
+            game.step(16.67);
+            engineProcessEvents(game.events, game);
+            game.events = [];
+            engineUpdateVisuals(game);
+            engineDrawScene(ctx, game, 'playing', false);
+            resultCounter--;
+            if (resultCounter <= 0) {
+                hidePrompt();
+                if (trial >= TOTAL_TRIALS) {
+                    showResults();
+                } else {
+                    // Next trial
+                    warmupCounter = 120; // 2 seconds between trials
+                    testState = 'warmup';
+                    trial++;
+                    updateHUD();
+                }
+            }
+            requestAnimationFrame(loop);
+            return;
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+    </script>
+</body>
+</html>

@@ -16,7 +16,7 @@
 // RENDERING CONSTANTS
 // =====================================================================
 
-const BUILD_VERSION = 'v17.3.0';
+const BUILD_VERSION = 'v18.1.0';
 const BUILD_DATE = '2026-02-23';
 
 // Dot rendering
@@ -49,6 +49,8 @@ let explosionRadius;
 
 let floatingTexts = [];
 let chainLines = [];
+let blastRings = [];     // { x, y, maxR, age, maxAge, hue }
+let clusterGlows = [];   // { dots: [{x,y}], age, maxAge }
 
 let shakeTrauma = 0;
 let shakeX = 0, shakeY = 0;
@@ -439,16 +441,23 @@ function drawDot(ctx, dot) {
         return;
     }
 
-    // Trail
+    // Trail — enhanced when dot was recently blast-pushed (Layer 2)
+    const blasting = dot._blastTrailTimer > 0;
+    const blastIntensity = blasting ? dot._blastTrailTimer / 30 : 0;
+    const trailHue = blasting ? dot._blastHue : hue;
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < dot._trail.length - 1; i++) {
         const t = dot._trail[i];
         const tp = (i + 1) / dot._trail.length;
-        ctx.globalAlpha = a * tp * 0.12;
-        const ts = r * tp * 0.8;
+        const baseAlpha = blasting ? 0.12 + blastIntensity * 0.25 : 0.12;
+        ctx.globalAlpha = a * tp * baseAlpha;
+        const baseSize = blasting ? 0.8 + blastIntensity * 1.0 : 0.8;
+        const ts = r * tp * baseSize;
+        const lum = blasting ? 60 + blastIntensity * 20 : 60;
+        const sat = blasting ? 70 + blastIntensity * 20 : 70;
         const tg = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, ts * 2);
-        tg.addColorStop(0, `hsla(${hue}, 70%, 60%, 0.5)`);
-        tg.addColorStop(1, `hsla(${hue}, 70%, 60%, 0)`);
+        tg.addColorStop(0, `hsla(${trailHue}, ${sat}%, ${lum}%, 0.5)`);
+        tg.addColorStop(1, `hsla(${trailHue}, ${sat}%, ${lum}%, 0)`);
         ctx.fillStyle = tg;
         ctx.fillRect(t.x - ts * 2, t.y - ts * 2, ts * 4, ts * 4);
     }
@@ -780,6 +789,46 @@ function engineProcessEvents(events, game) {
                 spawnFloatingText(ev.x, ev.y - 10, `+${ev.points}`, ev.hue);
                 break;
 
+            case 'blastForce':
+                // Layer 1: Blast ring — expanding shockwave showing force radius
+                blastRings.push({
+                    x: ev.x, y: ev.y,
+                    maxR: ev.radius,
+                    age: 0, maxAge: 18,  // ~0.3s at 60fps
+                    hue: ev.dotType === 'gravity' ? 270 : ev.dotType === 'volatile' ? 30 : 210,
+                });
+                // Layer 2: Mark pushed dots for enhanced trail rendering
+                for (const p of ev.pushed) {
+                    const dot = game.dots[p.dotIndex];
+                    if (dot && dot.active) {
+                        dot._blastTrailTimer = 30; // ~0.5s of enhanced trail
+                        dot._blastHue = ev.dotType === 'gravity' ? 270 : ev.dotType === 'volatile' ? 30 : 210;
+                    }
+                }
+                // Layer 3: Detect new clusters formed by blast push
+                // Check if any 3+ same-type dots are now within chain proximity
+                {
+                    const movedIndices = new Set(ev.pushed.map(p => p.dotIndex));
+                    for (const p of ev.pushed) {
+                        const dot = game.dots[p.dotIndex];
+                        if (!dot || !dot.active) continue;
+                        let nearby = 0;
+                        const clusterDots = [{ x: dot.x, y: dot.y }];
+                        for (const o of game.dots) {
+                            if (o === dot || !o.active || o.type !== dot.type) continue;
+                            if (Math.hypot(o.x - dot.x, o.y - dot.y) < (game.explosionRadius || 40)) {
+                                nearby++;
+                                clusterDots.push({ x: o.x, y: o.y });
+                            }
+                        }
+                        if (nearby >= 2) { // 3+ dots total including this one
+                            clusterGlows.push({ dots: clusterDots, age: 0, maxAge: 40 });
+                            break; // one glow per blast event is enough
+                        }
+                    }
+                }
+                break;
+
             case 'chainEnd':
                 // Momentum feedback
                 if (ev.momentum >= 3) {
@@ -809,9 +858,16 @@ function engineUpdateVisuals(game) {
     updateChainLines();
     particles.update();
 
+    // Update blast rings
+    blastRings = blastRings.filter(r => { r.age++; return r.age < r.maxAge; });
+    // Update cluster glows
+    clusterGlows = clusterGlows.filter(g => { g.age++; return g.age < g.maxAge; });
+
     // Update dot visual state
     for (const d of game.dots) {
         updateDotVisuals(d);
+        // Tick down blast trail timer
+        if (d._blastTrailTimer > 0) d._blastTrailTimer--;
     }
 
     // Screen shake
@@ -897,6 +953,51 @@ function engineDrawScene(ctx, game, gameState, supernovaActive) {
     drawConnections(ctx, game.dots, gameState, typedChains);
     drawChainLines(ctx);
     for (const e of game.explosions) drawExplosion(ctx, e);
+
+    // Layer 1: Blast rings — expanding shockwave showing blast force radius
+    for (const ring of blastRings) {
+        const t = ring.age / ring.maxAge;
+        const r = ring.maxR * easeOutQuad(t);
+        const alpha = (1 - t) * 0.5;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(ring.x, ring.y, Math.max(1, r), 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${ring.hue}, 60%, 65%, 1)`;
+        ctx.lineWidth = 2.5 * (1 - t) + 0.5;
+        ctx.stroke();
+        // Inner ring for depth
+        if (t < 0.6) {
+            ctx.globalAlpha = alpha * 0.4;
+            ctx.beginPath();
+            ctx.arc(ring.x, ring.y, Math.max(1, r * 0.6), 0, Math.PI * 2);
+            ctx.strokeStyle = `hsla(${ring.hue}, 50%, 80%, 1)`;
+            ctx.lineWidth = 1.5 * (1 - t);
+            ctx.stroke();
+        }
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Layer 3: Cluster glows — highlight new clusters formed by blast push
+    for (const cg of clusterGlows) {
+        const t = cg.age / cg.maxAge;
+        const alpha = t < 0.3 ? t / 0.3 : (1 - t) / 0.7; // fade in then out
+        ctx.globalCompositeOperation = 'lighter';
+        for (const pt of cg.dots) {
+            ctx.globalAlpha = alpha * 0.25;
+            const gr = (explosionRadius || 40) * 0.5;
+            const g = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, gr);
+            g.addColorStop(0, `hsla(50, 90%, 80%, 0.6)`);
+            g.addColorStop(0.5, `hsla(50, 80%, 60%, 0.2)`);
+            g.addColorStop(1, `hsla(50, 80%, 50%, 0)`);
+            ctx.fillStyle = g;
+            ctx.fillRect(pt.x - gr, pt.y - gr, gr * 2, gr * 2);
+        }
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
     particles.draw(ctx);
     for (const d of game.dots) drawDot(ctx, d);
     drawFloatingTexts(ctx);
@@ -910,6 +1011,8 @@ function engineDrawScene(ctx, game, gameState, supernovaActive) {
 function engineResetVisuals() {
     chainLines = [];
     floatingTexts = [];
+    blastRings = [];
+    clusterGlows = [];
     particles.clear();
     multiplierPulse = 0;
     feverIntensity = 0;

@@ -127,6 +127,23 @@ const EXPERIMENTS = {
         key: 'waveInterval', target: 'tier',
         min: 1000, max: 8000, step: 500, value: 3000,
     },
+    // === BLAST FORCE ===
+    'Blast Force': {
+        key: 'blastK', target: 'tier',
+        min: 0, max: 2.0, step: 0.1, value: 0.8,
+    },
+    'Blast Falloff': {
+        key: 'blastN', target: 'tier',
+        min: 0.5, max: 3.0, step: 0.1, value: 1.5,
+    },
+    'Blast Range': {
+        key: 'blastRangeMult', target: 'tier',
+        min: 1.0, max: 4.0, step: 0.1, value: 2.0,
+    },
+    'Blast Max Force': {
+        key: 'blastMaxForce', target: 'tier',
+        min: 0.5, max: 5.0, step: 0.5, value: 3.0,
+    },
 };
 
 // --- Groups for tab organization ---
@@ -135,6 +152,7 @@ const GROUPS = {
     'Spawn': ['Spawn Rate', 'Max Dots', 'Speed Min', 'Speed Max', 'Density Feedback'],
     'Types': ['Gravity Pull Force', 'Gravity Pull Range', 'Volatile Radius Mult', 'Volatile Speed Mult'],
     'School': ['Cohesion', 'Alignment', 'Separation', 'Flock Range'],
+    'Blast': ['Blast Force', 'Blast Falloff', 'Blast Range', 'Blast Max Force'],
     'Rules': ['Typed Chains'],
     'Lab':   ['Temperature', 'Mass Growth', 'Wave Spawn', 'Wave Size', 'Wave Interval'],
 };

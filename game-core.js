@@ -19,9 +19,17 @@
 // =====================================================================
 
 const DOT_TYPES = {
-    standard: { label: 'standard', radiusMult: 1.0, speedMult: 1.0 },
-    gravity:  { label: 'gravity',  radiusMult: 1.0, speedMult: 0.7, pullRange: 2.5, pullForce: 0.012 },
-    volatile: { label: 'volatile', radiusMult: 1.5, speedMult: 1.3 },
+    standard: { label: 'standard', radiusMult: 1.0, speedMult: 1.0, blastResist: 1.0 },
+    gravity:  { label: 'gravity',  radiusMult: 1.0, speedMult: 0.7, pullRange: 2.5, pullForce: 0.012, blastResist: 0.6 },
+    volatile: { label: 'volatile', radiusMult: 1.5, speedMult: 1.3, blastResist: 1.2 },
+};
+
+const BLAST_DEFAULTS = {
+    BLAST_K: 0.8,
+    BLAST_N: 1.5,
+    BLAST_RANGE_MULT: 2.0,
+    BLAST_MAX_FORCE: 3.0,
+    BLAST_DISPLACEMENT_CAP: 120,
 };
 
 const DEFAULTS = {
@@ -492,7 +500,13 @@ class Game {
             if (e.phase === 'grow') {
                 if (e.age >= cfg.EXPLOSION_GROW_MS) e.phase = 'hold';
                 e.radius = e.maxRadius * easeOutExpo(Math.min(e.age / cfg.EXPLOSION_GROW_MS, 1));
-            } else if (e.phase === 'hold') {
+            }
+            // Apply blast force once, at the moment grow transitions to hold
+            if (e.phase === 'hold' && !e._blastApplied) {
+                e._blastApplied = true;
+                this._applyBlastForce(e);
+            }
+            if (e.phase === 'hold') {
                 if (e.age >= cfg.EXPLOSION_GROW_MS + holdMs) e.phase = 'shrink';
                 e.radius = e.maxRadius;
             } else if (e.phase === 'shrink') {
@@ -712,7 +726,51 @@ class Game {
             age: 0,
             caught: new Set(),
             createdAt: this.time,
+            _blastApplied: false,
         };
+    }
+
+    _applyBlastForce(explosion) {
+        const cfg = this._contCfg || {};
+        const bk = cfg.blastK ?? BLAST_DEFAULTS.BLAST_K;
+        if (bk <= 0) return; // blast force disabled
+        const bn = cfg.blastN ?? BLAST_DEFAULTS.BLAST_N;
+        const rangeMult = cfg.blastRangeMult ?? BLAST_DEFAULTS.BLAST_RANGE_MULT;
+        const maxForce = cfg.blastMaxForce ?? BLAST_DEFAULTS.BLAST_MAX_FORCE;
+        const blastRange = explosion.maxRadius * rangeMult;
+        const pushed = [];
+
+        for (let i = 0; i < this.dots.length; i++) {
+            const dot = this.dots[i];
+            if (!dot.active || explosion.caught.has(i)) continue;
+            const dx = dot.x - explosion.x;
+            const dy = dot.y - explosion.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist >= blastRange || dist < 0.5) continue;
+
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const normalizedDist = Math.max(dist / explosion.maxRadius, 0.1);
+            const rawForce = bk / Math.pow(normalizedDist, bn);
+            const cappedForce = Math.min(rawForce, maxForce);
+            const resist = (DOT_TYPES[dot.type] || DOT_TYPES.standard).blastResist || 1.0;
+            const force = cappedForce * resist * this.spatialScale;
+
+            dot.vx += nx * force;
+            dot.vy += ny * force;
+            pushed.push({ dotIndex: i, x: dot.x, y: dot.y, fx: nx * force, fy: ny * force });
+        }
+
+        if (pushed.length > 0) {
+            this.events.push({
+                type: 'blastForce',
+                x: explosion.x, y: explosion.y,
+                radius: blastRange,
+                generation: explosion.generation,
+                dotType: explosion.dotType,
+                pushed,
+            });
+        }
     }
 
     _detonateDot(dot, dotIndex, generation, explosion) {
@@ -1283,5 +1341,5 @@ class BotRunner {
 // =====================================================================
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, CONTINUOUS_TIERS, DOT_TYPES, getRoundParams, getMultiplier, createRNG };
+    module.exports = { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, BLAST_DEFAULTS, CONTINUOUS_TIERS, DOT_TYPES, getRoundParams, getMultiplier, createRNG };
 }
