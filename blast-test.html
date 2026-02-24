@@ -233,7 +233,7 @@
     const WARMUP_FRAMES = 300; // 5 seconds at 60fps
     const RESULT_SHOW_FRAMES = 90; // 1.5s to show result
 
-    let W, H;
+    // W, H already declared by engine.js — reuse them
     let game;
     let testState = 'start'; // start | warmup | prompt | resolving | result | done
     let trial = 0;
@@ -247,9 +247,7 @@
     let settleCounter = 0;
 
     function resize() {
-        W = canvas.width = window.innerWidth;
-        H = canvas.height = window.innerHeight;
-        engineResize(canvas);
+        engineResize(canvas);  // sets global W, H and DOT_RADIUS/DOT_GLOW_SIZE
     }
     window.addEventListener('resize', resize);
     resize();
