@@ -276,16 +276,16 @@ function drawStartScreen() {
 // Flickering light bulb: infrequent bursts of rapid on/off toggles
 let _flickerBurst = null; // array of timestamps when state toggles
 let _flickerIdx = 0;
-let _flickerNext = 4000 + Math.random() * 6000;
+let _flickerNext = 8000 + Math.random() * 12000;
 let _flickerOn = false;
 
 function _scheduleFlickerBurst(now) {
-    // Build a burst: 3-7 rapid toggles with random gaps (30-120ms)
-    const count = 3 + (Math.random() * 5 | 0);
+    // Build a burst: 2-4 very fast toggles with tiny gaps (16-50ms)
+    const count = 2 + (Math.random() * 3 | 0);
     _flickerBurst = [now];
     let t = now;
     for (let i = 0; i < count; i++) {
-        t += 30 + Math.random() * 90;
+        t += 16 + Math.random() * 34;
         _flickerBurst.push(t);
     }
     _flickerIdx = 0;
@@ -306,7 +306,7 @@ function updateFlicker() {
             _flickerBurst = null;
             _flickerOn = false;
             canvas.style.filter = '';
-            _flickerNext = now + 4000 + Math.random() * 8000;
+            _flickerNext = now + 10000 + Math.random() * 15000;
         }
     } else {
         canvas.style.filter = '';
