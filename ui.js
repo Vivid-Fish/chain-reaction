@@ -319,6 +319,7 @@ function _initTitleLetters(cx, titleY, titleSize) {
             hue: 195 + i * 12,
             explodeTimer: 0,   // >0 means exploding
             explodeMax: 0,
+            cooldown: 0,       // >0 means immune to new explosions
             bloomTimer: 0,     // flash on detonation
             chainIdx: 0,       // which chain note to play
             width: widths[i],
@@ -330,7 +331,7 @@ function _initTitleLetters(cx, titleY, titleSize) {
 
 function _nudgeRandomLetter() {
     if (!_titleLetters) return;
-    const active = _titleLetters.filter(l => l.ch !== ' ' && l.explodeTimer <= 0);
+    const active = _titleLetters.filter(l => l.ch !== ' ' && l.explodeTimer <= 0 && l.cooldown <= 0);
     if (active.length === 0) return;
     const l = active[Math.random() * active.length | 0];
     l.vx += (Math.random() - 0.5) * 2.5;
@@ -338,7 +339,7 @@ function _nudgeRandomLetter() {
 }
 
 function _explodeLetter(letter, chainIdx) {
-    if (letter.explodeTimer > 0 || letter.ch === ' ') return;
+    if (letter.explodeTimer > 0 || letter.cooldown > 0 || letter.ch === ' ') return;
     letter.explodeTimer = 60;
     letter.explodeMax = 60;
     letter.bloomTimer = 10;
@@ -389,7 +390,7 @@ function _explodeLetter(letter, chainIdx) {
     setTimeout(() => {
         if (!_titleLetters) return;
         for (const other of _titleLetters) {
-            if (other === letter || other.ch === ' ' || other.explodeTimer > 0) continue;
+            if (other === letter || other.ch === ' ' || other.explodeTimer > 0 || other.cooldown > 0) continue;
             const dx = other.x - letter.x;
             const dy = other.y - letter.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -432,17 +433,21 @@ function _updateTitlePhysics() {
         l.y += l.vy;
 
         // Decay timers
-        if (l.explodeTimer > 0) l.explodeTimer--;
+        if (l.explodeTimer > 0) {
+            l.explodeTimer--;
+            if (l.explodeTimer <= 0) l.cooldown = 120; // immune for 2 sec after exploding
+        }
+        if (l.cooldown > 0) l.cooldown--;
         if (l.bloomTimer > 0) l.bloomTimer--;
     }
 
     // Collision detection between letters
     for (let i = 0; i < _titleLetters.length; i++) {
         const a = _titleLetters[i];
-        if (a.ch === ' ' || a.explodeTimer > 0) continue;
+        if (a.ch === ' ' || a.explodeTimer > 0 || a.cooldown > 0) continue;
         for (let j = i + 1; j < _titleLetters.length; j++) {
             const b = _titleLetters[j];
-            if (b.ch === ' ' || b.explodeTimer > 0) continue;
+            if (b.ch === ' ' || b.explodeTimer > 0 || b.cooldown > 0) continue;
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
