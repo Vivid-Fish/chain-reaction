@@ -1384,6 +1384,7 @@ function dispatchSwipe(dir) {
 
 canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
+    if (!audio.initialized) audio.init();
     const x = e.clientX, y = e.clientY;
 
     if (settingsOpen) {
