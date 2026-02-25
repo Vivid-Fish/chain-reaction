@@ -7,30 +7,87 @@
 - **Git:** github.com/Vivid-Fish/chain-reaction (main branch)
 - **Versioning:** Conventional commits + semver auto-bump (commit-msg hook)
 
-## Design Principles
+## The Feel We're Chasing
 
-These emerged from collaborative design sessions (Tim + Gemini + Claude).
+The player experience should feel like **racquetball, Rocket League, and Tetris Effect** — not like a puzzle game, not like a slot machine.
 
-### 1. Maximum Complexity, Minimum Abstraction
-The best version has 3 rules that create 1000 outcomes, not 1000 rules. Complexity must exist entirely on the playfield — no shop screens, no upgrade menus, no XP bars. If the player needs to read a wiki to understand a rule, it's wrong.
+**Racquetball/squash:** You read the ball off the wall, predict where it bounces, and position yourself before it arrives. The court is simple geometry. The physics are trivial — angle of incidence equals angle of reflection. But the skill ceiling is infinite because you're always trying to see one more bounce ahead than your opponent. Experts read the opponent's arm motion 160ms before they hit the ball and are already moving.
 
-### 2. Lateral Progression (The Mewgenics Principle)
-No loot is objectively better — just different. Players discover "broken" combinations through creativity, not grinding. A gravity dot isn't stronger than a volatile dot; they serve different strategic purposes. The feeling of power comes from recognizing how to exploit interactions, not from stat bumps.
+**Rocket League:** Same car, same ball, same arena for everyone. The only differentiator is mental physics simulation — how far ahead can you predict the ball? Bronze chases where the ball IS. Grand Champion is already where the ball WILL BE in 3 seconds. The physics are deliberately "fake" (tuned for learnability, not realism) so that prediction is reliable. Corey Davis: "I don't care about realism. I want to make awesome stuff happen."
 
-### 3. Property Transmission (The Virus Model)
-**The one rule:** An explosion inherits the properties of the dot that caused it, and imparts them to the dots it catches. This creates a genetic algorithm on screen — tap once, watch a "trait" evolve across the chain. The ORDER in which you trigger the chain changes the outcome entirely (Heavy→Volatile = supernova; Volatile→Heavy = scattered pops).
+**Tetris Effect:** Continuous flow state. You're not thinking — you're doing. Pieces fall, you place them, the music responds, the visuals pulse. Action and feedback merge into one loop. The skill is unconscious pattern recognition built through repetition, not conscious calculation.
 
-### 4. Emergent, Not Scripted
-No hard-coded synergies (`if (fire && ice) playSteam()`). Instead: systemic interactions. Fire adds heat. Ice removes heat. Steam is what happens when heat meets water. The game engine shouldn't "know" a combo happened; the combo should be a mathematical inevitability.
+**What these share:** The player is constantly making fast, simple physics calculations and taking immediate action on them. Not waiting. Not analyzing. Reading the board, predicting a short time horizon, acting, reading again. The loop is tight — under 2 seconds from observation to action. Mastery feels like seeing the matrix, not solving a math problem.
 
-### 5. Dots Are Always In Motion
-This is NOT a puzzle game — it's action-strategy. The temporal dimension (timing windows, prediction, interception) is fundamental. Any new mechanic must interact with movement. Static analysis fails because the board is never static.
+**What this means for us:** Dots must move predictably enough that a player can glance at the board and know where everything will be in 1-2 seconds. Wall bounces must be trivially readable. The game rewards the player who sees convergence points forming before they fully form — and taps at the right moment. The gap between "tap where dots are" and "tap where dots will be" is the entire skill curve.
 
-### 6. Juice Effects Are Multiplicative, Not Additive
-(From the build-app skill.) Each juice layer compounds the previous ones. Screen shake alone = +10%. Screen shake + particles = +30%. Screen shake + particles + sound = +80%. Order of implementation matters.
+## Universal Design Principles
 
-### 7. Simulation Before Design
-Don't guess. Measure. Before committing to any new mechanic, run headless simulations to understand how it affects the core metrics. The data tells us whether the game needs stabilizers, aggregators, or amplifiers.
+These apply to any game, not just this one. Established through research on Rocket League, Tetris Effect, Pokemon, Puyo Puyo, Slay the Spire, Hades, Threes, and others.
+
+### 1. Predictable Physics = Unbounded Skill Ceiling
+Simpler, more predictable physics create a HIGHER skill ceiling, not a lower one. When physics are deterministic and learnable, the optimal strategy is *predictive* — and prediction depth is unbounded. When physics are random or noisy, the optimal strategy is *reactive* — which caps skill expression. Randomness is the enemy of mastery. Make physics "fake" in a way that's MORE learnable than real physics — tuned for readability and fun, not realism. (Rocket League, Counter-Strike, Smash Bros Melee, billiards.)
+
+### 2. Easy to Learn, Hard to Master
+The skill axis must be unbounded — a player with 100 hours should play meaningfully differently from one with 1 hour. The mastery axis is prediction depth: novice reacts to what IS, intermediate predicts what WILL BE, expert reads multiple steps ahead. This requires principle #1 as a prerequisite — you can only predict what's deterministic.
+
+### 3. Maximum Complexity, Minimum Abstraction
+3 rules that create 1000 outcomes, not 1000 rules. Maximize the elegance ratio: emergent complexity / inherent complexity. Go has ~4 rules and more game states than atoms in the universe. Low mechanical complexity (easy to learn), high emergent complexity (many situations), moderate strategic complexity (manageable decisions). (Go, Puyo Puyo, Threes.)
+
+### 4. Layered Depth Architecture
+A child and a tournament player both play the same game, enjoy it fully, and never encounter each other's experience. Depth is structurally invisible to anyone who doesn't seek it. Layer 1 (Universal) must be fully satisfying on its own. Layer 1 must NEVER feel diminished by the existence of deeper layers. Depth reveals through difficulty, not instruction. (Pokemon, Slay the Spire.)
+
+### 5. Discoverable, Not Taught
+No tutorials for advanced mechanics. Players learn by noticing differences in feedback — subtly different visuals, sounds, celebrations — not by reading explanations. Discovery is the reward. Depth reveals one layer at a time through play, not through text. (Slay the Spire, Threes, Hades.)
+
+### 6. Bonus, Not Filter
+Depth mechanics are additive, never subtractive. Advanced rules provide a BONUS for skilled play, not a FILTER that punishes casual play. The casual floor is sacred — a player who ignores the depth layer must still have a complete, satisfying experience. (Puyo Puyo vs Chain Reaction: Puyo makes same-color mandatory; the better design makes it a bonus.)
+
+### 7. Emergent, Not Scripted
+No hard-coded synergies. Instead: systemic interactions where outcomes are mathematical inevitabilities, not special cases. The game engine shouldn't "know" a combo happened — the combo should emerge from physics. (Breath of the Wild, Noita, Dwarf Fortress.)
+
+### 8. The Experience Is What You Sell
+The mechanic has zero defensibility (Threes cloned by 2048 overnight). What separates free from paid is juice, game feel, and audio. The feeling that your play produces something beautiful. Audio is especially undervalued.
+
+### 9. Player Actions Should BE Music
+Player actions produce music, not trigger sound effects. The player unconsciously composes. Cascading events build melodic phrases. Spatial position maps to pitch. Longer sequences sound richer. The organic timing of player actions IS the musical character — don't over-quantize it. (Tetris Effect, Rez, Every Extend Extra, Lumines.)
+
+### 10. Near-Miss Is the Most Powerful Engagement Driver
+The brain reacts more strongly to an almost-win than to a clear loss — but only when coupled with player agency and immediate, visible feedback. Frame failure as achievement, not punishment. Even failed attempts should produce beauty. Show exactly how close. (Peggle, Celeste, Super Meat Boy.)
+
+### 11. Juice Effects Are Multiplicative
+Each feedback layer compounds the previous ones. Screen shake alone = +10%. Shake + particles = +30%. Shake + particles + sound = +80%. Order of implementation matters.
+
+### 12. Each Session Is a Story
+Beginning (sparse, quiet), middle (dense, complex), climax (overwhelming, transcendent). Not every session reaches the climax — that's what makes reaching it special. Smooth transitions, not level breaks. The game state itself shows the arc — no narration needed.
+
+### 13. Lateral Progression
+No loot is objectively better — just different. The feeling of power comes from recognizing how to exploit interactions, not from stat bumps. Players discover "broken" combinations through creativity, not grinding. (Mewgenics, Hades boon system.)
+
+### 14. Simulation Before Design
+Don't guess. Measure. Before committing to any new mechanic, run simulations to understand how it affects core metrics. Data narrows infinite search space to a region where fun is possible. Then human playtesting does the final 15%.
+
+## Chain Reaction-Specific Principles
+
+How the universal principles manifest in this game specifically.
+
+### The Board Is Never Static
+This is action-strategy, not puzzle. The temporal dimension (timing windows, prediction, interception) is fundamental. Any new mechanic must interact with movement. Static analysis fails because the board is never static.
+
+### Property Transmission (The Virus Model)
+An explosion inherits the properties of the dot that caused it, and imparts them to the dots it catches. This creates a genetic algorithm on screen — tap once, watch a "trait" evolve across the chain. The ORDER matters (Heavy→Volatile = supernova; Volatile→Heavy = scattered pops).
+
+### The Breathing Field
+Density oscillates like breathing. Inhale: dots accumulate, tension builds, audio layers in. Exhale: player taps, chain cascades, audio thins, calm. The player controls the rhythm — fast tappers take shallow breaths, patient tappers take deep breaths with massive clearance. Density is self-regulating difficulty: skilled players maintain flow-zone density, struggling players climb to critical density where even random taps produce decent chains (emergent mercy).
+
+### Prediction Depth as Skill Axis
+Novice taps where dots ARE. Intermediate taps where dots WILL BE in 1 second. Expert reads 2-3 convergence events ahead and chains taps so each chain's aftermath sets up the next. This is the "hard to master" half — and it requires predictable, deterministic dot physics to work.
+
+### Chains as Musical Phrases
+Gen-0 = bass hit, gen-1 = melodic note, gen-2 = harmonic, gen-3+ = percussion fill. Y-position determines starting pitch (top = bright, bottom = bass). A 10-chain sounds like a song fragment; a 2-chain sounds sparse. The cascade timing jitter IS the musical character — do NOT quantize to a beat grid.
+
+### Epochs Instead of Levels
+The player is in "Flow" but feels thickening toward "Surge." No loading screens, no score summaries between attempts. One unbroken experience. The field accumulates evidence of the player's actions — where chains occurred, the background retains faint glow. Over a long session, the background becomes a heat map painting.
 
 ## Core Meta-Questions
 
