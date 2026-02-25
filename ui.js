@@ -50,6 +50,8 @@ applySettings();
 // =====================================================================
 
 function draw() {
+    if (gameState === 'start') updateFlicker();
+    else canvas.style.filter = '';
     engineDrawScene(ctx, game, gameState, supernovaActive);
     drawUI();
     drawSettingsIcon();
@@ -274,19 +276,22 @@ function drawStartScreen() {
 let _flickerState = 0;   // 0 = normal, >0 = frames remaining in flicker
 let _flickerNext = 0;    // timestamp of next flicker
 
-function drawTitle(cx, titleY) {
-    const titleSize = Math.min(52, W * 0.10);
+function updateFlicker() {
     const now = performance.now();
-
-    // Flicker timing: random bursts of 2-5 frames, every 2-6 seconds
     if (_flickerState > 0) {
         _flickerState--;
-    } else if (now > _flickerNext) {
-        _flickerState = 2 + (Math.random() * 3 | 0);
-        _flickerNext = now + 2000 + Math.random() * 4000;
+        canvas.style.filter = 'invert(1)';
+    } else {
+        canvas.style.filter = '';
+        if (now > _flickerNext) {
+            _flickerState = 2 + (Math.random() * 3 | 0);
+            _flickerNext = now + 2000 + Math.random() * 4000;
+        }
     }
+}
 
-    const flicker = _flickerState > 0;
+function drawTitle(cx, titleY) {
+    const titleSize = Math.min(52, W * 0.10);
 
     ctx.save();
     ctx.textAlign = 'center';
@@ -294,24 +299,13 @@ function drawTitle(cx, titleY) {
     ctx.font = `300 ${titleSize}px Inter, system-ui, sans-serif`;
     ctx.letterSpacing = `${Math.max(1, titleSize * 0.06)}px`;
 
-    if (flicker) {
-        // Inverted: bright background slab + dark text
-        const tw = ctx.measureText('CHAIN REACTION').width;
-        const pad = titleSize * 0.4;
-        ctx.fillStyle = 'rgba(220, 230, 255, 0.92)';
-        ctx.fillRect(cx - tw / 2 - pad, titleY - titleSize * 0.55, tw + pad * 2, titleSize * 1.1);
-        ctx.fillStyle = 'rgba(4, 4, 16, 0.95)';
-        ctx.fillText('CHAIN REACTION', cx, titleY);
-    } else {
-        // Normal: glowing white text on dark background
-        ctx.shadowColor = 'rgba(120, 180, 255, 0.4)';
-        ctx.shadowBlur = 40;
-        ctx.fillStyle = 'rgba(255,255,255,0.98)';
-        ctx.fillText('CHAIN REACTION', cx, titleY);
-        ctx.shadowBlur = 60;
-        ctx.shadowColor = 'rgba(100, 160, 255, 0.2)';
-        ctx.fillText('CHAIN REACTION', cx, titleY);
-    }
+    ctx.shadowColor = 'rgba(120, 180, 255, 0.4)';
+    ctx.shadowBlur = 40;
+    ctx.fillStyle = 'rgba(255,255,255,0.98)';
+    ctx.fillText('CHAIN REACTION', cx, titleY);
+    ctx.shadowBlur = 60;
+    ctx.shadowColor = 'rgba(100, 160, 255, 0.2)';
+    ctx.fillText('CHAIN REACTION', cx, titleY);
 
     ctx.letterSpacing = '0px';
     ctx.restore();
