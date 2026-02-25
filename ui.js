@@ -50,8 +50,7 @@ applySettings();
 // =====================================================================
 
 function draw() {
-    if (gameState === 'start') updateFlicker();
-    else canvas.style.filter = '';
+    canvas.style.filter = '';
     engineDrawScene(ctx, game, gameState, supernovaActive);
     drawUI();
     drawSettingsIcon();
@@ -273,65 +272,312 @@ function drawStartScreen() {
     }
 }
 
-// Flickering light bulb: infrequent bursts of rapid on/off toggles
-let _flickerBurst = null; // array of timestamps when state toggles
-let _flickerIdx = 0;
-let _flickerNext = 8000 + Math.random() * 12000;
-let _flickerOn = false;
+// =====================================================================
+// TITLE ANIMATION — Floating letters with chain reaction explosions
+// =====================================================================
 
-function _scheduleFlickerBurst(now) {
-    // Build a burst: 2-4 very fast toggles with tiny gaps (16-50ms)
-    const count = 2 + (Math.random() * 3 | 0);
-    _flickerBurst = [now];
-    let t = now;
+const TITLE_TEXT = 'CHAIN REACTION';
+let _titleLetters = null;
+let _titleShockwaves = [];
+let _titleParticles = [];
+let _titleLastCx = 0;
+let _titleLastY = 0;
+let _titleLastSize = 0;
+let _titleNextNudge = 3000 + Math.random() * 4000;
+
+function _initTitleLetters(cx, titleY, titleSize) {
+    _titleLastCx = cx;
+    _titleLastY = titleY;
+    _titleLastSize = titleSize;
+    _titleLetters = [];
+    _titleShockwaves = [];
+    _titleParticles = [];
+
+    ctx.save();
+    ctx.font = `300 ${titleSize}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const spacing = Math.max(1, titleSize * 0.06);
+
+    // Measure each letter's position
+    const chars = TITLE_TEXT.split('');
+    const widths = chars.map(c => ctx.measureText(c).width + spacing);
+    const totalW = widths.reduce((a, b) => a + b, 0) - spacing;
+    let x = cx - totalW / 2;
+
+    for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i];
+        const lx = x + widths[i] / 2;
+        _titleLetters.push({
+            ch,
+            homeX: lx,
+            homeY: titleY,
+            x: lx,
+            y: titleY,
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.3,
+            hue: 195 + i * 12,
+            explodeTimer: 0,   // >0 means exploding
+            explodeMax: 0,
+            bloomTimer: 0,     // flash on detonation
+            chainIdx: 0,       // which chain note to play
+            width: widths[i],
+        });
+        x += widths[i];
+    }
+    ctx.restore();
+}
+
+function _nudgeRandomLetter() {
+    if (!_titleLetters) return;
+    const active = _titleLetters.filter(l => l.ch !== ' ' && l.explodeTimer <= 0);
+    if (active.length === 0) return;
+    const l = active[Math.random() * active.length | 0];
+    l.vx += (Math.random() - 0.5) * 2.5;
+    l.vy += (Math.random() - 0.5) * 2.0;
+}
+
+function _explodeLetter(letter, chainIdx) {
+    if (letter.explodeTimer > 0 || letter.ch === ' ') return;
+    letter.explodeTimer = 60;
+    letter.explodeMax = 60;
+    letter.bloomTimer = 10;
+    letter.chainIdx = chainIdx;
+
+    // Shockwave ring
+    _titleShockwaves.push({
+        x: letter.x, y: letter.y,
+        radius: 0, maxRadius: _titleLastSize * 1.2,
+        age: 0, hue: letter.hue,
+    });
+
+    // Burst particles
+    const count = 6 + (Math.random() * 4 | 0);
     for (let i = 0; i < count; i++) {
-        t += 16 + Math.random() * 34;
-        _flickerBurst.push(t);
+        const angle = (Math.PI * 2 * i / count) + Math.random() * 0.4;
+        const speed = 1.5 + Math.random() * 2.5;
+        _titleParticles.push({
+            x: letter.x, y: letter.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 40 + Math.random() * 20,
+            maxLife: 40 + Math.random() * 20,
+            hue: letter.hue + (Math.random() - 0.5) * 30,
+            size: 2 + Math.random() * 3,
+        });
     }
-    _flickerIdx = 0;
-    _flickerOn = true;
+
+    // Sound
+    if (audio.initialized) {
+        audio.playChainNote(Math.min(chainIdx, 15), chainIdx === 0 ? 0 : 1);
+    }
+
+    // Blast push nearby letters away
+    for (const other of _titleLetters) {
+        if (other === letter || other.ch === ' ') continue;
+        const dx = other.x - letter.x;
+        const dy = other.y - letter.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (dist < _titleLastSize * 2.5) {
+            const force = (1 - dist / (_titleLastSize * 2.5)) * 3;
+            other.vx += (dx / dist) * force;
+            other.vy += (dy / dist) * force;
+        }
+    }
+
+    // Chain: after short delay, explode neighbors within radius
+    setTimeout(() => {
+        if (!_titleLetters) return;
+        for (const other of _titleLetters) {
+            if (other === letter || other.ch === ' ' || other.explodeTimer > 0) continue;
+            const dx = other.x - letter.x;
+            const dy = other.y - letter.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < _titleLastSize * 1.8) {
+                _explodeLetter(other, chainIdx + 1);
+            }
+        }
+    }, 80 + Math.random() * 40);
 }
 
-function updateFlicker() {
+function _updateTitlePhysics() {
     const now = performance.now();
-    if (_flickerBurst) {
-        // Walk through the burst timeline
-        while (_flickerIdx < _flickerBurst.length - 1 && now >= _flickerBurst[_flickerIdx + 1]) {
-            _flickerIdx++;
-            _flickerOn = !_flickerOn;
+    const s = _titleLastSize;
+
+    // Periodic nudge to create collisions
+    if (now > _titleNextNudge) {
+        _nudgeRandomLetter();
+        _titleNextNudge = now + 5000 + Math.random() * 8000;
+    }
+
+    // Update letters
+    for (const l of _titleLetters) {
+        if (l.ch === ' ') continue;
+
+        // Spring back to home
+        const dx = l.homeX - l.x;
+        const dy = l.homeY - l.y;
+        l.vx += dx * 0.008;
+        l.vy += dy * 0.008;
+
+        // Gentle float
+        l.vx += Math.sin(now * 0.001 + l.homeX * 0.1) * 0.01;
+        l.vy += Math.cos(now * 0.0013 + l.homeY * 0.1) * 0.008;
+
+        // Damping
+        l.vx *= 0.97;
+        l.vy *= 0.97;
+
+        l.x += l.vx;
+        l.y += l.vy;
+
+        // Decay timers
+        if (l.explodeTimer > 0) l.explodeTimer--;
+        if (l.bloomTimer > 0) l.bloomTimer--;
+    }
+
+    // Collision detection between letters
+    for (let i = 0; i < _titleLetters.length; i++) {
+        const a = _titleLetters[i];
+        if (a.ch === ' ' || a.explodeTimer > 0) continue;
+        for (let j = i + 1; j < _titleLetters.length; j++) {
+            const b = _titleLetters[j];
+            if (b.ch === ' ' || b.explodeTimer > 0) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minDist = (a.width + b.width) * 0.35;
+            if (dist < minDist) {
+                // Collision! Start a chain reaction
+                _explodeLetter(a, 0);
+                _explodeLetter(b, 1);
+                break;
+            }
         }
-        canvas.style.filter = _flickerOn ? 'invert(1)' : '';
-        // Burst finished
-        if (_flickerIdx >= _flickerBurst.length - 1 && now >= _flickerBurst[_flickerBurst.length - 1] + 60) {
-            _flickerBurst = null;
-            _flickerOn = false;
-            canvas.style.filter = '';
-            _flickerNext = now + 10000 + Math.random() * 15000;
-        }
-    } else {
-        canvas.style.filter = '';
-        if (now > _flickerNext) _scheduleFlickerBurst(now);
+    }
+
+    // Update shockwaves
+    for (let i = _titleShockwaves.length - 1; i >= 0; i--) {
+        const sw = _titleShockwaves[i];
+        sw.age++;
+        sw.radius = sw.maxRadius * easeOutCubic(Math.min(1, sw.age / 30));
+        if (sw.age > 50) _titleShockwaves.splice(i, 1);
+    }
+
+    // Update particles
+    for (let i = _titleParticles.length - 1; i >= 0; i--) {
+        const p = _titleParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.96;
+        p.vy *= 0.96;
+        p.life--;
+        if (p.life <= 0) _titleParticles.splice(i, 1);
     }
 }
+
+function _drawTitleEffects() {
+    // Shockwave rings
+    for (const sw of _titleShockwaves) {
+        const alpha = Math.max(0, 1 - sw.age / 50);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, Math.max(0.1, sw.radius), 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${sw.hue}, 80%, 70%, 1)`;
+        ctx.lineWidth = 2.5 * (1 - sw.age / 50);
+        ctx.stroke();
+        // Inner ring
+        ctx.globalAlpha = alpha * 0.3;
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, Math.max(0.1, sw.radius * 0.6), 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${sw.hue + 20}, 70%, 80%, 1)`;
+        ctx.lineWidth = 1.5 * (1 - sw.age / 50);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Particles
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of _titleParticles) {
+        const t = p.life / p.maxLife;
+        ctx.globalAlpha = t * 0.8;
+        const r = p.size * t;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3);
+        g.addColorStop(0, `hsla(${p.hue}, 80%, 80%, 1)`);
+        g.addColorStop(1, `hsla(${p.hue}, 80%, 60%, 0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(p.x - r * 3, p.y - r * 3, r * 6, r * 6);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+}
+
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 function drawTitle(cx, titleY) {
     const titleSize = Math.min(52, W * 0.10);
 
+    // Init or reinit if layout changed
+    if (!_titleLetters || Math.abs(cx - _titleLastCx) > 1 || Math.abs(titleY - _titleLastY) > 1 || Math.abs(titleSize - _titleLastSize) > 1) {
+        _initTitleLetters(cx, titleY, titleSize);
+    }
+
+    _updateTitlePhysics();
+
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    const spacing = Math.max(1, titleSize * 0.06);
+
+    // Draw effects behind letters
+    _drawTitleEffects();
+
+    // Draw each letter
     ctx.font = `300 ${titleSize}px Inter, system-ui, sans-serif`;
-    ctx.letterSpacing = `${Math.max(1, titleSize * 0.06)}px`;
+    for (const l of _titleLetters) {
+        if (l.ch === ' ') continue;
 
-    ctx.shadowColor = 'rgba(120, 180, 255, 0.4)';
-    ctx.shadowBlur = 40;
-    ctx.fillStyle = 'rgba(255,255,255,0.98)';
-    ctx.fillText('CHAIN REACTION', cx, titleY);
-    ctx.shadowBlur = 60;
-    ctx.shadowColor = 'rgba(100, 160, 255, 0.2)';
-    ctx.fillText('CHAIN REACTION', cx, titleY);
+        // Bloom flash
+        if (l.bloomTimer > 0) {
+            const bt = 1 - l.bloomTimer / 10;
+            const br = titleSize * (0.5 + bt * 1.5);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = (1 - bt) * 0.7;
+            const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, br);
+            g.addColorStop(0, `hsla(${l.hue}, 70%, 95%, 1)`);
+            g.addColorStop(0.4, `hsla(${l.hue}, 80%, 70%, 0.4)`);
+            g.addColorStop(1, `hsla(${l.hue}, 80%, 60%, 0)`);
+            ctx.fillStyle = g;
+            ctx.fillRect(l.x - br, l.y - br, br * 2, br * 2);
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+        }
 
-    ctx.letterSpacing = '0px';
+        // Letter glow + text
+        const explodeT = l.explodeTimer > 0 ? l.explodeTimer / l.explodeMax : 0;
+        const shake = explodeT > 0.5 ? (Math.random() - 0.5) * 4 * explodeT : 0;
+        const scale = l.explodeTimer > 0 ? 1 + explodeT * 0.3 : 1;
+        const alpha = l.explodeTimer > 0 ? 0.3 + 0.7 * (1 - explodeT) : 1;
+        const hue = l.explodeTimer > 0 ? l.hue : 210;
+
+        ctx.save();
+        ctx.translate(l.x + shake, l.y + shake * 0.5);
+        ctx.scale(scale, scale);
+        ctx.shadowColor = `hsla(${hue}, 80%, 60%, ${0.4 * alpha})`;
+        ctx.shadowBlur = 40;
+        ctx.fillStyle = l.explodeTimer > 0
+            ? `hsla(${l.hue}, 80%, 85%, ${alpha})`
+            : `rgba(255,255,255,${0.98 * alpha})`;
+        ctx.fillText(l.ch, 0, 0);
+        // Second pass for extra glow
+        ctx.shadowBlur = 60;
+        ctx.shadowColor = `hsla(${hue}, 60%, 50%, ${0.2 * alpha})`;
+        ctx.fillText(l.ch, 0, 0);
+        ctx.restore();
+    }
+
     ctx.restore();
 }
 
