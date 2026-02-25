@@ -514,8 +514,6 @@ function _drawTitleEffects() {
     ctx.globalCompositeOperation = 'source-over';
 }
 
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-
 function drawTitle(cx, titleY) {
     const titleSize = Math.min(52, W * 0.10);
 
