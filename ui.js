@@ -273,20 +273,44 @@ function drawStartScreen() {
     }
 }
 
-let _flickerState = 0;   // 0 = normal, >0 = frames remaining in flicker
-let _flickerNext = 0;    // timestamp of next flicker
+// Flickering light bulb: infrequent bursts of rapid on/off toggles
+let _flickerBurst = null; // array of timestamps when state toggles
+let _flickerIdx = 0;
+let _flickerNext = 4000 + Math.random() * 6000;
+let _flickerOn = false;
+
+function _scheduleFlickerBurst(now) {
+    // Build a burst: 3-7 rapid toggles with random gaps (30-120ms)
+    const count = 3 + (Math.random() * 5 | 0);
+    _flickerBurst = [now];
+    let t = now;
+    for (let i = 0; i < count; i++) {
+        t += 30 + Math.random() * 90;
+        _flickerBurst.push(t);
+    }
+    _flickerIdx = 0;
+    _flickerOn = true;
+}
 
 function updateFlicker() {
     const now = performance.now();
-    if (_flickerState > 0) {
-        _flickerState--;
-        canvas.style.filter = 'invert(1)';
+    if (_flickerBurst) {
+        // Walk through the burst timeline
+        while (_flickerIdx < _flickerBurst.length - 1 && now >= _flickerBurst[_flickerIdx + 1]) {
+            _flickerIdx++;
+            _flickerOn = !_flickerOn;
+        }
+        canvas.style.filter = _flickerOn ? 'invert(1)' : '';
+        // Burst finished
+        if (_flickerIdx >= _flickerBurst.length - 1 && now >= _flickerBurst[_flickerBurst.length - 1] + 60) {
+            _flickerBurst = null;
+            _flickerOn = false;
+            canvas.style.filter = '';
+            _flickerNext = now + 4000 + Math.random() * 8000;
+        }
     } else {
         canvas.style.filter = '';
-        if (now > _flickerNext) {
-            _flickerState = 2 + (Math.random() * 3 | 0);
-            _flickerNext = now + 2000 + Math.random() * 4000;
-        }
+        if (now > _flickerNext) _scheduleFlickerBurst(now);
     }
 }
 
