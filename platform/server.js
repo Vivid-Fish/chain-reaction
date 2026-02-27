@@ -182,7 +182,11 @@ const server = createServer(async (req, res) => {
 
   try {
     const content = readFileSync(filePath);
-    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Cache-Control': 'no-cache',
+      'Permissions-Policy': 'gyroscope=(self), accelerometer=(self), magnetometer=(self)',
+    });
     res.end(content);
   } catch (e) {
     res.writeHead(500);
