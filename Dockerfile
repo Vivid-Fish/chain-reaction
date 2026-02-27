@@ -2,7 +2,8 @@ FROM node:22-alpine
 WORKDIR /app
 ARG BUILD_VERSION=dev
 ENV BUILD_VERSION=${BUILD_VERSION}
-COPY package.json package-lock.json* VERSION* ./
+COPY package.json package-lock.json* ./
+COPY VERSION ./
 COPY platform/ platform/
 COPY games/ games/
 RUN mkdir -p data/sessions
