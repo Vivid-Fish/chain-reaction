@@ -515,22 +515,96 @@
         pg.appendChild(section);
       }
 
+      // Lab parameters (from configure())
+      const labParams = {};
+      const hasConfigure = typeof tempG.configure === 'function';
+      if (hasConfigure) {
+        const paramDefs = tempG.configure();
+        if (paramDefs && paramDefs.length > 0) {
+          const section = document.createElement('div');
+          section.className = 'pregame-section';
+
+          const header = document.createElement('div');
+          header.className = 'pregame-label';
+          header.style.cursor = 'pointer';
+          header.textContent = '\u25B8 LAB';
+          section.appendChild(header);
+
+          const paramsDiv = document.createElement('div');
+          paramsDiv.style.display = 'none';
+
+          for (const p of paramDefs) {
+            labParams[p.key] = p.default;
+            const row = document.createElement('div');
+            row.className = 'slider-row';
+            row.style.marginTop = '6px';
+
+            const label = document.createElement('span');
+            label.style.cssText = 'font-size:12px;color:rgba(255,255,255,0.5);min-width:90px';
+            label.textContent = p.label;
+
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = String(p.min);
+            slider.max = String(p.max);
+            slider.step = String(p.step);
+            slider.value = String(p.default);
+
+            const val = document.createElement('span');
+            val.className = 'slider-val';
+            val.textContent = String(p.default);
+
+            slider.oninput = () => {
+              const v = p.type === 'int' ? parseInt(slider.value) : parseFloat(slider.value);
+              labParams[p.key] = v;
+              val.textContent = p.type === 'int' ? String(v) : v.toFixed(String(p.step).split('.')[1]?.length || 1);
+            };
+
+            row.appendChild(label);
+            row.appendChild(slider);
+            row.appendChild(val);
+            paramsDiv.appendChild(row);
+          }
+
+          header.onclick = () => {
+            const open = paramsDiv.style.display !== 'none';
+            paramsDiv.style.display = open ? 'none' : 'block';
+            header.textContent = (open ? '\u25B8' : '\u25BE') + ' LAB';
+          };
+
+          section.appendChild(paramsDiv);
+          pg.appendChild(section);
+        }
+      }
+
       // Buttons
       const btnRow = document.createElement('div');
       btnRow.className = 'btn-row';
       btnRow.style.marginTop = '16px';
 
+      const getParams = () => {
+        // Only include non-default params
+        const p = {};
+        if (hasConfigure) {
+          const defs = tempG.configure();
+          for (const d of defs) {
+            if (labParams[d.key] !== d.default) p[d.key] = labParams[d.key];
+          }
+        }
+        return p;
+      };
+
       const playBtn = document.createElement('button');
       playBtn.className = 'action-btn primary';
       playBtn.textContent = 'PLAY';
-      playBtn.onclick = () => launchGame(entry, 'play');
+      playBtn.onclick = () => launchGame(entry, 'play', 0.5, getParams());
       btnRow.appendChild(playBtn);
 
       if (hasBot) {
         const watchBtn = document.createElement('button');
         watchBtn.className = 'action-btn';
         watchBtn.textContent = 'WATCH BOT';
-        watchBtn.onclick = () => launchGame(entry, 'bot', difficultyValue);
+        watchBtn.onclick = () => launchGame(entry, 'bot', difficultyValue, getParams());
         btnRow.appendChild(watchBtn);
       }
 
@@ -541,7 +615,7 @@
     // -----------------------------------------------------------------------
     // SCREEN: Playing / Bot / Replay
     // -----------------------------------------------------------------------
-    function launchGame(entry, mode = 'play', botDifficulty = 0.5) {
+    function launchGame(entry, mode = 'play', botDifficulty = 0.5, params = {}) {
       document.body.className = 'in-game';
       menuEl.style.display = 'none';
       gameContainer.style.display = 'block';
@@ -569,7 +643,7 @@
         modeBadge.style.display = 'none';
       }
 
-      currentRunner = createBrowserRunner(gameModule, canvas, { mode, botDifficulty });
+      currentRunner = createBrowserRunner(gameModule, canvas, { mode, botDifficulty, params });
       currentRunner.setRenderer(createRenderer());
 
       // Show calibrate button for gyro games
