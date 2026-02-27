@@ -27,8 +27,8 @@ export function createGame(config) {
         score: 0,
         alive: true,
         elapsed: 0,
-        gravity: params.gravity || 0.4,
-        friction: params.friction || 0.98,
+        gravity: params.gravity || 1.5,
+        friction: params.friction || 0.985,
         hazards: [],
         hazardTimer: 0,
         difficulty: 1,
@@ -41,17 +41,18 @@ export function createGame(config) {
       state.elapsed += dt;
       state.difficulty = 1 + state.elapsed * 0.05;
 
-      // Get tilt from gyro or thumb
-      if (input.gyro) {
-        state.tiltX = input.gyro.tiltX * 0.5;
-        state.tiltY = input.gyro.tiltY * 0.5;
-      } else if (input.thumb && input.thumb.active) {
-        // Thumb position relative to center = tilt direction
+      // Get tilt from thumb (primary) + gyro (additive)
+      if (input.thumb && input.thumb.active) {
         state.tiltX = (input.thumb.x - 0.5) * 2;
         state.tiltY = (input.thumb.y - 0.5) * 2;
       } else {
-        state.tiltX *= 0.95;
-        state.tiltY *= 0.95;
+        state.tiltX *= 0.92;
+        state.tiltY *= 0.92;
+      }
+      // Gyro adds on top of thumb (if device supports it)
+      if (input.gyro) {
+        state.tiltX += input.gyro.tiltX * 0.6;
+        state.tiltY += input.gyro.tiltY * 0.6;
       }
 
       // Apply gravity based on tilt
@@ -62,9 +63,9 @@ export function createGame(config) {
       state.ball.vx *= state.friction;
       state.ball.vy *= state.friction;
 
-      // Move ball
-      state.ball.x += state.ball.vx * dt;
-      state.ball.y += state.ball.vy * dt;
+      // Move ball (velocity is in units per tick)
+      state.ball.x += state.ball.vx;
+      state.ball.y += state.ball.vy;
 
       // Check if ball fell off platform
       const dx = state.ball.x - state.platform.x;
@@ -276,8 +277,8 @@ export function createGame(config) {
 
     configure() {
       return [
-        { key: 'gravity', label: 'Gravity', type: 'float', min: 0.1, max: 1.0, default: 0.4, step: 0.05 },
-        { key: 'friction', label: 'Friction', type: 'float', min: 0.9, max: 1.0, default: 0.98, step: 0.01 },
+        { key: 'gravity', label: 'Gravity', type: 'float', min: 0.5, max: 3.0, default: 1.5, step: 0.1 },
+        { key: 'friction', label: 'Friction', type: 'float', min: 0.9, max: 1.0, default: 0.985, step: 0.005 },
         { key: 'platformRadius', label: 'Platform Size', type: 'float', min: 0.15, max: 0.45, default: 0.3, step: 0.05 },
       ];
     },

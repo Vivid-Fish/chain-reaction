@@ -28,11 +28,6 @@ const server = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let pathname = decodeURIComponent(url.pathname);
 
-  // Default route → platform/index.html
-  if (pathname === '/' || pathname === '') {
-    pathname = '/platform/index.html';
-  }
-
   // Resolve to file
   let filePath = normalize(join(ROOT, pathname));
 
@@ -43,11 +38,9 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Check if file exists
+  // If file doesn't exist, serve the SPA index (handles /dodge, /rhythm, etc.)
   if (!existsSync(filePath) || !statSync(filePath).isFile()) {
-    res.writeHead(404);
-    res.end('Not Found');
-    return;
+    filePath = join(ROOT, 'platform', 'index.html');
   }
 
   const ext = extname(filePath);

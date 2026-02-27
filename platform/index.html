@@ -10,29 +10,34 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       width: 100%; height: 100%;
-      overflow: hidden;
       background: #0a0a0f;
       color: #fff;
       font-family: 'Courier New', monospace;
-      touch-action: none;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
     }
+    body.in-menu {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    body.in-game {
+      overflow: hidden;
+      touch-action: none;
+    }
     #app {
       width: 100%;
-      height: 100%;
+      min-height: 100%;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
     }
     .menu {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 10px;
-      padding: 20px;
+      padding: 24px 20px 40px;
       max-width: 420px;
       width: 100%;
     }
@@ -41,6 +46,7 @@
       font-weight: bold;
       letter-spacing: 6px;
       color: #4af;
+      margin-top: 20px;
       margin-bottom: 4px;
     }
     .menu-sub {
@@ -78,28 +84,17 @@
       font-size: 18px;
       flex-shrink: 0;
     }
-    .game-btn .info {
-      flex: 1;
-    }
-    .game-btn .name {
-      font-weight: bold;
-      font-size: 14px;
-    }
-    .game-btn .desc {
-      font-size: 11px;
-      color: rgba(255,255,255,0.4);
-      margin-top: 2px;
-    }
-    .game-btn .tags {
-      font-size: 10px;
-      color: rgba(255,255,255,0.25);
-      margin-top: 3px;
-    }
+    .game-btn .info { flex: 1; }
+    .game-btn .name { font-weight: bold; font-size: 14px; }
+    .game-btn .desc { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+    .game-btn .tags { font-size: 10px; color: rgba(255,255,255,0.25); margin-top: 3px; }
     #game-container {
       width: 100%;
-      height: 100%;
+      height: 100vh;
+      height: 100dvh;
       display: none;
-      position: relative;
+      position: fixed;
+      top: 0; left: 0;
     }
     #game-canvas {
       display: block;
@@ -116,24 +111,10 @@
       gap: 14px;
       z-index: 10;
     }
-    .overlay-title {
-      font-size: 28px;
-      font-weight: bold;
-      letter-spacing: 3px;
-    }
-    .overlay-score {
-      font-size: 18px;
-      color: rgba(255,255,255,0.8);
-    }
-    .overlay-reason {
-      font-size: 13px;
-      color: rgba(255,255,255,0.4);
-    }
-    .btn-row {
-      display: flex;
-      gap: 12px;
-      margin-top: 10px;
-    }
+    .overlay-title { font-size: 28px; font-weight: bold; letter-spacing: 3px; }
+    .overlay-score { font-size: 18px; color: rgba(255,255,255,0.8); }
+    .overlay-reason { font-size: 13px; color: rgba(255,255,255,0.4); }
+    .btn-row { display: flex; gap: 12px; margin-top: 10px; }
     .action-btn {
       padding: 10px 28px;
       background: rgba(255,255,255,0.08);
@@ -151,8 +132,7 @@
     }
     .back-btn {
       position: absolute;
-      top: 8px;
-      left: 8px;
+      top: 8px; left: 8px;
       z-index: 20;
       padding: 6px 12px;
       background: rgba(0,0,0,0.5);
@@ -166,7 +146,7 @@
     .back-btn:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
   </style>
 </head>
-<body>
+<body class="in-menu">
   <div id="app">
     <div id="menu" class="menu"></div>
     <div id="game-container">
@@ -181,7 +161,7 @@
     import { createRenderer } from '/platform/renderer.js';
     import { createAudioEngine } from '/platform/audio.js';
 
-    // Game registry — import all games
+    // Game registry
     import { createGame as dodgeCreate } from '/games/dodge/game.js';
     import { createGame as rhythmCreate } from '/games/rhythm/game.js';
     import { createGame as territoryCreate } from '/games/territory/game.js';
@@ -196,36 +176,36 @@
     import { createGame as meteorCreate } from '/games/meteor/game.js';
 
     const GAMES = [
-      { name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '◇', createGame: dodgeCreate },
-      { name: 'Rhythm', desc: 'Tap beats to the music', tags: 'taps · timing', color: '#f4a', icon: '♪', createGame: rhythmCreate },
-      { name: 'Territory', desc: 'Capture the board (2P)', tags: 'taps · strategy · pvp', color: '#4fa', icon: '◈', createGame: territoryCreate },
-      { name: 'Stack', desc: 'Time your drops perfectly', tags: 'taps · precision', color: '#fa4', icon: '▢', createGame: stackCreate },
-      { name: 'Snake', desc: 'Eat, grow, survive', tags: 'thumb · classic', color: '#4f4', icon: '~', createGame: snakeCreate },
-      { name: 'Breakout', desc: 'Smash all the bricks', tags: 'thumb · physics', color: '#f84', icon: '▣', createGame: breakoutCreate },
-      { name: 'Aim Trainer', desc: 'Test your reflexes', tags: 'taps · speed', color: '#f44', icon: '◎', createGame: aimCreate },
-      { name: 'Balance', desc: 'Tilt to keep the ball', tags: 'thumb/gyro · physics', color: '#6cf', icon: '○', createGame: balanceCreate },
-      { name: 'Pong', desc: 'Classic paddle battle (2P)', tags: 'thumb · pvp', color: '#ff4', icon: '|', createGame: pongCreate },
-      { name: 'Runner', desc: 'Dodge and jump endlessly', tags: 'thumb+taps · lanes', color: '#a4f', icon: '▸', createGame: runnerCreate },
-      { name: 'Orbit', desc: 'Slingshot through space', tags: 'taps · gravity', color: '#4ff', icon: '◌', createGame: orbitCreate },
-      { name: 'Meteor', desc: 'Asteroids-style shooter', tags: 'thumb · shoot', color: '#fa0', icon: '✦', createGame: meteorCreate },
+      { id: 'dodge', name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '◇', createGame: dodgeCreate },
+      { id: 'rhythm', name: 'Rhythm', desc: 'Tap beats to the music', tags: 'taps · timing', color: '#f4a', icon: '♪', createGame: rhythmCreate },
+      { id: 'territory', name: 'Territory', desc: 'Capture the board (2P)', tags: 'taps · strategy · pvp', color: '#4fa', icon: '◈', createGame: territoryCreate },
+      { id: 'stack', name: 'Stack', desc: 'Time your drops perfectly', tags: 'taps · precision', color: '#fa4', icon: '▢', createGame: stackCreate },
+      { id: 'snake', name: 'Snake', desc: 'Eat, grow, survive', tags: 'thumb · classic', color: '#4f4', icon: '~', createGame: snakeCreate },
+      { id: 'breakout', name: 'Breakout', desc: 'Smash all the bricks', tags: 'thumb · physics', color: '#f84', icon: '▣', createGame: breakoutCreate },
+      { id: 'aim', name: 'Aim Trainer', desc: 'Test your reflexes', tags: 'taps · speed', color: '#f44', icon: '◎', createGame: aimCreate },
+      { id: 'balance', name: 'Balance', desc: 'Tilt to keep the ball', tags: 'thumb/gyro · physics', color: '#6cf', icon: '○', createGame: balanceCreate },
+      { id: 'pong', name: 'Pong', desc: 'Classic paddle battle (2P)', tags: 'thumb · pvp', color: '#ff4', icon: '|', createGame: pongCreate },
+      { id: 'runner', name: 'Runner', desc: 'Dodge and jump endlessly', tags: 'thumb+taps · lanes', color: '#a4f', icon: '▸', createGame: runnerCreate },
+      { id: 'orbit', name: 'Orbit', desc: 'Slingshot through space', tags: 'taps · gravity', color: '#4ff', icon: '◌', createGame: orbitCreate },
+      { id: 'meteor', name: 'Meteor', desc: 'Asteroids-style shooter', tags: 'thumb · shoot', color: '#fa0', icon: '✦', createGame: meteorCreate },
     ];
 
-    // DOM elements
     const menuEl = document.getElementById('menu');
     const gameContainer = document.getElementById('game-container');
     const canvas = document.getElementById('game-canvas');
     const backBtn = document.getElementById('back-btn');
 
-    // State
     let currentRunner = null;
     let currentInput = null;
     let audioEngine = null;
 
-    // Build menu
     function showMenu() {
       stopGame();
+      document.body.className = 'in-menu';
       menuEl.style.display = 'flex';
       gameContainer.style.display = 'none';
+      document.title = 'Game Lab';
+      history.pushState(null, '', '/');
 
       menuEl.innerHTML = `
         <div class="menu-title">GAME LAB</div>
@@ -249,24 +229,22 @@
     }
 
     function launchGame(entry) {
+      document.body.className = 'in-game';
       menuEl.style.display = 'none';
       gameContainer.style.display = 'block';
+      document.title = entry.name + ' — Game Lab';
+      history.pushState({ game: entry.id }, '', '/' + entry.id);
 
-      // Remove any overlay
       const oldOverlay = gameContainer.querySelector('.overlay');
       if (oldOverlay) oldOverlay.remove();
 
-      // Size canvas
       resizeCanvas();
 
-      // Wrap as game module
       const gameModule = { createGame: entry.createGame };
 
-      // Audio
       if (!audioEngine) audioEngine = createAudioEngine();
       audioEngine.resume();
 
-      // Runner
       currentRunner = createBrowserRunner(gameModule, canvas, {});
       currentRunner.setRenderer(createRenderer());
 
@@ -312,12 +290,14 @@
     }
 
     function resizeCanvas() {
+      if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
-      const rect = gameContainer.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      canvas.style.width = rect.width + 'px';
-      canvas.style.height = rect.height + 'px';
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
     }
 
     // Events
@@ -325,13 +305,25 @@
     window.addEventListener('resize', () => {
       if (gameContainer.style.display !== 'none') resizeCanvas();
     });
+    window.addEventListener('popstate', () => {
+      const path = location.pathname.replace(/^\//, '');
+      const game = GAMES.find(g => g.id === path);
+      if (game) launchGame(game);
+      else showMenu();
+    });
 
     // Unlock audio on first interaction
     document.addEventListener('touchstart', () => { if (audioEngine) audioEngine.resume(); }, { once: true });
     document.addEventListener('click', () => { if (audioEngine) audioEngine.resume(); }, { once: true });
 
-    // Start
-    showMenu();
+    // Route: check URL path on load
+    const path = location.pathname.replace(/^\//, '');
+    const directGame = GAMES.find(g => g.id === path);
+    if (directGame) {
+      launchGame(directGame);
+    } else {
+      showMenu();
+    }
   </script>
 </body>
 </html>
