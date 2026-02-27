@@ -601,6 +601,14 @@
       btnRow.appendChild(playBtn);
 
       if (hasBot) {
+        // PvP games: show VS BOT instead of WATCH BOT
+        if (tempG.meta.players === 2) {
+          const vsBtn = document.createElement('button');
+          vsBtn.className = 'action-btn';
+          vsBtn.textContent = 'VS BOT';
+          vsBtn.onclick = () => launchGame(entry, 'pvp', difficultyValue, getParams());
+          btnRow.appendChild(vsBtn);
+        }
         const watchBtn = document.createElement('button');
         watchBtn.className = 'action-btn';
         watchBtn.textContent = 'WATCH BOT';
@@ -639,6 +647,9 @@
       } else if (mode === 'replay') {
         modeBadge.textContent = 'REPLAY';
         modeBadge.style.display = 'block';
+      } else if (mode === 'pvp') {
+        modeBadge.textContent = 'VS BOT';
+        modeBadge.style.display = 'block';
       } else {
         modeBadge.style.display = 'none';
       }
@@ -651,7 +662,7 @@
       const isGyroGame = (tempG.meta.inputChannels || []).includes('gyro');
       calibrateBtn.style.display = (isGyroGame && mode === 'play') ? 'block' : 'none';
 
-      if (mode === 'play') {
+      if (mode === 'play' || mode === 'pvp') {
         currentInput = createInputCapture(canvas);
         currentInput.attach();
         // Calibrate gyro baseline to current phone orientation

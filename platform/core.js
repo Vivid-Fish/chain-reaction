@@ -72,8 +72,8 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
   // Input recording for replays
   const inputLog = [];
 
-  // Bot function (created if mode is 'bot')
-  const botFn = (mode === 'bot' && g.bot)
+  // Bot function (created for bot and pvp modes)
+  const botFn = ((mode === 'bot' || mode === 'pvp') && g.bot)
     ? g.bot(botDifficulty, rng.fork('bot'))
     : null;
 
@@ -94,7 +94,17 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
     if (accumulator > 200) accumulator = 200;
 
     while (accumulator >= tickMs) {
-      const input = botFn ? botFn(state, dt) : (inputCapture ? inputCapture.capture() : emptyInput());
+      let input;
+      if (mode === 'pvp' && botFn && inputCapture) {
+        // PvP: player 1 is human, player 2 is bot
+        input = [inputCapture.capture(), botFn(state, dt)];
+      } else if (botFn) {
+        input = botFn(state, dt);
+      } else if (inputCapture) {
+        input = inputCapture.capture();
+      } else {
+        input = emptyInput();
+      }
       inputLog.push(compactInput(input));
       tickCount++;
       // Deep copy for audio diffing — games mutate state in place
