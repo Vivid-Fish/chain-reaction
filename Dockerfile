@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY platform/ platform/
 COPY games/ games/
+RUN mkdir -p data/sessions
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
   CMD wget -qO /dev/null http://localhost:3000/ || exit 1

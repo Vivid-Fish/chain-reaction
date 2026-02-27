@@ -254,6 +254,7 @@
       currentRunner.setAudio(audioEngine);
 
       currentRunner.setOnEnd((score, reason) => {
+        saveSession(currentRunner);
         showEndOverlay(entry, score, reason);
       });
 
@@ -298,6 +299,22 @@
       canvas.height = h * dpr;
       canvas.style.width = w + 'px';
       canvas.style.height = h + 'px';
+    }
+
+    // Session recording
+    async function saveSession(runner) {
+      try {
+        const session = runner.getSession();
+        const resp = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(session),
+        });
+        const result = await resp.json();
+        console.log('Session saved:', result.id);
+      } catch (e) {
+        console.warn('Session save failed:', e.message);
+      }
     }
 
     // Events

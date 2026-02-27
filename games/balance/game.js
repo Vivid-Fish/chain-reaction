@@ -27,8 +27,8 @@ export function createGame(config) {
         score: 0,
         alive: true,
         elapsed: 0,
-        gravity: params.gravity || 1.5,
-        friction: params.friction || 0.985,
+        gravity: params.gravity || 0.5,
+        friction: params.friction || 0.96,
         hazards: [],
         hazardTimer: 0,
         difficulty: 1,
@@ -55,17 +55,17 @@ export function createGame(config) {
         state.tiltY += input.gyro.tiltY * 0.6;
       }
 
-      // Apply gravity based on tilt
+      // Apply gravity based on tilt (velocity in units/sec)
       state.ball.vx += state.tiltX * state.gravity * dt;
       state.ball.vy += state.tiltY * state.gravity * dt;
 
-      // Friction
+      // Friction (per-tick damping)
       state.ball.vx *= state.friction;
       state.ball.vy *= state.friction;
 
-      // Move ball (velocity is in units per tick)
-      state.ball.x += state.ball.vx;
-      state.ball.y += state.ball.vy;
+      // Move ball (integrate velocity over dt)
+      state.ball.x += state.ball.vx * dt;
+      state.ball.y += state.ball.vy * dt;
 
       // Check if ball fell off platform
       const dx = state.ball.x - state.platform.x;
@@ -277,8 +277,8 @@ export function createGame(config) {
 
     configure() {
       return [
-        { key: 'gravity', label: 'Gravity', type: 'float', min: 0.5, max: 3.0, default: 1.5, step: 0.1 },
-        { key: 'friction', label: 'Friction', type: 'float', min: 0.9, max: 1.0, default: 0.985, step: 0.005 },
+        { key: 'gravity', label: 'Gravity', type: 'float', min: 0.2, max: 1.5, default: 0.5, step: 0.1 },
+        { key: 'friction', label: 'Friction', type: 'float', min: 0.9, max: 0.99, default: 0.96, step: 0.01 },
         { key: 'platformRadius', label: 'Platform Size', type: 'float', min: 0.15, max: 0.45, default: 0.3, step: 0.05 },
       ];
     },

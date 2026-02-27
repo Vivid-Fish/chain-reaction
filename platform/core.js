@@ -67,6 +67,10 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
   let lastTime = 0;
   let running = false;
   let rafId = null;
+  let tickCount = 0;
+
+  // Input recording for replays
+  const inputLog = [];
 
   // These are injected by the shell/platform
   let inputCapture = null;
@@ -86,6 +90,8 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
 
     while (accumulator >= tickMs) {
       const input = inputCapture ? inputCapture.capture() : emptyInput();
+      inputLog.push(compactInput(input));
+      tickCount++;
       prevState = state;
       state = g.step(state, input, dt, rng);
 
@@ -120,6 +126,22 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
     get state() { return state; },
     get game() { return g; },
     get meta() { return g.meta; },
+    get seed() { return seed; },
+    get config() { return config; },
+    get ticks() { return tickCount; },
+
+    getSession() {
+      return {
+        seed,
+        config,
+        gameId: g.meta.id,
+        ticks: tickCount,
+        score: g.score(state),
+        status: g.status(state),
+        inputs: inputLog,
+        timestamp: Date.now(),
+      };
+    },
 
     start() {
       running = true;
@@ -137,6 +159,8 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
       this.stop();
       state = g.init(config);
       prevState = state;
+      inputLog.length = 0;
+      tickCount = 0;
       this.start();
     },
 
@@ -167,4 +191,60 @@ export function emptyInput() {
     taps: [],
     keys: {},
   };
+}
+
+// Compact input for replay storage — only store non-null fields
+function compactInput(input) {
+  const c = {};
+  if (input.thumb) {
+    // Round to 4 decimal places to save space
+    c.t = [
+      Math.round(input.thumb.x * 10000) / 10000,
+      Math.round(input.thumb.y * 10000) / 10000,
+    ];
+  }
+  if (input.gyro) {
+    c.g = [
+      Math.round(input.gyro.tiltX * 1000) / 1000,
+      Math.round(input.gyro.tiltY * 1000) / 1000,
+    ];
+  }
+  if (input.taps && input.taps.length > 0) {
+    c.p = input.taps.map(t => [
+      Math.round(t.x * 10000) / 10000,
+      Math.round(t.y * 10000) / 10000,
+    ]);
+  }
+  if (input.keys) {
+    const pressed = Object.keys(input.keys).filter(k => input.keys[k]);
+    if (pressed.length > 0) c.k = pressed;
+  }
+  return c;
+}
+
+// Expand compact input back to full format (for replay playback)
+export function expandInput(compact) {
+  const input = emptyInput();
+  if (compact.t) {
+    input.thumb = {
+      active: true,
+      x: compact.t[0], y: compact.t[1],
+      vx: 0, vy: 0,
+      startX: compact.t[0], startY: compact.t[1],
+      duration: 0,
+    };
+  }
+  if (compact.g) {
+    input.gyro = {
+      tiltX: compact.g[0], tiltY: compact.g[1],
+      alpha: 0, beta: 0, gamma: 0,
+    };
+  }
+  if (compact.p) {
+    input.taps = compact.p.map(p => ({ x: p[0], y: p[1], time: 0 }));
+  }
+  if (compact.k) {
+    for (const k of compact.k) input.keys[k] = true;
+  }
+  return input;
 }
