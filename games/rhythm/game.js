@@ -193,7 +193,7 @@ export function createGame(config) {
             if (dist <= PERFECT_TOLERANCE) {
               // Perfect hit
               state.combo++;
-              const comboMult = 1 + Math.floor(state.combo / 10) * 0.5;
+              const comboMult = Math.min(2, 1 + Math.floor(state.combo / 10) * 0.25);
               state.score += Math.round(PERFECT_SCORE * comboMult);
               state.perfects++;
               state.judgments.push({
@@ -205,7 +205,7 @@ export function createGame(config) {
             } else if (dist <= STRIKE_TOLERANCE) {
               // Good hit
               state.combo++;
-              const comboMult = 1 + Math.floor(state.combo / 10) * 0.5;
+              const comboMult = Math.min(2, 1 + Math.floor(state.combo / 10) * 0.25);
               state.score += Math.round(GOOD_SCORE * comboMult);
               state.goods++;
               state.health = Math.max(0, state.health - GOOD_PENALTY_HEALTH * state.healthDrain * 0.3);
@@ -218,7 +218,7 @@ export function createGame(config) {
             } else {
               // In the wider window but not close enough — still count as good
               state.combo++;
-              const comboMult = 1 + Math.floor(state.combo / 10) * 0.5;
+              const comboMult = Math.min(2, 1 + Math.floor(state.combo / 10) * 0.25);
               state.score += Math.round(GOOD_SCORE * 0.5 * comboMult);
               state.goods++;
               state.judgments.push({

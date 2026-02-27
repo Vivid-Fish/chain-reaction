@@ -169,40 +169,56 @@ export function createGame(config) {
 
     bot(difficulty, rng) {
       // Bot that avoids obstacles by moving toward the safest column
+      let decisionX = 0.5;
+      let decisionCooldown = 0;
+
       return (state, dt) => {
         if (!state.alive) return { thumb: null, gyro: null, taps: [], keys: {} };
 
-        // Find the safest x position based on upcoming obstacles
-        const lookAhead = state.obstacles.filter(o => o.y < state.player.y && o.y > state.player.y - 0.3);
-        let targetX = state.player.x;
+        // Reaction delay: low difficulty re-evaluates slowly
+        decisionCooldown -= dt;
+        if (decisionCooldown <= 0) {
+          decisionCooldown = (1 - difficulty) * (1 - difficulty) * 0.4;
 
-        if (lookAhead.length > 0) {
-          // Score each x position by distance from obstacles
-          let bestX = state.player.x;
-          let bestScore = -Infinity;
-          const steps = 10 + Math.floor(difficulty * 20); // more precision at higher difficulty
+          // Look-ahead distance scales with difficulty
+          const lookDist = 0.1 + difficulty * 0.3;
+          const lookAhead = state.obstacles.filter(o => o.y < state.player.y && o.y > state.player.y - lookDist);
 
-          for (let i = 0; i <= steps; i++) {
-            const testX = i / steps;
-            let minDist = Infinity;
-            for (const obs of lookAhead) {
-              const d = Math.abs(testX - obs.x) - obs.width / 2;
-              minDist = Math.min(minDist, d);
+          if (lookAhead.length > 0) {
+            let bestX = state.player.x;
+            let bestScore = -Infinity;
+            const steps = 5 + Math.floor(difficulty * 25);
+
+            for (let i = 0; i <= steps; i++) {
+              const testX = i / steps;
+              let minDist = Infinity;
+              for (const obs of lookAhead) {
+                const d = Math.abs(testX - obs.x) - obs.width / 2;
+                minDist = Math.min(minDist, d);
+              }
+              // Multiplicative noise
+              const noise = (1 - difficulty) * (1 - difficulty) * rng.float(-0.15, 0.15);
+              const score = minDist + noise;
+              if (score > bestScore) {
+                bestScore = score;
+                bestX = testX;
+              }
             }
-            // Add noise inversely proportional to difficulty
-            const noise = (1 - difficulty) * rng.float(-0.1, 0.1);
-            const score = minDist + noise;
-            if (score > bestScore) {
-              bestScore = score;
-              bestX = testX;
-            }
+            decisionX = bestX;
           }
-          targetX = bestX;
         }
 
-        // Add reaction delay: lower difficulty = lag behind
-        const blend = 0.3 + difficulty * 0.7;
-        const smoothedX = state.player.x + (targetX - state.player.x) * blend;
+        // Random drift: low difficulty occasionally moves toward danger
+        if (difficulty < 0.5) {
+          const driftChance = (0.5 - difficulty) * 0.05;
+          if (rng.float(0, 1) < driftChance) {
+            decisionX = rng.float(0.1, 0.9); // random position
+          }
+        }
+
+        // Movement smoothing: always some smoothing to prevent jitter
+        const blend = 0.08 + difficulty * 0.4;
+        const smoothedX = state.player.x + (decisionX - state.player.x) * blend;
 
         return {
           thumb: { active: true, x: smoothedX, y: 0.5, vx: 0, vy: 0, startX: smoothedX, startY: 0.5, duration: 1 },

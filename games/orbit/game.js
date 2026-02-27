@@ -287,6 +287,7 @@ export function createGame(config) {
 
     bot(difficulty, rng) {
       let tapCooldown = 0;
+      let orbitTime = 0; // how long we've been orbiting current planet
 
       return (state, dt) => {
         if (!state.alive) return { thumb: null, gyro: null, taps: [], keys: {} };
@@ -295,38 +296,50 @@ export function createGame(config) {
         const taps = [];
 
         if (state.orbiting !== null) {
-          // Check if we have good velocity to release (moving upward or toward a star)
+          orbitTime += dt;
           const vy = state.ship.vy;
-          const speed = Math.sqrt(state.ship.vx * state.ship.vx + state.ship.vy * state.ship.vy);
+          const speed = Math.sqrt(state.ship.vx * state.ship.vx + vy * vy);
 
-          // Release when moving upward with good speed
-          const shouldRelease = vy < -0.05 && speed > 0.1 && tapCooldown <= 0;
-          const releaseChance = 0.3 + difficulty * 0.7;
+          // Must orbit for minimum time to build speed
+          // d=0: releases almost immediately, d=1: waits for a full orbit (~0.5s)
+          const minOrbitTime = difficulty * 0.4;
 
-          if (shouldRelease && rng.float(0, 1) < releaseChance * dt * 5) {
-            taps.push({ x: 0.5, y: 0.5, time: 0 });
-            tapCooldown = 0.2 + (1 - difficulty) * 0.5;
+          if (tapCooldown <= 0 && orbitTime > minOrbitTime) {
+            // Release when moving upward (vy < 0 in this coordinate system)
+            // d=0: releases at any angle, d=1: only when strongly upward
+            const minUpward = -vy / Math.max(speed, 0.01);
+            const threshold = difficulty * 0.5; // d=0: 0 (any), d=1: 0.5 (needs upward component)
+
+            if (speed > 0.05 && minUpward > threshold) {
+              taps.push({ x: 0.5, y: 0.5, time: 0 });
+              tapCooldown = 0.05;
+              orbitTime = 0;
+            } else if (rng.float(0, 1) < (1 - difficulty) * dt * 3) {
+              // Low difficulty: randomly release at bad times
+              taps.push({ x: 0.5, y: 0.5, time: 0 });
+              tapCooldown = 0.1;
+              orbitTime = 0;
+            }
           }
         } else {
-          // Not orbiting — find nearest planet and attach
+          orbitTime = 0;
+          // Not orbiting — grab nearest planet ASAP
           if (tapCooldown <= 0 && state.planets.length > 0) {
-            let nearest = 0;
             let nearestDist = Infinity;
             for (let i = 0; i < state.planets.length; i++) {
-              const dx = state.ship.x - state.planets[i].x;
-              const dy = state.ship.y - state.planets[i].y;
+              const p = state.planets[i];
+              const dx = state.ship.x - p.x;
+              const dy = state.ship.y - p.y;
               const d = Math.sqrt(dx * dx + dy * dy);
-              if (d < nearestDist) {
-                nearestDist = d;
-                nearest = i;
-              }
+              if (d < nearestDist) nearestDist = d;
             }
-            // Orbit if close enough
+
+            // Grab when in range — high difficulty grabs fast, low waits
             if (nearestDist < 0.3) {
-              const orbitChance = difficulty * 0.5;
-              if (rng.float(0, 1) < orbitChance * dt * 10) {
+              const grabSpeed = 0.2 + difficulty * 0.8;
+              if (rng.float(0, 1) < grabSpeed * dt * 20) {
                 taps.push({ x: 0.5, y: 0.5, time: 0 });
-                tapCooldown = 0.3;
+                tapCooldown = 0.05 + (1 - difficulty) * 0.2;
               }
             }
           }

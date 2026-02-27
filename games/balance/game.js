@@ -231,6 +231,10 @@ export function createGame(config) {
     },
 
     bot(difficulty, rng) {
+      // Reaction delay: low difficulty = slow updates
+      let updateCooldown = 0;
+      let lastTiltX = 0, lastTiltY = 0;
+
       return (state, dt) => {
         if (!state.alive) return { thumb: null, gyro: null, taps: [], keys: {} };
 
@@ -240,20 +244,32 @@ export function createGame(config) {
         const dx = state.ball.x - cx;
         const dy = state.ball.y - cy;
 
-        // PD controller: correct position + dampen velocity
-        const kp = 0.5 + difficulty * 1.5;
-        const kd = 0.3 + difficulty * 0.7;
-        let targetTiltX = -(dx * kp + state.ball.vx * kd);
-        let targetTiltY = -(dy * kp + state.ball.vy * kd);
+        // Reaction delay: low difficulty bots update their aim slowly
+        updateCooldown -= dt;
+        if (updateCooldown <= 0) {
+          // PD controller: gains scale quadratically with difficulty
+          // d=0: kp=0.1, kd=0.0 (almost no correction)
+          // d=0.5: kp=0.6, kd=0.25
+          // d=1.0: kp=2.0, kd=1.0
+          const kp = 0.1 + difficulty * difficulty * 1.9;
+          const kd = difficulty * difficulty * 1.0;
+          let targetTiltX = -(dx * kp + state.ball.vx * kd);
+          let targetTiltY = -(dy * kp + state.ball.vy * kd);
 
-        // Add noise
-        const noise = (1 - difficulty) * 0.3;
-        targetTiltX += rng.float(-noise, noise);
-        targetTiltY += rng.float(-noise, noise);
+          // Add noise: multiplicative so it scales with the correction magnitude
+          const noise = (1 - difficulty) * 0.6;
+          targetTiltX += rng.float(-noise, noise);
+          targetTiltY += rng.float(-noise, noise);
+
+          lastTiltX = targetTiltX;
+          lastTiltY = targetTiltY;
+          // Low difficulty: update every 200ms; high: every frame
+          updateCooldown = (1 - difficulty) * 0.2;
+        }
 
         // Convert tilt to thumb position (tilt = (thumb - 0.5) * 2)
-        const thumbX = 0.5 + targetTiltX / 2;
-        const thumbY = 0.5 + targetTiltY / 2;
+        const thumbX = 0.5 + lastTiltX / 2;
+        const thumbY = 0.5 + lastTiltY / 2;
 
         return {
           thumb: { active: true, x: thumbX, y: thumbY, vx: 0, vy: 0, startX: thumbX, startY: thumbY, duration: 1 },

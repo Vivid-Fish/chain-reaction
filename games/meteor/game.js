@@ -371,54 +371,60 @@ export function createGame(config) {
     },
 
     bot(difficulty, rng) {
+      let aimX = 0.5, aimY = 0.5;
+      let aimCooldown = 0;
+      let targetId = -1; // stick to a target to avoid jittering
+
       return (state, dt) => {
         if (!state.alive) return { thumb: null, gyro: null, taps: [], keys: {} };
 
-        // Find nearest asteroid
-        let nearest = null;
-        let nearestDist = Infinity;
-        for (const a of state.asteroids) {
-          const dx = a.x - state.ship.x;
-          const dy = a.y - state.ship.y;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < nearestDist) {
-            nearestDist = d;
-            nearest = a;
+        // Reaction delay: d=0 re-aims every 300ms, d=1 every frame
+        aimCooldown -= dt;
+        if (aimCooldown <= 0) {
+          aimCooldown = (1 - difficulty) * 0.3;
+
+          // Target selection: closest asteroid (simple, stable)
+          let nearest = null;
+          let nearestDist = Infinity;
+          for (const a of state.asteroids) {
+            const dx = a.x - state.ship.x;
+            const dy = a.y - state.ship.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d < nearestDist) {
+              nearestDist = d;
+              nearest = a;
+            }
           }
+
+          if (nearest) {
+            const dx = nearest.x - state.ship.x;
+            const dy = nearest.y - state.ship.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+
+            // Lead prediction: d=0 aims at current position, d=1 leads perfectly
+            const bulletSpeed = 0.6;
+            const rawLeadTime = d / bulletSpeed;
+            const leadTime = rawLeadTime * difficulty;
+            const predX = nearest.x + nearest.vx * leadTime;
+            const predY = nearest.y + nearest.vy * leadTime;
+
+            const pdx = predX - state.ship.x;
+            const pdy = predY - state.ship.y;
+            const pd = Math.sqrt(pdx * pdx + pdy * pdy);
+            if (pd > 0.01) {
+              aimX = 0.5 + (pdx / pd) * 0.3;
+              aimY = 0.5 + (pdy / pd) * 0.3;
+            }
+          }
+
+          // Aim noise: large at low difficulty, zero at high
+          const noise = (1 - difficulty) * 0.2;
+          aimX += rng.float(-noise, noise);
+          aimY += rng.float(-noise, noise);
         }
-
-        let targetX = 0.5, targetY = 0.5;
-
-        if (nearest) {
-          // Aim toward nearest asteroid with lead compensation
-          const leadTime = nearestDist / 0.6 * difficulty;
-          const predX = nearest.x + nearest.vx * leadTime;
-          const predY = nearest.y + nearest.vy * leadTime;
-
-          // Direction from center to target = thumb position
-          const dx = predX - state.ship.x;
-          const dy = predY - state.ship.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 0.01) {
-            targetX = 0.5 + (dx / dist) * 0.3;
-            targetY = 0.5 + (dy / dist) * 0.3;
-          }
-
-          // Avoidance: if asteroid is very close, dodge
-          if (nearestDist < 0.1 && difficulty > 0.3) {
-            // Move perpendicular
-            targetX = 0.5 - (dy / dist) * 0.3;
-            targetY = 0.5 + (dx / dist) * 0.3;
-          }
-        }
-
-        // Add noise
-        const noise = (1 - difficulty) * 0.15;
-        targetX += rng.float(-noise, noise);
-        targetY += rng.float(-noise, noise);
 
         return {
-          thumb: { active: true, x: targetX, y: targetY, vx: 0, vy: 0, startX: targetX, startY: targetY, duration: 1 },
+          thumb: { active: true, x: aimX, y: aimY, vx: 0, vy: 0, startX: aimX, startY: aimY, duration: 1 },
           gyro: null,
           taps: [],
           keys: {},

@@ -269,57 +269,69 @@ export function createGame(config) {
     },
 
     bot(difficulty, rng) {
+      let reactionTimer = 0;
+      let decidedLane = 1;
+      let lastDecisionTime = 0;
+
       return (state, dt) => {
         if (!state.alive) return { thumb: null, gyro: null, taps: [], keys: {} };
 
         const laneWidth = 1 / 3;
         const lanePositions = [laneWidth / 2, 0.5, 1 - laneWidth / 2];
-
-        // Look ahead at upcoming obstacles
-        const upcoming = state.obstacles.filter(o =>
-          o.y > state.player.y - 0.4 && o.y < state.player.y
-        );
-
-        let targetLane = state.player.lane;
         const taps = [];
 
-        if (upcoming.length > 0) {
-          // Score each lane
-          const laneScores = [0, 0, 0];
-          for (const obs of upcoming) {
-            const urgency = 1 / Math.max(0.01, state.player.y - obs.y);
-            laneScores[obs.lane] -= urgency;
-            // Can we jump this?
-            if (obs.type === 'ground') {
-              laneScores[obs.lane] += urgency * 0.5 * difficulty;
-            }
-          }
+        // Reaction delay: low difficulty bots re-evaluate slowly
+        // d=0: every 0.2s, d=1.0: every frame
+        reactionTimer -= dt;
+        if (reactionTimer <= 0) {
+          reactionTimer = (1 - difficulty) * (1 - difficulty) * 0.2;
 
-          // Add noise
-          for (let i = 0; i < 3; i++) {
-            laneScores[i] += rng.float(0, 1) * (1 - difficulty) * 2;
-          }
-
-          // Pick best lane
-          let best = 0;
-          for (let i = 1; i < 3; i++) {
-            if (laneScores[i] > laneScores[best]) best = i;
-          }
-          targetLane = best;
-
-          // Jump if obstacle in our lane is ground type and close
-          const closestInLane = upcoming.find(o =>
-            o.lane === targetLane &&
-            o.type === 'ground' &&
-            state.player.y - o.y < 0.15
+          // Look-ahead distance scales with difficulty
+          // d=0: sees 0.15 ahead, d=1: sees 0.4 ahead
+          const lookDist = 0.15 + difficulty * 0.25;
+          const upcoming = state.obstacles.filter(o =>
+            o.y > state.player.y - lookDist && o.y < state.player.y
           );
-          if (closestInLane && !state.player.jumping && difficulty > 0.3) {
+
+          if (upcoming.length > 0) {
+            const laneScores = [0, 0, 0];
+            for (const obs of upcoming) {
+              const urgency = 1 / Math.max(0.01, state.player.y - obs.y);
+              laneScores[obs.lane] -= urgency;
+              if (obs.type === 'ground') {
+                laneScores[obs.lane] += urgency * 0.3 * difficulty;
+              }
+            }
+
+            // Add noise inversely proportional to difficulty (multiplicative)
+            for (let i = 0; i < 3; i++) {
+              laneScores[i] += rng.float(-1, 1) * (1 - difficulty) * 3;
+            }
+
+            let best = 0;
+            for (let i = 1; i < 3; i++) {
+              if (laneScores[i] > laneScores[best]) best = i;
+            }
+            decidedLane = best;
+          }
+        }
+
+        // Jump: only high-difficulty bots jump reliably, low bots miss the timing
+        const upcoming = state.obstacles.filter(o =>
+          o.lane === decidedLane &&
+          o.type === 'ground' &&
+          o.y > state.player.y - 0.15 && o.y < state.player.y
+        );
+        if (upcoming.length > 0 && !state.player.jumping) {
+          // Jump probability scales with difficulty
+          const jumpChance = difficulty * difficulty;
+          if (rng.float(0, 1) < jumpChance) {
             taps.push({ x: 0.5, y: 0.5, time: 0 });
           }
         }
 
         return {
-          thumb: { active: true, x: lanePositions[targetLane], y: 0.5, vx: 0, vy: 0, startX: lanePositions[targetLane], startY: 0.5, duration: 1 },
+          thumb: { active: true, x: lanePositions[decidedLane], y: 0.5, vx: 0, vy: 0, startX: lanePositions[decidedLane], startY: 0.5, duration: 1 },
           gyro: null,
           taps,
           keys: {},

@@ -235,37 +235,41 @@ export function createGame(config) {
       let lastKnownBallY = 0.5;
 
       return (state, dt) => {
-        // Predict where ball will intersect paddle's x
         let targetY = 0.5;
 
         if (state.ball.vx !== 0) {
-          // Simple prediction: linear extrapolation
-          const speed = Math.sqrt(state.ball.vx * state.ball.vx + state.ball.vy * state.ball.vy);
-          let bx = state.ball.x, by = state.ball.y;
-          let bvx = state.ball.vx, bvy = state.ball.vy;
+          // Prediction quality scales with difficulty:
+          // d=0: no prediction (just track ball.y), d=1: full wall-bounce prediction
+          const predSteps = Math.floor(difficulty * difficulty * 200);
 
-          // Simulate ball path (with bounces) for up to 200 steps
-          for (let i = 0; i < 200; i++) {
-            bx += bvx * dt;
-            by += bvy * dt;
-            if (by < 0.01) { by = 0.01; bvy = Math.abs(bvy); }
-            if (by > 0.99) { by = 0.99; bvy = -Math.abs(bvy); }
-            if (bx < 0.03 || bx > 0.97) {
-              targetY = by;
-              break;
+          if (predSteps > 5) {
+            let bx = state.ball.x, by = state.ball.y;
+            let bvx = state.ball.vx, bvy = state.ball.vy;
+            for (let i = 0; i < predSteps; i++) {
+              bx += bvx * dt;
+              by += bvy * dt;
+              if (by < 0.01) { by = 0.01; bvy = Math.abs(bvy); }
+              if (by > 0.99) { by = 0.99; bvy = -Math.abs(bvy); }
+              if (bx < 0.03 || bx > 0.97) {
+                targetY = by;
+                break;
+              }
             }
+          } else {
+            // Low difficulty: just track ball's current y
+            targetY = state.ball.y;
           }
 
           // Reaction delay — lower difficulty = more lag
           reactionDelay -= dt;
           if (reactionDelay <= 0) {
             lastKnownBallY = targetY;
-            reactionDelay = (1 - difficulty) * 0.3;
+            reactionDelay = (1 - difficulty) * (1 - difficulty) * 0.4;
           }
         }
 
-        // Add imprecision
-        const noise = (1 - difficulty) * 0.15;
+        // Imprecision: quadratic noise
+        const noise = (1 - difficulty) * (1 - difficulty) * 0.2;
         const aim = lastKnownBallY + rng.float(-noise, noise);
 
         return {

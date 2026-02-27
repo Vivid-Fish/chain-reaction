@@ -348,16 +348,15 @@ export function createGame(config) {
         let targetX = state.food ? state.food.x : 0.5;
         let targetY = state.food ? state.food.y : 0.5;
 
-        // At higher difficulty, check if the direct path to food hits our body
-        // and try to route around it
-        if (difficulty > 0.3 && state.snake.length > 10) {
+        // Scale body awareness with difficulty (no threshold gate)
+        if (state.snake.length > 5 + Math.floor((1 - difficulty) * 20)) {
           const dx = targetX - head.x;
           const dy = targetY - head.y;
           const distToFood = Math.sqrt(dx * dx + dy * dy);
           const dirToFood = Math.atan2(dy, dx);
 
           // Look ahead along the path to food for body segments
-          const lookSteps = Math.floor(5 + difficulty * 15);
+          const lookSteps = Math.floor(3 + difficulty * difficulty * 17);
           const stepDist = Math.min(distToFood, 0.15) / lookSteps;
           let blocked = false;
 
@@ -422,8 +421,8 @@ export function createGame(config) {
         if (head.y < WALL_MARGIN + wallPush) targetY = Math.max(targetY, WALL_MARGIN + wallPush);
         if (head.y > 1 - WALL_MARGIN - wallPush) targetY = Math.min(targetY, 1 - WALL_MARGIN - wallPush);
 
-        // Add noise inversely proportional to difficulty
-        const noise = (1 - difficulty) * 0.15;
+        // Add noise: quadratic so low difficulty wanders a lot
+        const noise = (1 - difficulty) * (1 - difficulty) * 0.2;
         targetX += rng.float(-noise, noise);
         targetY += rng.float(-noise, noise);
 

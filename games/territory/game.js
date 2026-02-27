@@ -476,9 +476,7 @@ export function createGame(config) {
     },
 
     bot(difficulty, rng) {
-      // Returns a function that produces an input frame for the current player
-      // Low difficulty: random valid move
-      // High difficulty: maximize captures + positional value (corners/edges worth more)
+      // Smooth scaling: all features present at all difficulties, weighted by difficulty
       return (state, dt) => {
         const noInput = { thumb: null, gyro: null, taps: [], keys: {} };
 
@@ -489,67 +487,38 @@ export function createGame(config) {
 
         let chosen;
 
-        if (difficulty < 0.2) {
-          // Pure random
-          chosen = rng.pick(validMoves);
-        } else if (difficulty < 0.5) {
-          // Greedy: maximize captures with some noise
-          const scored = validMoves.map(m => ({
-            move: m,
-            value: m.captures.length + rng.float(-1, 1) * (1 - difficulty),
-          }));
-          scored.sort((a, b) => b.value - a.value);
-          chosen = scored[0].move;
-        } else if (difficulty < 0.8) {
-          // Captures + positional value
-          const scored = validMoves.map(m => {
-            const captureVal = m.captures.length * 2;
-            const posVal = positionalValue(m.row, m.col, state.size);
-            const noise = rng.float(-0.5, 0.5) * (1 - difficulty);
-            return { move: m, value: captureVal + posVal + noise };
-          });
-          scored.sort((a, b) => b.value - a.value);
-          chosen = scored[0].move;
-        } else {
-          // Expert: captures + position + look-ahead (consider opponent response)
-          const scored = validMoves.map(m => {
-            const captureVal = m.captures.length * 3;
-            const posVal = positionalValue(m.row, m.col, state.size) * 2;
+        // Score all moves with features weighted by difficulty
+        const scored = validMoves.map(m => {
+          // Capture value: always present, weight increases with difficulty
+          const captureVal = m.captures.length * (1 + difficulty * 2);
 
-            // Simulate this move and check what opponent gets
+          // Positional value: kicks in proportionally with difficulty
+          const posVal = positionalValue(m.row, m.col, state.size) * difficulty;
+
+          // Look-ahead: only at high difficulty (expensive), scales smoothly
+          let lookaheadVal = 0;
+          if (difficulty > 0.5) {
+            const lookaheadStrength = (difficulty - 0.5) * 2; // 0 to 1 over d=0.5..1.0
             const simGrid = state.grid.map(row => row.slice());
             simGrid[m.row][m.col] = state.currentPlayer;
             for (const [cr, cc] of m.captures) {
               simGrid[cr][cc] = state.currentPlayer;
             }
-
-            // Check opponent's best response
             const oppMoves = getValidMoves(simGrid, 1 - state.currentPlayer, state.size);
             let oppBestCaptures = 0;
-            let oppBestPos = -10;
             for (const om of oppMoves) {
-              if (om.captures.length > oppBestCaptures) {
-                oppBestCaptures = om.captures.length;
-              }
-              const op = positionalValue(om.row, om.col, state.size);
-              if (op > oppBestPos) oppBestPos = op;
+              if (om.captures.length > oppBestCaptures) oppBestCaptures = om.captures.length;
             }
+            lookaheadVal = -(oppBestCaptures * 2 + oppMoves.length * 0.1) * lookaheadStrength;
+          }
 
-            // Penalize moves that give opponent strong responses
-            const oppPenalty = (oppBestCaptures * 2 + Math.max(0, oppBestPos)) * 0.5;
+          // Noise: quadratic, large at low difficulty
+          const noise = rng.float(-1, 1) * (1 - difficulty) * (1 - difficulty) * 3;
 
-            // Bonus for reducing opponent's mobility
-            const mobilityPenalty = oppMoves.length * 0.1;
-
-            const noise = rng.float(-0.2, 0.2) * (1 - difficulty);
-            return {
-              move: m,
-              value: captureVal + posVal - oppPenalty - mobilityPenalty + noise,
-            };
-          });
-          scored.sort((a, b) => b.value - a.value);
-          chosen = scored[0].move;
-        }
+          return { move: m, value: captureVal + posVal + lookaheadVal + noise };
+        });
+        scored.sort((a, b) => b.value - a.value);
+        chosen = scored[0].move;
 
         // Convert grid cell back to normalized tap coordinates
         const padding = 0.06;

@@ -677,21 +677,20 @@ export function createGame(config) {
 
     bot(difficulty, rng) {
       // Bot that controls the paddle to intercept the ball
-      // Higher difficulty = better prediction, tighter tracking
       let lastTargetX = 0.5;
+      let reactionTimer = 0;
+      let currentTargetX = 0.5;
 
       return (state, dt) => {
         if (state.lives <= 0) {
           return { thumb: null, gyro: null, taps: [], keys: {} };
         }
 
-        // Find the most relevant ball to track:
-        // Prefer the ball closest to the paddle (highest y, moving downward)
+        // Find the most relevant ball to track
         let trackBall = null;
         let bestScore = -Infinity;
 
         for (const ball of state.balls) {
-          // Prioritize balls moving downward and close to paddle
           const urgency = ball.y + (ball.vy > 0 ? ball.vy * 0.5 : 0);
           if (urgency > bestScore) {
             bestScore = urgency;
@@ -708,49 +707,40 @@ export function createGame(config) {
           };
         }
 
-        let targetX;
+        // Reaction delay: low difficulty re-evaluates slowly
+        reactionTimer -= dt;
+        if (reactionTimer <= 0) {
+          reactionTimer = (1 - difficulty) * 0.15;
 
-        if (difficulty > 0.5) {
-          // High difficulty: predict where ball will be at paddle y
-          // Simple linear prediction
+          // Prediction quality scales smoothly with difficulty
+          // d=0: just follow ball.x. d=1: full wall-bounce prediction.
           const timeToReach = trackBall.vy > 0.01
             ? (state.paddle.y - trackBall.y) / trackBall.vy
             : 2.0;
 
-          // Simulate ball path with wall bounces
+          // Prediction time scales with difficulty (d=0: 0s, d=1: full)
+          const predictionTime = Math.min(timeToReach, 1.5) * difficulty;
+
           let predX = trackBall.x;
           let predVx = trackBall.vx;
-          let remaining = Math.min(timeToReach, 3.0); // cap prediction time
+          let remaining = predictionTime;
           const step = 1 / 60;
 
           while (remaining > 0) {
             predX += predVx * step;
-            // Bounce off walls
-            if (predX < 0.01) {
-              predX = 0.01;
-              predVx = Math.abs(predVx);
-            } else if (predX > 0.99) {
-              predX = 0.99;
-              predVx = -Math.abs(predVx);
-            }
+            if (predX < 0.01) { predX = 0.01; predVx = Math.abs(predVx); }
+            else if (predX > 0.99) { predX = 0.99; predVx = -Math.abs(predVx); }
             remaining -= step;
           }
 
-          // Add slight intentional offset based on difficulty
-          // to aim for better angles (hit slightly off-center)
-          const angleOffset = (difficulty > 0.8) ? rng.float(-0.02, 0.02) : 0;
-          targetX = predX + angleOffset;
-        } else {
-          // Low difficulty: just follow ball.x with delay
-          targetX = trackBall.x;
-          // Add noise for lower difficulty
-          targetX += (1 - difficulty * 2) * rng.float(-0.08, 0.08);
+          // Noise: quadratic falloff
+          const noise = (1 - difficulty) * (1 - difficulty) * 0.12;
+          currentTargetX = predX + rng.float(-noise, noise);
         }
 
-        // Smooth tracking: blend toward target based on difficulty
-        // Higher difficulty = snappier response
-        const blend = 0.2 + difficulty * 0.6;
-        lastTargetX = lastTargetX + (targetX - lastTargetX) * blend;
+        // Tracking speed: fast enough to catch, but not so fast it overshoots
+        const blend = 0.15 + difficulty * 0.5;
+        lastTargetX = lastTargetX + (currentTargetX - lastTargetX) * blend;
 
         // Clamp to valid range
         lastTargetX = Math.max(0.05, Math.min(0.95, lastTargetX));
