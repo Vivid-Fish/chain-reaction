@@ -121,16 +121,38 @@ export function createInputCapture(canvas) {
   }
 
   // --- Gyro ---
+  let gyroBetaBaseline = null;
+  let gyroGammaBaseline = null;
+  let gyroCalibrated = false;
+
   function onDeviceOrientation(e) {
     gyroSupported = true;
+    const beta = e.beta || 0;
+    const gamma = e.gamma || 0;
+
+    // Calibrate: capture baseline on first reading
+    if (!gyroCalibrated) {
+      gyroBetaBaseline = beta;
+      gyroGammaBaseline = gamma;
+      gyroCalibrated = true;
+    }
+
+    // Report deltas from baseline, not raw values
+    const deltaBeta = beta - gyroBetaBaseline;
+    const deltaGamma = gamma - gyroGammaBaseline;
+
     gyro = {
-      alpha: e.alpha || 0,  // compass
-      beta: e.beta || 0,    // front-back tilt [-180, 180]
-      gamma: e.gamma || 0,  // left-right tilt [-90, 90]
-      // Normalized tilt: gamma/90 gives [-1, 1] for left-right
-      tiltX: Math.max(-1, Math.min(1, (e.gamma || 0) / 45)),
-      tiltY: Math.max(-1, Math.min(1, (e.beta || 0) / 45)),
+      alpha: e.alpha || 0,
+      beta, gamma,
+      tiltX: Math.max(-1, Math.min(1, deltaGamma / 30)),
+      tiltY: Math.max(-1, Math.min(1, deltaBeta / 30)),
     };
+  }
+
+  function calibrateGyro() {
+    gyroCalibrated = false;
+    gyroBetaBaseline = null;
+    gyroGammaBaseline = null;
   }
 
   // --- Lifecycle ---
@@ -147,9 +169,15 @@ export function createInputCapture(canvas) {
     document.addEventListener('keyup', onKeyUp);
 
     if (window.DeviceOrientationEvent) {
-      // Some browsers require permission
       if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        // Will be requested on first user interaction
+        // iOS 13+ requires explicit permission from user gesture context
+        DeviceOrientationEvent.requestPermission()
+          .then(perm => {
+            if (perm === 'granted') {
+              window.addEventListener('deviceorientation', onDeviceOrientation);
+            }
+          })
+          .catch(() => {});
       } else {
         window.addEventListener('deviceorientation', onDeviceOrientation);
       }
@@ -192,5 +220,5 @@ export function createInputCapture(canvas) {
     return frame;
   }
 
-  return { attach, detach, capture, requestGyro };
+  return { attach, detach, capture, requestGyro, calibrateGyro };
 }

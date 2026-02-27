@@ -53,7 +53,7 @@ export function runHeadless(game, { seed = 1, params = {}, botDifficulty = null,
 // ---------------------------------------------------------------------------
 // Browser runner — runs a game with rendering and real input
 // ---------------------------------------------------------------------------
-export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx = null } = {}) {
+export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'play', botDifficulty = 0.5 } = {}) {
   seed = seed || Math.floor(Math.random() * 2147483647);
   const rng = createRNG(seed);
   const config = resolveParams(game, params);
@@ -72,6 +72,11 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
   // Input recording for replays
   const inputLog = [];
 
+  // Bot function (created if mode is 'bot')
+  const botFn = (mode === 'bot' && g.bot)
+    ? g.bot(botDifficulty, rng.fork('bot'))
+    : null;
+
   // These are injected by the shell/platform
   let inputCapture = null;
   let renderer = null;
@@ -89,10 +94,11 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
     if (accumulator > 200) accumulator = 200;
 
     while (accumulator >= tickMs) {
-      const input = inputCapture ? inputCapture.capture() : emptyInput();
+      const input = botFn ? botFn(state, dt) : (inputCapture ? inputCapture.capture() : emptyInput());
       inputLog.push(compactInput(input));
       tickCount++;
-      prevState = state;
+      // Deep copy for audio diffing — games mutate state in place
+      prevState = JSON.parse(JSON.stringify(state));
       state = g.step(state, input, dt, rng);
 
       if (audioEngine && g.audio) {
@@ -129,6 +135,7 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
     get seed() { return seed; },
     get config() { return config; },
     get ticks() { return tickCount; },
+    get mode() { return mode; },
 
     getSession() {
       return {
@@ -140,6 +147,7 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
         status: g.status(state),
         inputs: inputLog,
         timestamp: Date.now(),
+        botPlay: mode === 'bot' ? botDifficulty : undefined,
       };
     },
 
@@ -172,9 +180,107 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, audioCtx 
 }
 
 // ---------------------------------------------------------------------------
+// Replay runner — replays a recorded session with rendering
+// ---------------------------------------------------------------------------
+export function createReplayRunner(game, canvas, session) {
+  const rng = createRNG(session.seed);
+  const config = session.config || {};
+  const g = game.createGame(config);
+  const dt = 1 / (g.meta.tickRate || 60);
+  const tickMs = dt * 1000;
+  const inputs = session.inputs || [];
+
+  let state = g.init(config);
+  let prevState = state;
+  let accumulator = 0;
+  let lastTime = 0;
+  let running = false;
+  let rafId = null;
+  let tickCount = 0;
+
+  let renderer = null;
+  let audioEngine = null;
+  let onEnd = null;
+
+  function tick(timestamp) {
+    if (!running) return;
+
+    if (lastTime === 0) lastTime = timestamp;
+    accumulator += (timestamp - lastTime);
+    lastTime = timestamp;
+
+    if (accumulator > 200) accumulator = 200;
+
+    while (accumulator >= tickMs) {
+      if (tickCount >= inputs.length) {
+        running = false;
+        if (onEnd) onEnd(g.score(state), 'replay_end');
+        return;
+      }
+
+      const compact = inputs[tickCount];
+      const input = (compact && Object.keys(compact).length > 0) ? expandInput(compact) : emptyInput();
+      tickCount++;
+      prevState = JSON.parse(JSON.stringify(state));
+      state = g.step(state, input, dt, rng);
+
+      if (audioEngine && g.audio) {
+        const events = g.audio(prevState, state);
+        if (events && events.length > 0) {
+          audioEngine.play(events);
+        }
+      }
+
+      const s = g.status(state);
+      if (s !== 'playing') {
+        running = false;
+        if (onEnd) onEnd(g.score(state), s.reason || 'ended');
+        return;
+      }
+
+      accumulator -= tickMs;
+    }
+
+    if (renderer && g.render) {
+      const alpha = accumulator / tickMs;
+      renderer.begin(canvas);
+      g.render(state, renderer.draw, alpha);
+      renderer.end();
+    }
+
+    rafId = requestAnimationFrame(tick);
+  }
+
+  return {
+    get state() { return state; },
+    get game() { return g; },
+    get meta() { return g.meta; },
+    get ticks() { return tickCount; },
+    get totalTicks() { return inputs.length; },
+    get mode() { return 'replay'; },
+
+    start() {
+      running = true;
+      lastTime = 0;
+      accumulator = 0;
+      rafId = requestAnimationFrame(tick);
+    },
+
+    stop() {
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+    },
+
+    setRenderer(r) { renderer = r; },
+    setAudio(a) { audioEngine = a; },
+    setOnEnd(fn) { onEnd = fn; },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-function resolveParams(game, overrides) {
+export function resolveParams(game, overrides) {
   const g = game.createGame({});
   const defs = g.configure ? g.configure() : [];
   const defaults = {};

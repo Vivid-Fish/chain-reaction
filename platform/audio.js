@@ -12,7 +12,7 @@ export function createAudioEngine(audioCtx) {
   }
 
   const master = audioCtx.createGain();
-  master.gain.value = 0.3;
+  master.gain.value = 0.7;
   master.connect(audioCtx.destination);
 
   function play(events) {
@@ -102,5 +102,9 @@ export function createAudioEngine(audioCtx) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
 
-  return { play, resume, ctx: audioCtx };
+  function setVolume(v) {
+    master.gain.value = Math.max(0, Math.min(1, v));
+  }
+
+  return { play, resume, setVolume, ctx: audioCtx };
 }

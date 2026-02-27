@@ -54,6 +54,22 @@
       color: rgba(255,255,255,0.35);
       margin-bottom: 16px;
     }
+    .menu-links {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .menu-link {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.35);
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .menu-link:hover { color: rgba(255,255,255,0.7); }
     .game-btn {
       width: 100%;
       padding: 14px 16px;
@@ -114,7 +130,8 @@
     .overlay-title { font-size: 28px; font-weight: bold; letter-spacing: 3px; }
     .overlay-score { font-size: 18px; color: rgba(255,255,255,0.8); }
     .overlay-reason { font-size: 13px; color: rgba(255,255,255,0.4); }
-    .btn-row { display: flex; gap: 12px; margin-top: 10px; }
+    .overlay-id { font-size: 10px; color: rgba(255,255,255,0.2); margin-top: 4px; }
+    .btn-row { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
     .action-btn {
       padding: 10px 28px;
       background: rgba(255,255,255,0.08);
@@ -130,6 +147,10 @@
       background: rgba(68,170,255,0.15);
       border-color: rgba(68,170,255,0.3);
     }
+    .action-btn.primary {
+      background: rgba(68,170,255,0.2);
+      border-color: rgba(68,170,255,0.4);
+    }
     .back-btn {
       position: absolute;
       top: 8px; left: 8px;
@@ -144,6 +165,107 @@
       border-radius: 4px;
     }
     .back-btn:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+    .mode-badge {
+      position: absolute;
+      top: 8px; right: 8px;
+      z-index: 20;
+      padding: 4px 10px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.5);
+      font-family: inherit;
+      font-size: 11px;
+      border-radius: 4px;
+      letter-spacing: 1px;
+    }
+    /* Pre-game screen */
+    .pregame {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 40px 20px;
+      max-width: 380px;
+      width: 100%;
+    }
+    .pregame-icon {
+      width: 64px; height: 64px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+    .pregame-name {
+      font-size: 24px;
+      font-weight: bold;
+      letter-spacing: 3px;
+    }
+    .pregame-desc {
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+    }
+    .pregame-tags {
+      font-size: 11px;
+      color: rgba(255,255,255,0.3);
+    }
+    .pregame-section {
+      width: 100%;
+      margin-top: 8px;
+    }
+    .pregame-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+    .slider-row input[type=range] {
+      flex: 1;
+      accent-color: #4af;
+    }
+    .slider-val {
+      font-size: 13px;
+      color: rgba(255,255,255,0.7);
+      min-width: 36px;
+      text-align: right;
+    }
+    /* Sessions list */
+    .session-item {
+      width: 100%;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.12s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .session-item:hover {
+      background: rgba(68,170,255,0.08);
+      border-color: rgba(68,170,255,0.2);
+    }
+    .session-game { font-size: 13px; font-weight: bold; }
+    .session-score { font-size: 13px; color: rgba(255,255,255,0.6); }
+    .session-time { font-size: 10px; color: rgba(255,255,255,0.25); }
+    .session-bot { font-size: 10px; color: #4af; }
+    /* Settings */
+    .settings-row {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .settings-label { font-size: 13px; color: rgba(255,255,255,0.7); }
   </style>
 </head>
 <body class="in-menu">
@@ -151,57 +273,77 @@
     <div id="menu" class="menu"></div>
     <div id="game-container">
       <button class="back-btn" id="back-btn">&larr; MENU</button>
+      <div class="mode-badge" id="mode-badge" style="display:none"></div>
       <canvas id="game-canvas"></canvas>
     </div>
   </div>
 
   <script type="module">
-    import { createBrowserRunner } from '/platform/core.js';
+    import { createBrowserRunner, createReplayRunner } from '/platform/core.js';
     import { createInputCapture } from '/platform/input.js';
     import { createRenderer } from '/platform/renderer.js';
     import { createAudioEngine } from '/platform/audio.js';
 
-    // Game registry
-    import { createGame as dodgeCreate } from '/games/dodge/game.js';
-    import { createGame as rhythmCreate } from '/games/rhythm/game.js';
-    import { createGame as territoryCreate } from '/games/territory/game.js';
-    import { createGame as stackCreate } from '/games/stack/game.js';
-    import { createGame as snakeCreate } from '/games/snake/game.js';
-    import { createGame as breakoutCreate } from '/games/breakout/game.js';
-    import { createGame as aimCreate } from '/games/aim/game.js';
-    import { createGame as balanceCreate } from '/games/balance/game.js';
-    import { createGame as pongCreate } from '/games/pong/game.js';
-    import { createGame as runnerCreate } from '/games/runner/game.js';
-    import { createGame as orbitCreate } from '/games/orbit/game.js';
-    import { createGame as meteorCreate } from '/games/meteor/game.js';
+    // -----------------------------------------------------------------------
+    // Game Registry — games register themselves, no hard-coded list
+    // -----------------------------------------------------------------------
+    const GAMES = [];
 
-    const GAMES = [
-      { id: 'dodge', name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '◇', createGame: dodgeCreate },
-      { id: 'rhythm', name: 'Rhythm', desc: 'Tap beats to the music', tags: 'taps · timing', color: '#f4a', icon: '♪', createGame: rhythmCreate },
-      { id: 'territory', name: 'Territory', desc: 'Capture the board (2P)', tags: 'taps · strategy · pvp', color: '#4fa', icon: '◈', createGame: territoryCreate },
-      { id: 'stack', name: 'Stack', desc: 'Time your drops perfectly', tags: 'taps · precision', color: '#fa4', icon: '▢', createGame: stackCreate },
-      { id: 'snake', name: 'Snake', desc: 'Eat, grow, survive', tags: 'thumb · classic', color: '#4f4', icon: '~', createGame: snakeCreate },
-      { id: 'breakout', name: 'Breakout', desc: 'Smash all the bricks', tags: 'thumb · physics', color: '#f84', icon: '▣', createGame: breakoutCreate },
-      { id: 'aim', name: 'Aim Trainer', desc: 'Test your reflexes', tags: 'taps · speed', color: '#f44', icon: '◎', createGame: aimCreate },
-      { id: 'balance', name: 'Balance', desc: 'Tilt to keep the ball', tags: 'thumb/gyro · physics', color: '#6cf', icon: '○', createGame: balanceCreate },
-      { id: 'pong', name: 'Pong', desc: 'Classic paddle battle (2P)', tags: 'thumb · pvp', color: '#ff4', icon: '|', createGame: pongCreate },
-      { id: 'runner', name: 'Runner', desc: 'Dodge and jump endlessly', tags: 'thumb+taps · lanes', color: '#a4f', icon: '▸', createGame: runnerCreate },
-      { id: 'orbit', name: 'Orbit', desc: 'Slingshot through space', tags: 'taps · gravity', color: '#4ff', icon: '◌', createGame: orbitCreate },
-      { id: 'meteor', name: 'Meteor', desc: 'Asteroids-style shooter', tags: 'thumb · shoot', color: '#fa0', icon: '✦', createGame: meteorCreate },
-    ];
+    function registerGame(entry) {
+      GAMES.push(entry);
+    }
 
+    // Register all games
+    const gameModules = await Promise.all([
+      import('/games/dodge/game.js').then(m => ({ id: 'dodge', name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '\u25C7', createGame: m.createGame })),
+      import('/games/rhythm/game.js').then(m => ({ id: 'rhythm', name: 'Rhythm', desc: 'Tap beats to the music', tags: 'taps · timing', color: '#f4a', icon: '\u266A', createGame: m.createGame })),
+      import('/games/territory/game.js').then(m => ({ id: 'territory', name: 'Territory', desc: 'Capture the board (2P)', tags: 'taps · strategy · pvp', color: '#4fa', icon: '\u25C8', createGame: m.createGame })),
+      import('/games/stack/game.js').then(m => ({ id: 'stack', name: 'Stack', desc: 'Time your drops perfectly', tags: 'taps · precision', color: '#fa4', icon: '\u25A2', createGame: m.createGame })),
+      import('/games/snake/game.js').then(m => ({ id: 'snake', name: 'Snake', desc: 'Eat, grow, survive', tags: 'thumb · classic', color: '#4f4', icon: '~', createGame: m.createGame })),
+      import('/games/breakout/game.js').then(m => ({ id: 'breakout', name: 'Breakout', desc: 'Smash all the bricks', tags: 'thumb · physics', color: '#f84', icon: '\u25A3', createGame: m.createGame })),
+      import('/games/aim/game.js').then(m => ({ id: 'aim', name: 'Aim Trainer', desc: 'Test your reflexes', tags: 'taps · speed', color: '#f44', icon: '\u25CE', createGame: m.createGame })),
+      import('/games/balance/game.js').then(m => ({ id: 'balance', name: 'Balance', desc: 'Tilt to keep the ball', tags: 'thumb/gyro · physics', color: '#6cf', icon: '\u25CB', createGame: m.createGame })),
+      import('/games/pong/game.js').then(m => ({ id: 'pong', name: 'Pong', desc: 'Classic paddle battle (2P)', tags: 'thumb · pvp', color: '#ff4', icon: '|', createGame: m.createGame })),
+      import('/games/runner/game.js').then(m => ({ id: 'runner', name: 'Runner', desc: 'Dodge and jump endlessly', tags: 'thumb+taps · lanes', color: '#a4f', icon: '\u25B8', createGame: m.createGame })),
+      import('/games/orbit/game.js').then(m => ({ id: 'orbit', name: 'Orbit', desc: 'Slingshot through space', tags: 'taps · gravity', color: '#4ff', icon: '\u25CC', createGame: m.createGame })),
+      import('/games/meteor/game.js').then(m => ({ id: 'meteor', name: 'Meteor', desc: 'Asteroids-style shooter', tags: 'thumb · shoot', color: '#fa0', icon: '\u2726', createGame: m.createGame })),
+    ]);
+    gameModules.forEach(registerGame);
+
+    // -----------------------------------------------------------------------
+    // DOM elements
+    // -----------------------------------------------------------------------
     const menuEl = document.getElementById('menu');
     const gameContainer = document.getElementById('game-container');
     const canvas = document.getElementById('game-canvas');
     const backBtn = document.getElementById('back-btn');
+    const modeBadge = document.getElementById('mode-badge');
 
     let currentRunner = null;
     let currentInput = null;
     let audioEngine = null;
     let buildVersion = '';
+    let lastSession = null; // last completed session data for replay
+    let lastSessionId = null;
+    let masterVolume = parseFloat(localStorage.getItem('gl_volume') || '0.5');
 
     fetch('/api/version').then(r => r.json()).then(d => { buildVersion = d.version; }).catch(() => {});
 
+    // -----------------------------------------------------------------------
+    // Audio init
+    // -----------------------------------------------------------------------
+    function ensureAudio() {
+      if (!audioEngine) {
+        audioEngine = createAudioEngine();
+        audioEngine.setVolume(masterVolume);
+      }
+      audioEngine.resume();
+      return audioEngine;
+    }
+
+    // -----------------------------------------------------------------------
+    // SCREEN: Main Menu
+    // -----------------------------------------------------------------------
     function showMenu() {
       stopGame();
       document.body.className = 'in-menu';
@@ -210,10 +352,32 @@
       document.title = 'Game Lab';
       history.pushState(null, '', '/');
 
-      menuEl.innerHTML = `
-        <div class="menu-title">GAME LAB</div>
-        <div class="menu-sub">${GAMES.length} experiments${buildVersion ? ' · v' + buildVersion : ''}</div>
-      `;
+      menuEl.innerHTML = '';
+
+      const title = document.createElement('div');
+      title.className = 'menu-title';
+      title.textContent = 'GAME LAB';
+      menuEl.appendChild(title);
+
+      const sub = document.createElement('div');
+      sub.className = 'menu-sub';
+      sub.textContent = `${GAMES.length} experiments${buildVersion ? ' \u00B7 v' + buildVersion : ''}`;
+      menuEl.appendChild(sub);
+
+      // Menu links
+      const links = document.createElement('div');
+      links.className = 'menu-links';
+      const sessionsLink = document.createElement('button');
+      sessionsLink.className = 'menu-link';
+      sessionsLink.textContent = 'REPLAYS';
+      sessionsLink.onclick = showSessionsList;
+      links.appendChild(sessionsLink);
+      const settingsLink = document.createElement('button');
+      settingsLink.className = 'menu-link';
+      settingsLink.textContent = 'SETTINGS';
+      settingsLink.onclick = showSettings;
+      links.appendChild(settingsLink);
+      menuEl.appendChild(links);
 
       for (const game of GAMES) {
         const btn = document.createElement('button');
@@ -226,17 +390,126 @@
             <div class="tags">${game.tags}</div>
           </div>
         `;
-        btn.onclick = () => launchGame(game);
+        btn.onclick = () => showPreGame(game);
         menuEl.appendChild(btn);
       }
     }
 
-    function launchGame(entry) {
+    // -----------------------------------------------------------------------
+    // SCREEN: Pre-Game
+    // -----------------------------------------------------------------------
+    function showPreGame(entry) {
+      stopGame();
+      document.body.className = 'in-menu';
+      menuEl.style.display = 'flex';
+      gameContainer.style.display = 'none';
+      document.title = entry.name + ' \u2014 Game Lab';
+      history.pushState({ game: entry.id, screen: 'pregame' }, '', '/' + entry.id);
+
+      menuEl.innerHTML = '';
+
+      const pg = document.createElement('div');
+      pg.className = 'pregame';
+
+      // Back to menu
+      const backLink = document.createElement('button');
+      backLink.className = 'menu-link';
+      backLink.textContent = '\u2190 Back to menu';
+      backLink.style.alignSelf = 'flex-start';
+      backLink.onclick = showMenu;
+      pg.appendChild(backLink);
+
+      // Game icon
+      const icon = document.createElement('div');
+      icon.className = 'pregame-icon';
+      icon.style.cssText = `background:${entry.color}22;color:${entry.color}`;
+      icon.textContent = entry.icon;
+      pg.appendChild(icon);
+
+      // Game info
+      const name = document.createElement('div');
+      name.className = 'pregame-name';
+      name.textContent = entry.name;
+      pg.appendChild(name);
+
+      const desc = document.createElement('div');
+      desc.className = 'pregame-desc';
+      desc.textContent = entry.desc;
+      pg.appendChild(desc);
+
+      const tags = document.createElement('div');
+      tags.className = 'pregame-tags';
+      tags.textContent = entry.tags;
+      pg.appendChild(tags);
+
+      // Check if game has a bot
+      const tempG = entry.createGame({});
+      const hasBot = typeof tempG.bot === 'function';
+
+      // Difficulty slider (for bot mode)
+      let difficultyValue = 0.5;
+      if (hasBot) {
+        const section = document.createElement('div');
+        section.className = 'pregame-section';
+        const label = document.createElement('div');
+        label.className = 'pregame-label';
+        label.textContent = 'Bot Difficulty';
+        section.appendChild(label);
+
+        const row = document.createElement('div');
+        row.className = 'slider-row';
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.value = '50';
+        const valLabel = document.createElement('span');
+        valLabel.className = 'slider-val';
+        valLabel.textContent = '50%';
+        slider.oninput = () => {
+          difficultyValue = parseInt(slider.value) / 100;
+          valLabel.textContent = slider.value + '%';
+        };
+        row.appendChild(slider);
+        row.appendChild(valLabel);
+        section.appendChild(row);
+        pg.appendChild(section);
+      }
+
+      // Buttons
+      const btnRow = document.createElement('div');
+      btnRow.className = 'btn-row';
+      btnRow.style.marginTop = '16px';
+
+      const playBtn = document.createElement('button');
+      playBtn.className = 'action-btn primary';
+      playBtn.textContent = 'PLAY';
+      playBtn.onclick = () => launchGame(entry, 'play');
+      btnRow.appendChild(playBtn);
+
+      if (hasBot) {
+        const watchBtn = document.createElement('button');
+        watchBtn.className = 'action-btn';
+        watchBtn.textContent = 'WATCH BOT';
+        watchBtn.onclick = () => launchGame(entry, 'bot', difficultyValue);
+        btnRow.appendChild(watchBtn);
+      }
+
+      pg.appendChild(btnRow);
+      menuEl.appendChild(pg);
+    }
+
+    // -----------------------------------------------------------------------
+    // SCREEN: Playing / Bot / Replay
+    // -----------------------------------------------------------------------
+    function launchGame(entry, mode = 'play', botDifficulty = 0.5) {
       document.body.className = 'in-game';
       menuEl.style.display = 'none';
       gameContainer.style.display = 'block';
-      document.title = entry.name + ' — Game Lab';
-      history.pushState({ game: entry.id }, '', '/' + entry.id);
+      document.title = entry.name + ' \u2014 Game Lab';
+      if (mode === 'play' || mode === 'bot') {
+        history.pushState({ game: entry.id, mode }, '', '/' + entry.id);
+      }
 
       const oldOverlay = gameContainer.querySelector('.overlay');
       if (oldOverlay) oldOverlay.remove();
@@ -244,53 +517,293 @@
       resizeCanvas();
 
       const gameModule = { createGame: entry.createGame };
+      ensureAudio();
 
-      if (!audioEngine) audioEngine = createAudioEngine();
-      audioEngine.resume();
+      // Mode badge
+      if (mode === 'bot') {
+        modeBadge.textContent = `BOT ${Math.round(botDifficulty * 100)}%`;
+        modeBadge.style.display = 'block';
+      } else if (mode === 'replay') {
+        modeBadge.textContent = 'REPLAY';
+        modeBadge.style.display = 'block';
+      } else {
+        modeBadge.style.display = 'none';
+      }
 
-      currentRunner = createBrowserRunner(gameModule, canvas, {});
+      currentRunner = createBrowserRunner(gameModule, canvas, { mode, botDifficulty });
       currentRunner.setRenderer(createRenderer());
 
-      currentInput = createInputCapture(canvas);
-      currentInput.attach();
-      currentRunner.setInput(currentInput);
+      if (mode === 'play') {
+        currentInput = createInputCapture(canvas);
+        currentInput.attach();
+        currentRunner.setInput(currentInput);
+      }
+
       currentRunner.setAudio(audioEngine);
 
       currentRunner.setOnEnd((score, reason) => {
-        saveSession(currentRunner);
-        showEndOverlay(entry, score, reason);
+        lastSession = currentRunner.getSession();
+        saveSession(lastSession).then(id => { lastSessionId = id; });
+        showEndOverlay(entry, score, reason, mode);
       });
 
       currentRunner.start();
     }
 
-    function showEndOverlay(entry, score, reason) {
+    function launchReplay(entry, session) {
+      document.body.className = 'in-game';
+      menuEl.style.display = 'none';
+      gameContainer.style.display = 'block';
+      document.title = entry.name + ' Replay \u2014 Game Lab';
+
+      const oldOverlay = gameContainer.querySelector('.overlay');
+      if (oldOverlay) oldOverlay.remove();
+
+      resizeCanvas();
+
+      const gameModule = { createGame: entry.createGame };
+      ensureAudio();
+
+      modeBadge.textContent = 'REPLAY';
+      modeBadge.style.display = 'block';
+
+      currentRunner = createReplayRunner(gameModule, canvas, session);
+      currentRunner.setRenderer(createRenderer());
+      currentRunner.setAudio(audioEngine);
+
+      currentRunner.setOnEnd((score, reason) => {
+        showEndOverlay(entry, score, reason, 'replay');
+      });
+
+      currentRunner.start();
+    }
+
+    // -----------------------------------------------------------------------
+    // SCREEN: Game Over / Results
+    // -----------------------------------------------------------------------
+    function showEndOverlay(entry, score, reason, mode) {
       const overlay = document.createElement('div');
       overlay.className = 'overlay';
-      overlay.innerHTML = `
-        <div class="overlay-title">GAME OVER</div>
-        <div class="overlay-score">${score.label || 'Score'}: ${score.primary}${score.unit || ''}</div>
-        <div class="overlay-reason">${reason}</div>
-        <div class="btn-row">
-          <button class="action-btn" id="retry-btn">RETRY</button>
-          <button class="action-btn" id="menu-btn">MENU</button>
-        </div>
-      `;
-      gameContainer.appendChild(overlay);
 
-      overlay.querySelector('#retry-btn').onclick = () => {
-        overlay.remove();
-        currentRunner.restart();
-      };
-      overlay.querySelector('#menu-btn').onclick = () => {
+      const title = mode === 'replay' ? 'REPLAY END' : (mode === 'bot' ? 'BOT FINISHED' : 'GAME OVER');
+
+      let scoreText = `${score.label || 'Score'}: ${score.primary}${score.unit || ''}`;
+      if (score.players) {
+        scoreText = `${score.players[0]} - ${score.players[1]}`;
+      }
+
+      overlay.innerHTML = `
+        <div class="overlay-title">${title}</div>
+        <div class="overlay-score">${scoreText}</div>
+        <div class="overlay-reason">${reason}</div>
+        ${lastSessionId ? `<div class="overlay-id">${lastSessionId}</div>` : ''}
+      `;
+
+      const btnRow = document.createElement('div');
+      btnRow.className = 'btn-row';
+
+      if (mode !== 'replay') {
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'action-btn primary';
+        retryBtn.textContent = 'RETRY';
+        retryBtn.onclick = () => {
+          overlay.remove();
+          currentRunner.restart();
+        };
+        btnRow.appendChild(retryBtn);
+      }
+
+      // Replay button — replay the session that just ended
+      if (lastSession && mode !== 'replay') {
+        const replayBtn = document.createElement('button');
+        replayBtn.className = 'action-btn';
+        replayBtn.textContent = 'REPLAY';
+        replayBtn.onclick = () => {
+          overlay.remove();
+          stopGame();
+          launchReplay(entry, lastSession);
+        };
+        btnRow.appendChild(replayBtn);
+      }
+
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'action-btn';
+      menuBtn.textContent = 'MENU';
+      menuBtn.onclick = () => {
         overlay.remove();
         showMenu();
       };
+      btnRow.appendChild(menuBtn);
+
+      overlay.appendChild(btnRow);
+      gameContainer.appendChild(overlay);
     }
 
+    // -----------------------------------------------------------------------
+    // SCREEN: Sessions List (Replays)
+    // -----------------------------------------------------------------------
+    async function showSessionsList() {
+      document.body.className = 'in-menu';
+      menuEl.style.display = 'flex';
+      gameContainer.style.display = 'none';
+      document.title = 'Replays \u2014 Game Lab';
+
+      menuEl.innerHTML = '';
+
+      const title = document.createElement('div');
+      title.className = 'menu-title';
+      title.style.fontSize = '22px';
+      title.textContent = 'REPLAYS';
+      menuEl.appendChild(title);
+
+      const backLink = document.createElement('button');
+      backLink.className = 'menu-link';
+      backLink.textContent = '\u2190 Back to menu';
+      backLink.style.marginBottom = '12px';
+      backLink.onclick = showMenu;
+      menuEl.appendChild(backLink);
+
+      const loading = document.createElement('div');
+      loading.className = 'pregame-desc';
+      loading.textContent = 'Loading sessions...';
+      menuEl.appendChild(loading);
+
+      try {
+        const resp = await fetch('/api/sessions?limit=50');
+        const sessions = await resp.json();
+        loading.remove();
+
+        if (sessions.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'pregame-desc';
+          empty.textContent = 'No sessions recorded yet. Play a game!';
+          menuEl.appendChild(empty);
+          return;
+        }
+
+        for (const s of sessions) {
+          const item = document.createElement('div');
+          item.className = 'session-item';
+
+          const left = document.createElement('div');
+          const gameEntry = GAMES.find(g => g.id === s.gameId);
+          const gameName = gameEntry ? gameEntry.name : s.gameId;
+
+          left.innerHTML = `
+            <div class="session-game">${gameName}</div>
+            <div class="session-time">${new Date(s.timestamp).toLocaleString()}</div>
+            ${s.botPlay !== undefined ? '<div class="session-bot">BOT</div>' : ''}
+          `;
+
+          const right = document.createElement('div');
+          right.style.textAlign = 'right';
+          right.innerHTML = `
+            <div class="session-score">${s.score?.primary ?? '—'}${s.score?.unit || ''}</div>
+            <div class="session-time">${s.inputCount} inputs</div>
+          `;
+
+          item.appendChild(left);
+          item.appendChild(right);
+
+          item.onclick = async () => {
+            const gameEntry = GAMES.find(g => g.id === s.gameId);
+            if (!gameEntry) return;
+
+            try {
+              const resp = await fetch(`/api/session/${s.id}`);
+              const session = await resp.json();
+              launchReplay(gameEntry, session);
+            } catch (e) {
+              console.error('Failed to load session:', e);
+            }
+          };
+
+          menuEl.appendChild(item);
+        }
+      } catch (e) {
+        loading.textContent = 'Failed to load sessions.';
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // SCREEN: Settings
+    // -----------------------------------------------------------------------
+    function showSettings() {
+      document.body.className = 'in-menu';
+      menuEl.style.display = 'flex';
+      gameContainer.style.display = 'none';
+      document.title = 'Settings \u2014 Game Lab';
+
+      menuEl.innerHTML = '';
+
+      const title = document.createElement('div');
+      title.className = 'menu-title';
+      title.style.fontSize = '22px';
+      title.textContent = 'SETTINGS';
+      menuEl.appendChild(title);
+
+      const backLink = document.createElement('button');
+      backLink.className = 'menu-link';
+      backLink.textContent = '\u2190 Back to menu';
+      backLink.style.marginBottom = '16px';
+      backLink.onclick = showMenu;
+      menuEl.appendChild(backLink);
+
+      // Volume
+      const volRow = document.createElement('div');
+      volRow.className = 'settings-row';
+      const volLabel = document.createElement('span');
+      volLabel.className = 'settings-label';
+      volLabel.textContent = 'Volume';
+      volRow.appendChild(volLabel);
+
+      const volSlider = document.createElement('input');
+      volSlider.type = 'range';
+      volSlider.min = '0';
+      volSlider.max = '100';
+      volSlider.value = String(Math.round(masterVolume * 100));
+      volSlider.style.width = '150px';
+      volSlider.style.accentColor = '#4af';
+
+      const volVal = document.createElement('span');
+      volVal.className = 'slider-val';
+      volVal.textContent = volSlider.value + '%';
+
+      volSlider.oninput = () => {
+        masterVolume = parseInt(volSlider.value) / 100;
+        volVal.textContent = volSlider.value + '%';
+        localStorage.setItem('gl_volume', String(masterVolume));
+        if (audioEngine) audioEngine.setVolume(masterVolume);
+      };
+
+      volRow.appendChild(volSlider);
+      volRow.appendChild(volVal);
+      menuEl.appendChild(volRow);
+
+      // Version info
+      if (buildVersion) {
+        const verRow = document.createElement('div');
+        verRow.className = 'settings-row';
+        verRow.style.marginTop = '24px';
+        const verLabel = document.createElement('span');
+        verLabel.className = 'settings-label';
+        verLabel.textContent = 'Build';
+        verRow.appendChild(verLabel);
+        const verVal = document.createElement('span');
+        verVal.className = 'slider-val';
+        verVal.textContent = buildVersion;
+        verRow.appendChild(verVal);
+        menuEl.appendChild(verRow);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Utilities
+    // -----------------------------------------------------------------------
     function stopGame() {
       if (currentRunner) { currentRunner.stop(); currentRunner = null; }
       if (currentInput) { currentInput.detach(); currentInput = null; }
+      modeBadge.style.display = 'none';
     }
 
     function resizeCanvas() {
@@ -304,10 +817,8 @@
       canvas.style.height = h + 'px';
     }
 
-    // Session recording
-    async function saveSession(runner) {
+    async function saveSession(session) {
       try {
-        const session = runner.getSession();
         const resp = await fetch('/api/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -315,32 +826,49 @@
         });
         const result = await resp.json();
         console.log('Session saved:', result.id);
+        return result.id;
       } catch (e) {
         console.warn('Session save failed:', e.message);
+        return null;
       }
     }
 
+    // -----------------------------------------------------------------------
     // Events
-    backBtn.onclick = showMenu;
+    // -----------------------------------------------------------------------
+    backBtn.onclick = () => {
+      if (currentRunner) {
+        // If playing, save session before going to menu
+        if (currentRunner.mode !== 'replay') {
+          const session = currentRunner.getSession();
+          saveSession(session);
+        }
+      }
+      showMenu();
+    };
+
     window.addEventListener('resize', () => {
       if (gameContainer.style.display !== 'none') resizeCanvas();
     });
+
     window.addEventListener('popstate', () => {
       const path = location.pathname.replace(/^\//, '');
       const game = GAMES.find(g => g.id === path);
-      if (game) launchGame(game);
+      if (game) showPreGame(game);
       else showMenu();
     });
 
     // Unlock audio on first interaction
-    document.addEventListener('touchstart', () => { if (audioEngine) audioEngine.resume(); }, { once: true });
-    document.addEventListener('click', () => { if (audioEngine) audioEngine.resume(); }, { once: true });
+    document.addEventListener('touchstart', () => ensureAudio(), { once: true });
+    document.addEventListener('click', () => ensureAudio(), { once: true });
 
+    // -----------------------------------------------------------------------
     // Route: check URL path on load
+    // -----------------------------------------------------------------------
     const path = location.pathname.replace(/^\//, '');
     const directGame = GAMES.find(g => g.id === path);
     if (directGame) {
-      launchGame(directGame);
+      showPreGame(directGame);
     } else {
       showMenu();
     }

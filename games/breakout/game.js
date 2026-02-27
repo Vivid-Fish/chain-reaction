@@ -109,18 +109,15 @@ export function createGame(config) {
         }
       }
 
-      // Launch ball upward at slight angle
-      const angle = -Math.PI / 2 + (Math.random() * 0.4 - 0.2);
-
       return {
         paddle: { x: 0.5, width: paddleWidth, height: 0.015, y: 0.92 },
         balls: [
           {
             x: 0.5,
             y: 0.88,
-            vx: Math.cos(angle) * ballSpeed,
-            vy: Math.sin(angle) * ballSpeed,
+            vx: 0, vy: 0,
             radius: 0.01,
+            needsLaunch: true,
           },
         ],
         bricks,
@@ -148,6 +145,16 @@ export function createGame(config) {
 
     step(state, input, dt, rng) {
       if (state.lives <= 0) return state;
+
+      // Deferred ball launch — uses rng for deterministic replay
+      for (const ball of state.balls) {
+        if (ball.needsLaunch) {
+          const angle = -Math.PI / 2 + rng.float(-0.2, 0.2);
+          ball.vx = Math.cos(angle) * state.ballSpeed;
+          ball.vy = Math.sin(angle) * state.ballSpeed;
+          ball.needsLaunch = false;
+        }
+      }
 
       // Reset audio flags
       state.lastBrickHit = false;
