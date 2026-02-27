@@ -43,8 +43,8 @@ export function createGame(config) {
 
       // Get tilt from gyro (primary on mobile) or thumb (fallback/desktop)
       state.hasGyro = !!input.gyro;
-      state.gyroRaw = input.gyro ? `${input.gyro.tiltX.toFixed(2)},${input.gyro.tiltY.toFixed(2)}` : 'none';
       state.gyroActive = !!(input.gyro && (input.gyro.tiltX !== 0 || input.gyro.tiltY !== 0));
+      state.calibrated = !!input.calibrated;
       if (state.gyroActive) {
         // Gyro available: use it directly as the tilt source
         state.tiltX = input.gyro.tiltX * 1.5;
@@ -197,11 +197,15 @@ export function createGame(config) {
         color: 'rgba(255,255,255,0.8)',
       });
 
+      // Calibration flash
+      if (state.calibrated) {
+        draw.text('calibrated', 0.5, 0.5, { size: 0.03, color: 'rgba(100,255,150,0.6)' });
+      }
+
       // Tilt hint
       if (state.gyroActive) {
-        draw.text('gyro active', 0.5, 0.94, { size: 0.016, color: 'rgba(100,200,255,0.4)' });
+        draw.text('double-tap to recalibrate', 0.5, 0.94, { size: 0.012, color: 'rgba(100,200,255,0.25)' });
       } else if (state.elapsed < 5 && !state.hasGyro) {
-        // Show hint for first 5 seconds if no gyro detected
         draw.text('drag to tilt the platform', 0.5, 0.93, { size: 0.016, color: 'rgba(255,255,255,0.25)' });
         draw.text('enable motion sensors for gyro', 0.5, 0.96, { size: 0.012, color: 'rgba(255,255,255,0.15)' });
       }

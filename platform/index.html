@@ -540,6 +540,8 @@
       if (mode === 'play') {
         currentInput = createInputCapture(canvas);
         currentInput.attach();
+        // Recalibrate gyro baseline to current phone orientation
+        currentInput.calibrateGyro();
         currentRunner.setInput(currentInput);
       }
 

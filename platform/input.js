@@ -30,16 +30,24 @@ export function createInputCapture(canvas) {
 
   // --- Touch handling ---
   let primaryTouch = null;
+  let lastTapTime = 0;
 
   function onTouchStart(e) {
     e.preventDefault();
+    const now = performance.now();
     for (const t of e.changedTouches) {
       const pos = normalize(t.clientX, t.clientY);
       if (primaryTouch === null) {
+        // Double-tap detection: recalibrate gyro
+        if (gyroSupported && now - lastTapTime < 300) {
+          calibrateGyro();
+        }
+        lastTapTime = now;
+
         primaryTouch = t.identifier;
         thumbStartX = pos.x;
         thumbStartY = pos.y;
-        thumbStartTime = performance.now();
+        thumbStartTime = now;
         thumb = {
           active: true,
           x: pos.x, y: pos.y,
@@ -48,7 +56,7 @@ export function createInputCapture(canvas) {
           duration: 0,
         };
       }
-      taps.push({ x: pos.x, y: pos.y, time: performance.now() });
+      taps.push({ x: pos.x, y: pos.y, time: now });
     }
   }
 
@@ -126,6 +134,7 @@ export function createInputCapture(canvas) {
   let gyroCalibrated = false;
   let gyroEventCount = 0;
   let gyroDiagSent = false;
+  let lastCalibrationTime = 0;
   const gyroDiag = { source: null, errors: [] };
 
   function onDeviceOrientation(e) {
@@ -160,6 +169,7 @@ export function createInputCapture(canvas) {
     gyroCalibrated = false;
     gyroBetaBaseline = null;
     gyroGammaBaseline = null;
+    lastCalibrationTime = performance.now();
   }
 
   // Send gyro diagnostics to server (once per session, after 3s)
@@ -305,6 +315,7 @@ export function createInputCapture(canvas) {
       gyro: gyro ? { ...gyro } : null,
       taps: taps.splice(0),  // drain queue
       keys: { ...keys },
+      calibrated: lastCalibrationTime > 0 && (performance.now() - lastCalibrationTime) < 1500,
     };
     return frame;
   }
