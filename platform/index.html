@@ -198,6 +198,9 @@
     let currentRunner = null;
     let currentInput = null;
     let audioEngine = null;
+    let buildVersion = '';
+
+    fetch('/api/version').then(r => r.json()).then(d => { buildVersion = d.version; }).catch(() => {});
 
     function showMenu() {
       stopGame();
@@ -209,7 +212,7 @@
 
       menuEl.innerHTML = `
         <div class="menu-title">GAME LAB</div>
-        <div class="menu-sub">${GAMES.length} experiments</div>
+        <div class="menu-sub">${GAMES.length} experiments${buildVersion ? ' · v' + buildVersion : ''}</div>
       `;
 
       for (const game of GAMES) {

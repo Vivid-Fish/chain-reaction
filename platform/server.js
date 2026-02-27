@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, readdirSy
 import { join, extname, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, '..');
@@ -16,6 +17,7 @@ const SESSIONS_DIR = join(ROOT, 'data', 'sessions');
 mkdirSync(SESSIONS_DIR, { recursive: true });
 
 const PORT = process.env.PORT || 3000;
+const BUILD_VERSION = process.env.BUILD_VERSION || readBuildVersion();
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -71,6 +73,11 @@ const server = createServer(async (req, res) => {
 
   // --- API routes ---
 
+  // GET /api/version
+  if (req.method === 'GET' && pathname === '/api/version') {
+    return json(res, { version: BUILD_VERSION });
+  }
+
   // POST /api/session — store a game session
   if (req.method === 'POST' && pathname === '/api/session') {
     try {
@@ -86,6 +93,7 @@ const server = createServer(async (req, res) => {
         ticks: body.ticks,
         inputs: body.inputs,
         timestamp: body.timestamp || Date.now(),
+        buildVersion: BUILD_VERSION,
         userAgent: (req.headers['user-agent'] || '').slice(0, 200),
       };
       writeFileSync(join(SESSIONS_DIR, `${id}.json`), JSON.stringify(session));
@@ -170,7 +178,23 @@ const server = createServer(async (req, res) => {
   }
 });
 
+function readBuildVersion() {
+  // 1. Env var (set by Docker build arg or manually)
+  if (process.env.BUILD_VERSION && process.env.BUILD_VERSION !== 'dev') {
+    return process.env.BUILD_VERSION;
+  }
+  // 2. Version file (written at commit time)
+  try {
+    return readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim();
+  } catch {}
+  // 3. Git
+  try {
+    return execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
+  } catch {}
+  return 'dev';
+}
+
 server.listen(PORT, () => {
-  console.log(`Game Lab on http://localhost:${PORT}`);
+  console.log(`Game Lab v${BUILD_VERSION} on http://localhost:${PORT}`);
   console.log(`Sessions: ${SESSIONS_DIR}`);
 });
