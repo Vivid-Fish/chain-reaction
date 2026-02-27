@@ -1,15 +1,10 @@
 // Quick headless test: run dodge game with bot ladder
-import { runHeadless } from './core.js';
-import { botLadder } from './eval/runner.js';
-import { createGame } from '../games/dodge/game.js';
+import { runOne, botLadder, loadGame } from './eval/runner.js';
 
-// Wrap the game module to match the expected interface
-const game = {
-  createGame: (config) => createGame(config),
-};
+const game = await loadGame('dodge');
 
 console.log('=== Single run test ===');
-const result = runHeadless(game, { seed: 42, botDifficulty: 0.5, maxTicks: 10000 });
+const result = runOne(game, { seed: 42, botDifficulty: 0.5, maxTicks: 10000 });
 console.log(`Score: ${result.score.primary}m, Time: ${result.time.toFixed(1)}s, Reason: ${result.endReason}`);
 
 console.log('\n=== Bot ladder ===');
@@ -19,5 +14,7 @@ const ladder = botLadder(game, {
   maxTicks: 10000,
 });
 
-console.log(ladder.summary);
+for (const l of ladder.ladder) {
+  console.log(`d=${l.difficulty.toFixed(2)}: score=${l.scores.mean.toFixed(1)} ± ${l.scores.stddev.toFixed(1)}, time=${l.times.mean.toFixed(1)}s, ended=${l.ended}/${l.runs}`);
+}
 console.log(`\nSkill discrimination: ${ladder.skillDiscrimination.toFixed(2)}x`);
