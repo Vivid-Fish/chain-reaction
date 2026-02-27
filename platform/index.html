@@ -327,7 +327,11 @@
     let lastSessionId = null;
     let masterVolume = parseFloat(localStorage.getItem('gl_volume') || '0.5');
 
-    fetch('/api/version').then(r => r.json()).then(d => { buildVersion = d.version; }).catch(() => {});
+    fetch('/api/version').then(r => r.json()).then(d => {
+      buildVersion = d.version;
+      const sub = document.querySelector('.menu-sub');
+      if (sub) sub.textContent = `${GAMES.length} experiments · v${buildVersion}`;
+    }).catch(() => {});
 
     // -----------------------------------------------------------------------
     // Audio init
