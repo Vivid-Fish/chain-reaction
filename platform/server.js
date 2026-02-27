@@ -151,6 +151,18 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // POST /api/diag — client diagnostics (gyro, errors, etc.)
+  if (req.method === 'POST' && pathname === '/api/diag') {
+    try {
+      const body = await readBody(req);
+      const ts = new Date().toISOString();
+      console.log(`[DIAG ${ts}] ${JSON.stringify(body)}`);
+      return json(res, { ok: true });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
   // --- Static file serving ---
   let filePath = normalize(join(ROOT, pathname));
 

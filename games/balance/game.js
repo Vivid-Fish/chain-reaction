@@ -42,6 +42,8 @@ export function createGame(config) {
       state.difficulty = 1 + state.elapsed * 0.05;
 
       // Get tilt from gyro (primary on mobile) or thumb (fallback/desktop)
+      state.hasGyro = !!input.gyro;
+      state.gyroRaw = input.gyro ? `${input.gyro.tiltX.toFixed(2)},${input.gyro.tiltY.toFixed(2)}` : 'none';
       state.gyroActive = !!(input.gyro && (input.gyro.tiltX !== 0 || input.gyro.tiltY !== 0));
       if (state.gyroActive) {
         // Gyro available: use it directly as the tilt source
@@ -195,12 +197,16 @@ export function createGame(config) {
         color: 'rgba(255,255,255,0.8)',
       });
 
-      // Tilt hint + gyro status
-      const gyroLabel = state.gyroActive ? 'gyro active' : 'touch to tilt';
-      const gyroColor = state.gyroActive ? 'rgba(100,200,255,0.4)' : 'rgba(255,255,255,0.2)';
-      draw.text(gyroLabel, 0.5, 0.94, {
-        size: 0.018,
-        color: gyroColor,
+      // Tilt hint + gyro debug
+      if (state.gyroActive) {
+        draw.text('gyro active', 0.5, 0.93, { size: 0.018, color: 'rgba(100,200,255,0.4)' });
+      } else {
+        draw.text('touch to tilt', 0.5, 0.93, { size: 0.018, color: 'rgba(255,255,255,0.2)' });
+      }
+      // Debug: show raw gyro data
+      draw.text(`gyro: ${state.gyroRaw || 'none'}`, 0.5, 0.97, {
+        size: 0.013,
+        color: 'rgba(255,255,255,0.15)',
       });
 
       if (!state.alive) {

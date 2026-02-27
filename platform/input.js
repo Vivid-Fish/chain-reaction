@@ -125,6 +125,8 @@ export function createInputCapture(canvas) {
   let gyroGammaBaseline = null;
   let gyroCalibrated = false;
   let gyroEventCount = 0;
+  let gyroDiagSent = false;
+  const gyroDiag = { source: null, errors: [] };
 
   function onDeviceOrientation(e) {
     // Some devices fire the event but with all nulls
@@ -160,6 +162,33 @@ export function createInputCapture(canvas) {
     gyroGammaBaseline = null;
   }
 
+  // Send gyro diagnostics to server (once per session, after 3s)
+  function sendGyroDiag() {
+    if (gyroDiagSent) return;
+    gyroDiagSent = true;
+    const diag = {
+      type: 'gyro',
+      supported: gyroSupported,
+      eventCount: gyroEventCount,
+      source: gyroDiag.source,
+      errors: gyroDiag.errors,
+      apis: {
+        DeviceOrientationEvent: !!window.DeviceOrientationEvent,
+        requestPermission: typeof DeviceOrientationEvent?.requestPermission === 'function',
+        AbsoluteOrientationSensor: !!window.AbsoluteOrientationSensor,
+        RelativeOrientationSensor: !!window.RelativeOrientationSensor,
+        Gyroscope: !!window.Gyroscope,
+        DeviceMotionEvent: !!window.DeviceMotionEvent,
+      },
+      ua: navigator.userAgent.slice(0, 200),
+    };
+    fetch('/api/diag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(diag),
+    }).catch(() => {});
+  }
+
   // --- Lifecycle ---
   function attach() {
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -173,37 +202,74 @@ export function createInputCapture(canvas) {
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
 
-    // Try deviceorientation first (works on most devices)
+    // --- Gyro: try multiple approaches ---
+
+    // 1. deviceorientation (standard, works on most devices)
     if (window.DeviceOrientationEvent) {
       if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        // iOS 13+ requires explicit permission from user gesture context
+        // iOS 13+
         DeviceOrientationEvent.requestPermission()
           .then(perm => {
             if (perm === 'granted') {
+              gyroDiag.source = 'deviceorientation-ios';
               window.addEventListener('deviceorientation', onDeviceOrientation);
+            } else {
+              gyroDiag.errors.push('ios-permission-denied:' + perm);
             }
           })
-          .catch(() => {});
+          .catch(e => { gyroDiag.errors.push('ios-permission-error:' + e.message); });
       } else {
+        gyroDiag.source = 'deviceorientation';
         window.addEventListener('deviceorientation', onDeviceOrientation);
       }
+    } else {
+      gyroDiag.errors.push('no-DeviceOrientationEvent');
     }
 
-    // Fallback: Generic Sensor API (some Android devices prefer this)
-    if (!gyroSupported && window.AbsoluteOrientationSensor) {
+    // 2. devicemotion fallback (accelerometer-only devices)
+    if (window.DeviceMotionEvent) {
+      let motionFallbackActive = false;
+      const onDeviceMotion = (e) => {
+        // Only use as fallback if deviceorientation isn't working
+        if (gyroSupported) return;
+        const ag = e.accelerationIncludingGravity;
+        if (!ag || ag.x === null) return;
+        motionFallbackActive = true;
+        // Derive tilt from gravity vector
+        // x: left-right tilt, y: front-back tilt, z: up-down
+        const gamma = Math.atan2(ag.x, ag.z) * (180 / Math.PI);
+        const beta = Math.atan2(ag.y, ag.z) * (180 / Math.PI);
+        onDeviceOrientation({ alpha: 0, beta, gamma });
+        if (!gyroDiag.source || gyroDiag.source === 'deviceorientation') {
+          gyroDiag.source = 'devicemotion-fallback';
+        }
+      };
+      window.addEventListener('devicemotion', onDeviceMotion);
+    }
+
+    // 3. Generic Sensor API fallback (some Android Chrome)
+    if (window.AbsoluteOrientationSensor) {
       try {
         const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
         sensor.addEventListener('reading', () => {
-          // Convert quaternion to Euler angles (simplified)
+          if (gyroSupported && gyroDiag.source !== 'sensor-api') return;
           const [x, y, z, w] = sensor.quaternion;
           const gamma = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)) * (180 / Math.PI);
           const beta = Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x)))) * (180 / Math.PI);
+          gyroDiag.source = 'sensor-api';
           onDeviceOrientation({ alpha: 0, beta, gamma });
         });
-        sensor.addEventListener('error', () => {});
+        sensor.addEventListener('error', (e) => {
+          gyroDiag.errors.push('sensor-error:' + (e.error?.message || 'unknown'));
+        });
         sensor.start();
-      } catch (e) {}
+      } catch (e) {
+        gyroDiag.errors.push('sensor-catch:' + e.message);
+      }
     }
+
+    // Send diagnostics after 3 seconds
+    setTimeout(sendGyroDiag, 3000);
   }
 
   function detach() {
