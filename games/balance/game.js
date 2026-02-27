@@ -197,17 +197,14 @@ export function createGame(config) {
         color: 'rgba(255,255,255,0.8)',
       });
 
-      // Tilt hint + gyro debug
+      // Tilt hint
       if (state.gyroActive) {
-        draw.text('gyro active', 0.5, 0.93, { size: 0.018, color: 'rgba(100,200,255,0.4)' });
-      } else {
-        draw.text('touch to tilt', 0.5, 0.93, { size: 0.018, color: 'rgba(255,255,255,0.2)' });
+        draw.text('gyro active', 0.5, 0.94, { size: 0.016, color: 'rgba(100,200,255,0.4)' });
+      } else if (state.elapsed < 5 && !state.hasGyro) {
+        // Show hint for first 5 seconds if no gyro detected
+        draw.text('drag to tilt the platform', 0.5, 0.93, { size: 0.016, color: 'rgba(255,255,255,0.25)' });
+        draw.text('enable motion sensors for gyro', 0.5, 0.96, { size: 0.012, color: 'rgba(255,255,255,0.15)' });
       }
-      // Debug: show raw gyro data
-      draw.text(`gyro: ${state.gyroRaw || 'none'}`, 0.5, 0.97, {
-        size: 0.013,
-        color: 'rgba(255,255,255,0.15)',
-      });
 
       if (!state.alive) {
         draw.text('FELL OFF', 0.5, 0.4, {

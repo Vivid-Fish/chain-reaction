@@ -180,6 +180,7 @@ export function createInputCapture(canvas) {
         Gyroscope: !!window.Gyroscope,
         DeviceMotionEvent: !!window.DeviceMotionEvent,
       },
+      brave: !!navigator.brave,
       ua: navigator.userAgent.slice(0, 200),
     };
     fetch('/api/diag', {
