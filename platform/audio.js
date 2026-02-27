@@ -15,6 +15,17 @@ export function createAudioEngine(audioCtx) {
   master.gain.value = 0.7;
   master.connect(audioCtx.destination);
 
+  // Voice pool: limit concurrent voices to prevent resource leaks
+  const MAX_VOICES = 16;
+  let activeVoices = 0;
+
+  function voiceStart() {
+    if (activeVoices >= MAX_VOICES) return false;
+    activeVoices++;
+    return true;
+  }
+  function voiceEnd() { activeVoices = Math.max(0, activeVoices - 1); }
+
   function play(events) {
     if (!events || audioCtx.state === 'closed') return;
     const now = audioCtx.currentTime;
@@ -30,20 +41,25 @@ export function createAudioEngine(audioCtx) {
   }
 
   function playTone(now, e) {
+    if (!voiceStart()) return;
+    const dur = e.duration || 0.1;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = e.wave || 'sine';
     osc.frequency.value = e.freq || 440;
     gain.gain.setValueAtTime(e.gain || 0.1, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + (e.duration || 0.1));
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
     osc.connect(gain);
     gain.connect(master);
     osc.start(now);
-    osc.stop(now + (e.duration || 0.1) + 0.01);
+    osc.stop(now + dur + 0.01);
+    osc.onended = voiceEnd;
   }
 
   function playNoise(now, e) {
-    const bufferSize = audioCtx.sampleRate * (e.duration || 0.2);
+    if (!voiceStart()) return;
+    const dur = e.duration || 0.2;
+    const bufferSize = audioCtx.sampleRate * dur;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -54,7 +70,7 @@ export function createAudioEngine(audioCtx) {
 
     const gain = audioCtx.createGain();
     gain.gain.setValueAtTime(e.gain || 0.1, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + (e.duration || 0.2));
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
 
     if (e.filter) {
       const filter = audioCtx.createBiquadFilter();
@@ -67,35 +83,41 @@ export function createAudioEngine(audioCtx) {
     }
     gain.connect(master);
     source.start(now);
+    source.onended = voiceEnd;
   }
 
   function playDrum(now, e) {
-    // Quick pitch-down sine for kick/tom sounds
+    if (!voiceStart()) return;
+    const dur = e.duration || 0.15;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(e.freq || 150, now);
-    osc.frequency.exponentialRampToValueAtTime(30, now + (e.duration || 0.15));
+    osc.frequency.exponentialRampToValueAtTime(30, now + dur);
     gain.gain.setValueAtTime(e.gain || 0.2, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + (e.duration || 0.15));
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
     osc.connect(gain);
     gain.connect(master);
     osc.start(now);
-    osc.stop(now + (e.duration || 0.15) + 0.01);
+    osc.stop(now + dur + 0.01);
+    osc.onended = voiceEnd;
   }
 
   function playSweep(now, e) {
+    if (!voiceStart()) return;
+    const dur = e.duration || 0.2;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = e.wave || 'sawtooth';
     osc.frequency.setValueAtTime(e.freqStart || 200, now);
-    osc.frequency.exponentialRampToValueAtTime(e.freqEnd || 800, now + (e.duration || 0.2));
+    osc.frequency.exponentialRampToValueAtTime(e.freqEnd || 800, now + dur);
     gain.gain.setValueAtTime(e.gain || 0.08, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + (e.duration || 0.2));
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
     osc.connect(gain);
     gain.connect(master);
     osc.start(now);
-    osc.stop(now + (e.duration || 0.2) + 0.01);
+    osc.stop(now + dur + 0.01);
+    osc.onended = voiceEnd;
   }
 
   function resume() {

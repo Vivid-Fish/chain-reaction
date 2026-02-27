@@ -244,13 +244,29 @@ export function createGame(config) {
       const events = [];
       if (prev.alive && !state.alive) {
         events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.4, gain: 0.3 });
+        events.push({ type: 'drum', freq: 60, duration: 0.3, gain: 0.2 });
       }
       if (state.player.jumping && !prev.player.jumping) {
         events.push({ type: 'sweep', freqStart: 300, freqEnd: 600, duration: 0.1, gain: 0.1 });
       }
+      // Landing
+      if (!state.player.jumping && prev.player.jumping) {
+        events.push({ type: 'drum', freq: 100, duration: 0.06, gain: 0.08 });
+      }
+      // Lane change
+      if (state.player.lane !== prev.player.lane) {
+        events.push({ type: 'tone', freq: 500, duration: 0.03, gain: 0.06, wave: 'triangle' });
+      }
       // Coin collect
-      if (state.score > prev.score && state.score % 10 === 0) {
+      if (state.score > prev.score && Math.floor(state.distance * 100) === state.score) {
+        // Coins give +10
+      } else if (state.score > prev.score) {
         events.push({ type: 'tone', freq: 800, duration: 0.05, gain: 0.1 });
+        events.push({ type: 'tone', freq: 1200, duration: 0.03, gain: 0.06 });
+      }
+      // Speed milestones every 1000m
+      if (Math.floor(state.distance * 100 / 1000) > Math.floor(prev.distance * 100 / 1000)) {
+        events.push({ type: 'sweep', freqStart: 500, freqEnd: 1000, duration: 0.15, gain: 0.1 });
       }
       return events;
     },

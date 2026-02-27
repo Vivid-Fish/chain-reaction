@@ -315,6 +315,20 @@ export function createGame(config) {
         events.push({ type: 'tone', freq: pitch * 1.5, duration: 0.05, gain: 0.1 });
       }
 
+      // Turning click
+      if (state.alive && state.snake.length > 0 && prev.snake.length > 0) {
+        const head = state.snake[0];
+        const prevHead = prev.snake[0];
+        const dx = head.x - prevHead.x;
+        const dy = head.y - prevHead.y;
+        const pdx = prevHead.x - (prev.snake[1]?.x || prevHead.x);
+        const pdy = prevHead.y - (prev.snake[1]?.y || prevHead.y);
+        // Detect direction change via cross product
+        if (Math.abs(dx * pdy - dy * pdx) > 0.0001) {
+          events.push({ type: 'tone', freq: 600, duration: 0.02, gain: 0.04, wave: 'triangle' });
+        }
+      }
+
       // Death sound
       if (prev.alive && !state.alive) {
         events.push({ type: 'noise', filter: 'lowpass', freq: 150, duration: 0.6, gain: 0.35 });

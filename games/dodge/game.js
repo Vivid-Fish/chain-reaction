@@ -145,10 +145,24 @@ export function createGame(config) {
       const events = [];
       if (prev.alive && !state.alive) {
         events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.5, gain: 0.3 });
+        events.push({ type: 'drum', freq: 60, duration: 0.3, gain: 0.2 });
       }
-      // Periodic whoosh as speed increases
-      if (Math.floor(state.distance * 10) > Math.floor(prev.distance * 10)) {
-        events.push({ type: 'tone', freq: 300 + state.speed * 100, duration: 0.05, gain: 0.08 });
+      // Near-miss: swoosh when obstacle passes close to player
+      if (state.alive) {
+        for (const obs of state.obstacles) {
+          const dx = Math.abs(state.player.x - obs.x) - obs.width / 2;
+          if (dx < 0.04 && dx > -0.01 && Math.abs(obs.y - state.player.y) < 0.05) {
+            // Check if this obstacle just entered near-miss range
+            const prevObs = prev.obstacles?.find(po => po === obs || (Math.abs(po.x - obs.x) < 0.01 && Math.abs(po.y - obs.y + state.speed * (1/60)) < 0.03));
+            if (!prevObs || Math.abs(state.player.x - prevObs.x) - prevObs.width / 2 >= 0.04) {
+              events.push({ type: 'sweep', freqStart: 800, freqEnd: 200, duration: 0.08, gain: 0.06 });
+            }
+          }
+        }
+      }
+      // Speed milestone every 50m
+      if (Math.floor(state.distance * 2) > Math.floor(prev.distance * 2)) {
+        events.push({ type: 'tone', freq: 400 + state.speed * 80, duration: 0.04, gain: 0.06, wave: 'triangle' });
       }
       return events;
     },

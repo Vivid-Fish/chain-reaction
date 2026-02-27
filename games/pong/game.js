@@ -204,13 +204,22 @@ export function createGame(config) {
 
     audio(prev, state) {
       const events = [];
-      // Paddle hit
+      // Paddle hit — pitch rises with rally length
       if (state.rally > prev.rally) {
         events.push({ type: 'tone', freq: 300 + state.rally * 20, duration: 0.06, gain: 0.12, wave: 'square' });
+      }
+      // Wall bounce (ball.vy changed sign)
+      if (state.ball.vy * prev.ball.vy < 0 && state.rally === prev.rally) {
+        events.push({ type: 'tone', freq: 200, duration: 0.03, gain: 0.06, wave: 'triangle' });
       }
       // Score
       if (state.scores[0] > prev.scores[0] || state.scores[1] > prev.scores[1]) {
         events.push({ type: 'drum', freq: 120, duration: 0.2, gain: 0.2 });
+        events.push({ type: 'sweep', freqStart: 200, freqEnd: 100, duration: 0.3, gain: 0.1 });
+      }
+      // Serve (rally goes from 0 to moving)
+      if (prev.ball.vx === 0 && state.ball.vx !== 0) {
+        events.push({ type: 'tone', freq: 440, duration: 0.05, gain: 0.08 });
       }
       return events;
     },
