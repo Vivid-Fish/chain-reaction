@@ -44,7 +44,6 @@ export function createGame(config) {
       // Get tilt from gyro (primary on mobile) or thumb (fallback/desktop)
       state.hasGyro = !!input.gyro;
       state.gyroActive = !!(input.gyro && (input.gyro.tiltX !== 0 || input.gyro.tiltY !== 0));
-      state.calibrated = !!input.calibrated;
       if (state.gyroActive) {
         // Gyro available: use it directly as the tilt source
         state.tiltX = input.gyro.tiltX * 1.5;
@@ -76,24 +75,13 @@ export function createGame(config) {
       state.ball.x += state.ball.vx * dt;
       state.ball.y += state.ball.vy * dt;
 
-      // Check if ball fell off platform
+      // Check if ball fell off platform (dead when ball edge reaches platform edge)
       const dx = state.ball.x - state.platform.x;
       const dy = state.ball.y - state.platform.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > state.platform.radius - state.ball.radius) {
-        // Edge bounce (keep ball on platform with elastic bounce)
-        if (dist > state.platform.radius) {
-          state.alive = false;
-          return state;
-        }
-        // Push back toward center
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const dot = state.ball.vx * nx + state.ball.vy * ny;
-        if (dot > 0) {
-          state.ball.vx -= 2 * dot * nx * 0.3;
-          state.ball.vy -= 2 * dot * ny * 0.3;
-        }
+        state.alive = false;
+        return state;
       }
 
       // Spawn hazards (pulsing danger zones on the platform)
@@ -170,14 +158,6 @@ export function createGame(config) {
         });
       }
 
-      // Tilt indicator
-      const tiltVizX = state.platform.x + state.tiltX * 0.05;
-      const tiltVizY = state.platform.y + state.tiltY * 0.05;
-      draw.line(state.platform.x, state.platform.y, tiltVizX, tiltVizY, {
-        color: 'rgba(255, 200, 100, 0.3)',
-        width: 2,
-      });
-
       // Ball
       if (state.alive) {
         draw.circle(state.ball.x, state.ball.y, state.ball.radius, {
@@ -197,15 +177,8 @@ export function createGame(config) {
         color: 'rgba(255,255,255,0.8)',
       });
 
-      // Calibration flash
-      if (state.calibrated) {
-        draw.text('calibrated', 0.5, 0.5, { size: 0.03, color: 'rgba(100,255,150,0.6)' });
-      }
-
       // Tilt hint
-      if (state.gyroActive) {
-        draw.text('double-tap to recalibrate', 0.5, 0.94, { size: 0.012, color: 'rgba(100,200,255,0.25)' });
-      } else if (state.elapsed < 5 && !state.hasGyro) {
+      if (!state.gyroActive && state.elapsed < 5 && !state.hasGyro) {
         draw.text('drag to tilt the platform', 0.5, 0.93, { size: 0.016, color: 'rgba(255,255,255,0.25)' });
         draw.text('enable motion sensors for gyro', 0.5, 0.96, { size: 0.012, color: 'rgba(255,255,255,0.15)' });
       }

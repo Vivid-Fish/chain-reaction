@@ -165,6 +165,39 @@
       border-radius: 4px;
     }
     .back-btn:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+    .calibrate-btn {
+      position: absolute;
+      bottom: 12px; right: 12px;
+      z-index: 20;
+      padding: 8px 14px;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(100,200,255,0.25);
+      color: rgba(100,200,255,0.7);
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      border-radius: 4px;
+      letter-spacing: 1px;
+      display: none;
+    }
+    .calibrate-btn:active { background: rgba(100,200,255,0.15); }
+    .pause-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.8);
+      gap: 20px;
+      z-index: 30;
+    }
+    .pause-overlay .pause-msg {
+      font-size: 15px;
+      color: rgba(255,255,255,0.7);
+      text-align: center;
+      line-height: 1.6;
+    }
     .mode-badge {
       position: absolute;
       top: 8px; right: 8px;
@@ -274,6 +307,7 @@
     <div id="game-container">
       <button class="back-btn" id="back-btn">&larr; MENU</button>
       <div class="mode-badge" id="mode-badge" style="display:none"></div>
+      <button class="calibrate-btn" id="calibrate-btn">CALIBRATE</button>
       <canvas id="game-canvas"></canvas>
     </div>
   </div>
@@ -318,6 +352,7 @@
     const canvas = document.getElementById('game-canvas');
     const backBtn = document.getElementById('back-btn');
     const modeBadge = document.getElementById('mode-badge');
+    const calibrateBtn = document.getElementById('calibrate-btn');
 
     let currentRunner = null;
     let currentInput = null;
@@ -537,10 +572,15 @@
       currentRunner = createBrowserRunner(gameModule, canvas, { mode, botDifficulty });
       currentRunner.setRenderer(createRenderer());
 
+      // Show calibrate button for gyro games
+      const tempG = gameModule.createGame({});
+      const isGyroGame = (tempG.meta.inputChannels || []).includes('gyro');
+      calibrateBtn.style.display = (isGyroGame && mode === 'play') ? 'block' : 'none';
+
       if (mode === 'play') {
         currentInput = createInputCapture(canvas);
         currentInput.attach();
-        // Recalibrate gyro baseline to current phone orientation
+        // Calibrate gyro baseline to current phone orientation
         currentInput.calibrateGyro();
         currentRunner.setInput(currentInput);
       }
@@ -548,6 +588,7 @@
       currentRunner.setAudio(audioEngine);
 
       currentRunner.setOnEnd((score, reason) => {
+        calibrateBtn.style.display = 'none';
         lastSession = currentRunner.getSession();
         saveSession(lastSession).then(id => { lastSessionId = id; });
         showEndOverlay(entry, score, reason, mode);
@@ -810,6 +851,10 @@
       if (currentRunner) { currentRunner.stop(); currentRunner = null; }
       if (currentInput) { currentInput.detach(); currentInput = null; }
       modeBadge.style.display = 'none';
+      calibrateBtn.style.display = 'none';
+      // Remove any pause overlay
+      const po = gameContainer.querySelector('.pause-overlay');
+      if (po) po.remove();
     }
 
     function resizeCanvas() {
@@ -844,13 +889,38 @@
     // -----------------------------------------------------------------------
     backBtn.onclick = () => {
       if (currentRunner) {
-        // If playing, save session before going to menu
         if (currentRunner.mode !== 'replay') {
           const session = currentRunner.getSession();
           saveSession(session);
         }
       }
       showMenu();
+    };
+
+    calibrateBtn.onclick = () => {
+      if (!currentRunner || !currentInput) return;
+      // Pause the game
+      currentRunner.stop();
+      calibrateBtn.style.display = 'none';
+
+      // Show pause overlay with instructions
+      const overlay = document.createElement('div');
+      overlay.className = 'pause-overlay';
+      overlay.innerHTML = `
+        <div class="overlay-title">PAUSED</div>
+        <div class="pause-msg">Hold your phone in the position<br>you want to be level</div>
+      `;
+      const resumeBtn = document.createElement('button');
+      resumeBtn.className = 'action-btn primary';
+      resumeBtn.textContent = 'RESUME';
+      resumeBtn.onclick = () => {
+        currentInput.calibrateGyro();
+        overlay.remove();
+        calibrateBtn.style.display = 'block';
+        currentRunner.start();
+      };
+      overlay.appendChild(resumeBtn);
+      gameContainer.appendChild(overlay);
     };
 
     window.addEventListener('resize', () => {
