@@ -183,10 +183,19 @@ function readBuildVersion() {
   if (process.env.BUILD_VERSION && process.env.BUILD_VERSION !== 'dev') {
     return process.env.BUILD_VERSION;
   }
-  // 2. Version file (written at commit time)
-  try {
-    return readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim();
-  } catch {}
+  // 2. Version file (written at commit time) — check multiple locations
+  const candidates = [
+    join(ROOT, 'VERSION'),
+    join(__dirname, '..', 'VERSION'),
+    '/app/VERSION',
+    'VERSION',
+  ];
+  for (const path of candidates) {
+    try {
+      const v = readFileSync(path, 'utf-8').trim();
+      if (v) return v;
+    } catch {}
+  }
   // 3. Git
   try {
     return execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
