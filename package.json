@@ -2,6 +2,7 @@
   "name": "chain-reaction",
   "version": "1.0.0",
   "description": "Chain Reaction game with persistence and replays",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

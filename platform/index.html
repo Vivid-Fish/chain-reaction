@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Game Lab</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #0a0a0f;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #app {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .menu {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 20px;
+      max-width: 420px;
+      width: 100%;
+    }
+    .menu-title {
+      font-size: 28px;
+      font-weight: bold;
+      letter-spacing: 6px;
+      color: #4af;
+      margin-bottom: 4px;
+    }
+    .menu-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 16px;
+    }
+    .game-btn {
+      width: 100%;
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #fff;
+      font-family: inherit;
+      font-size: 15px;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: all 0.12s;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+    }
+    .game-btn:hover, .game-btn:active {
+      background: rgba(68,170,255,0.1);
+      border-color: rgba(68,170,255,0.3);
+    }
+    .game-btn .icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .game-btn .info {
+      flex: 1;
+    }
+    .game-btn .name {
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .game-btn .desc {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 2px;
+    }
+    .game-btn .tags {
+      font-size: 10px;
+      color: rgba(255,255,255,0.25);
+      margin-top: 3px;
+    }
+    #game-container {
+      width: 100%;
+      height: 100%;
+      display: none;
+      position: relative;
+    }
+    #game-canvas {
+      display: block;
+      touch-action: none;
+    }
+    .overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.75);
+      gap: 14px;
+      z-index: 10;
+    }
+    .overlay-title {
+      font-size: 28px;
+      font-weight: bold;
+      letter-spacing: 3px;
+    }
+    .overlay-score {
+      font-size: 18px;
+      color: rgba(255,255,255,0.8);
+    }
+    .overlay-reason {
+      font-size: 13px;
+      color: rgba(255,255,255,0.4);
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .action-btn {
+      padding: 10px 28px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 5px;
+      transition: all 0.12s;
+    }
+    .action-btn:hover {
+      background: rgba(68,170,255,0.15);
+      border-color: rgba(68,170,255,0.3);
+    }
+    .back-btn {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 20;
+      padding: 6px 12px;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.6);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .back-btn:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="menu" class="menu"></div>
+    <div id="game-container">
+      <button class="back-btn" id="back-btn">&larr; MENU</button>
+      <canvas id="game-canvas"></canvas>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createBrowserRunner } from './core.js';
+    import { createInputCapture } from './input.js';
+    import { createRenderer } from './renderer.js';
+    import { createAudioEngine } from './audio.js';
+
+    // Game registry — import all games
+    import { createGame as dodgeCreate } from '../games/dodge/game.js';
+    import { createGame as rhythmCreate } from '../games/rhythm/game.js';
+    import { createGame as territoryCreate } from '../games/territory/game.js';
+    import { createGame as stackCreate } from '../games/stack/game.js';
+    import { createGame as snakeCreate } from '../games/snake/game.js';
+    import { createGame as breakoutCreate } from '../games/breakout/game.js';
+    import { createGame as aimCreate } from '../games/aim/game.js';
+    import { createGame as balanceCreate } from '../games/balance/game.js';
+    import { createGame as pongCreate } from '../games/pong/game.js';
+    import { createGame as runnerCreate } from '../games/runner/game.js';
+    import { createGame as orbitCreate } from '../games/orbit/game.js';
+    import { createGame as meteorCreate } from '../games/meteor/game.js';
+
+    const GAMES = [
+      { name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '◇', createGame: dodgeCreate },
+      { name: 'Rhythm', desc: 'Tap beats to the music', tags: 'taps · timing', color: '#f4a', icon: '♪', createGame: rhythmCreate },
+      { name: 'Territory', desc: 'Capture the board (2P)', tags: 'taps · strategy · pvp', color: '#4fa', icon: '◈', createGame: territoryCreate },
+      { name: 'Stack', desc: 'Time your drops perfectly', tags: 'taps · precision', color: '#fa4', icon: '▢', createGame: stackCreate },
+      { name: 'Snake', desc: 'Eat, grow, survive', tags: 'thumb · classic', color: '#4f4', icon: '~', createGame: snakeCreate },
+      { name: 'Breakout', desc: 'Smash all the bricks', tags: 'thumb · physics', color: '#f84', icon: '▣', createGame: breakoutCreate },
+      { name: 'Aim Trainer', desc: 'Test your reflexes', tags: 'taps · speed', color: '#f44', icon: '◎', createGame: aimCreate },
+      { name: 'Balance', desc: 'Tilt to keep the ball', tags: 'thumb/gyro · physics', color: '#6cf', icon: '○', createGame: balanceCreate },
+      { name: 'Pong', desc: 'Classic paddle battle (2P)', tags: 'thumb · pvp', color: '#ff4', icon: '|', createGame: pongCreate },
+      { name: 'Runner', desc: 'Dodge and jump endlessly', tags: 'thumb+taps · lanes', color: '#a4f', icon: '▸', createGame: runnerCreate },
+      { name: 'Orbit', desc: 'Slingshot through space', tags: 'taps · gravity', color: '#4ff', icon: '◌', createGame: orbitCreate },
+      { name: 'Meteor', desc: 'Asteroids-style shooter', tags: 'thumb · shoot', color: '#fa0', icon: '✦', createGame: meteorCreate },
+    ];
+
+    // DOM elements
+    const menuEl = document.getElementById('menu');
+    const gameContainer = document.getElementById('game-container');
+    const canvas = document.getElementById('game-canvas');
+    const backBtn = document.getElementById('back-btn');
+
+    // State
+    let currentRunner = null;
+    let currentInput = null;
+    let audioEngine = null;
+
+    // Build menu
+    function showMenu() {
+      stopGame();
+      menuEl.style.display = 'flex';
+      gameContainer.style.display = 'none';
+
+      menuEl.innerHTML = `
+        <div class="menu-title">GAME LAB</div>
+        <div class="menu-sub">${GAMES.length} experiments</div>
+      `;
+
+      for (const game of GAMES) {
+        const btn = document.createElement('button');
+        btn.className = 'game-btn';
+        btn.innerHTML = `
+          <div class="icon" style="background:${game.color}22;color:${game.color}">${game.icon}</div>
+          <div class="info">
+            <div class="name">${game.name}</div>
+            <div class="desc">${game.desc}</div>
+            <div class="tags">${game.tags}</div>
+          </div>
+        `;
+        btn.onclick = () => launchGame(game);
+        menuEl.appendChild(btn);
+      }
+    }
+
+    function launchGame(entry) {
+      menuEl.style.display = 'none';
+      gameContainer.style.display = 'block';
+
+      // Remove any overlay
+      const oldOverlay = gameContainer.querySelector('.overlay');
+      if (oldOverlay) oldOverlay.remove();
+
+      // Size canvas
+      resizeCanvas();
+
+      // Wrap as game module
+      const gameModule = { createGame: entry.createGame };
+
+      // Audio
+      if (!audioEngine) audioEngine = createAudioEngine();
+      audioEngine.resume();
+
+      // Runner
+      currentRunner = createBrowserRunner(gameModule, canvas, {});
+      currentRunner.setRenderer(createRenderer());
+
+      currentInput = createInputCapture(canvas);
+      currentInput.attach();
+      currentRunner.setInput(currentInput);
+      currentRunner.setAudio(audioEngine);
+
+      currentRunner.setOnEnd((score, reason) => {
+        showEndOverlay(entry, score, reason);
+      });
+
+      currentRunner.start();
+    }
+
+    function showEndOverlay(entry, score, reason) {
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay';
+      overlay.innerHTML = `
+        <div class="overlay-title">GAME OVER</div>
+        <div class="overlay-score">${score.label || 'Score'}: ${score.primary}${score.unit || ''}</div>
+        <div class="overlay-reason">${reason}</div>
+        <div class="btn-row">
+          <button class="action-btn" id="retry-btn">RETRY</button>
+          <button class="action-btn" id="menu-btn">MENU</button>
+        </div>
+      `;
+      gameContainer.appendChild(overlay);
+
+      overlay.querySelector('#retry-btn').onclick = () => {
+        overlay.remove();
+        currentRunner.restart();
+      };
+      overlay.querySelector('#menu-btn').onclick = () => {
+        overlay.remove();
+        showMenu();
+      };
+    }
+
+    function stopGame() {
+      if (currentRunner) { currentRunner.stop(); currentRunner = null; }
+      if (currentInput) { currentInput.detach(); currentInput = null; }
+    }
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = gameContainer.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+    }
+
+    // Events
+    backBtn.onclick = showMenu;
+    window.addEventListener('resize', () => {
+      if (gameContainer.style.display !== 'none') resizeCanvas();
+    });
+
+    // Unlock audio on first interaction
+    document.addEventListener('touchstart', () => { if (audioEngine) audioEngine.resume(); }, { once: true });
+    document.addEventListener('click', () => { if (audioEngine) audioEngine.resume(); }, { once: true });
+
+    // Start
+    showMenu();
+  </script>
+</body>
+</html>
