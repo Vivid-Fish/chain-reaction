@@ -77,6 +77,11 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
     ? g.bot(botDifficulty, rng.fork('bot'))
     : null;
 
+  // Second bot for 2-player games in spectator mode (bot vs bot)
+  const botFn2 = (mode === 'bot' && g.bot && (g.meta.players || 1) >= 2)
+    ? g.bot(botDifficulty, rng.fork('bot2'))
+    : null;
+
   // These are injected by the shell/platform
   let inputCapture = null;
   let renderer = null;
@@ -98,6 +103,9 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
       if (mode === 'pvp' && botFn && inputCapture) {
         // PvP: player 1 is human, player 2 is bot
         input = [inputCapture.capture(), botFn(state, dt)];
+      } else if (botFn && botFn2) {
+        // Bot spectator for 2-player games: bot vs bot
+        input = [botFn(state, dt), botFn2(state, dt)];
       } else if (botFn) {
         input = botFn(state, dt);
       } else if (inputCapture) {
