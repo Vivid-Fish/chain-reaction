@@ -41,18 +41,25 @@ export function createGame(config) {
       state.elapsed += dt;
       state.difficulty = 1 + state.elapsed * 0.05;
 
-      // Get tilt from thumb (primary) + gyro (additive)
-      if (input.thumb && input.thumb.active) {
+      // Get tilt from gyro (primary on mobile) or thumb (fallback/desktop)
+      state.gyroActive = !!(input.gyro && (input.gyro.tiltX !== 0 || input.gyro.tiltY !== 0));
+      if (state.gyroActive) {
+        // Gyro available: use it directly as the tilt source
+        state.tiltX = input.gyro.tiltX * 1.5;
+        state.tiltY = input.gyro.tiltY * 1.5;
+        // Thumb adds fine adjustment on top
+        if (input.thumb && input.thumb.active) {
+          state.tiltX += (input.thumb.x - 0.5) * 0.5;
+          state.tiltY += (input.thumb.y - 0.5) * 0.5;
+        }
+      } else if (input.thumb && input.thumb.active) {
+        // No gyro: thumb is sole control
         state.tiltX = (input.thumb.x - 0.5) * 2;
         state.tiltY = (input.thumb.y - 0.5) * 2;
       } else {
+        // No input: decay
         state.tiltX *= 0.92;
         state.tiltY *= 0.92;
-      }
-      // Gyro adds on top of thumb (if device supports it)
-      if (input.gyro) {
-        state.tiltX += input.gyro.tiltX * 0.6;
-        state.tiltY += input.gyro.tiltY * 0.6;
       }
 
       // Apply gravity based on tilt (velocity in units/sec)
@@ -188,10 +195,12 @@ export function createGame(config) {
         color: 'rgba(255,255,255,0.8)',
       });
 
-      // Tilt hint
-      draw.text('tilt to balance', 0.5, 0.94, {
+      // Tilt hint + gyro status
+      const gyroLabel = state.gyroActive ? 'gyro active' : 'touch to tilt';
+      const gyroColor = state.gyroActive ? 'rgba(100,200,255,0.4)' : 'rgba(255,255,255,0.2)';
+      draw.text(gyroLabel, 0.5, 0.94, {
         size: 0.018,
-        color: 'rgba(255,255,255,0.2)',
+        color: gyroColor,
       });
 
       if (!state.alive) {

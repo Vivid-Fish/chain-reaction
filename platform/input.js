@@ -124,9 +124,14 @@ export function createInputCapture(canvas) {
   let gyroBetaBaseline = null;
   let gyroGammaBaseline = null;
   let gyroCalibrated = false;
+  let gyroEventCount = 0;
 
   function onDeviceOrientation(e) {
+    // Some devices fire the event but with all nulls
+    if (e.beta === null && e.gamma === null) return;
+
     gyroSupported = true;
+    gyroEventCount++;
     const beta = e.beta || 0;
     const gamma = e.gamma || 0;
 
@@ -168,6 +173,7 @@ export function createInputCapture(canvas) {
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
 
+    // Try deviceorientation first (works on most devices)
     if (window.DeviceOrientationEvent) {
       if (typeof DeviceOrientationEvent.requestPermission === 'function') {
         // iOS 13+ requires explicit permission from user gesture context
@@ -181,6 +187,22 @@ export function createInputCapture(canvas) {
       } else {
         window.addEventListener('deviceorientation', onDeviceOrientation);
       }
+    }
+
+    // Fallback: Generic Sensor API (some Android devices prefer this)
+    if (!gyroSupported && window.AbsoluteOrientationSensor) {
+      try {
+        const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
+        sensor.addEventListener('reading', () => {
+          // Convert quaternion to Euler angles (simplified)
+          const [x, y, z, w] = sensor.quaternion;
+          const gamma = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)) * (180 / Math.PI);
+          const beta = Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x)))) * (180 / Math.PI);
+          onDeviceOrientation({ alpha: 0, beta, gamma });
+        });
+        sensor.addEventListener('error', () => {});
+        sensor.start();
+      } catch (e) {}
     }
   }
 
@@ -220,5 +242,9 @@ export function createInputCapture(canvas) {
     return frame;
   }
 
-  return { attach, detach, capture, requestGyro, calibrateGyro };
+  return {
+    attach, detach, capture, requestGyro, calibrateGyro,
+    get gyroSupported() { return gyroSupported; },
+    get gyroEvents() { return gyroEventCount; },
+  };
 }
