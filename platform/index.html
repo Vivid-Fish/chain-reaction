@@ -176,24 +176,24 @@
   </div>
 
   <script type="module">
-    import { createBrowserRunner } from './core.js';
-    import { createInputCapture } from './input.js';
-    import { createRenderer } from './renderer.js';
-    import { createAudioEngine } from './audio.js';
+    import { createBrowserRunner } from '/platform/core.js';
+    import { createInputCapture } from '/platform/input.js';
+    import { createRenderer } from '/platform/renderer.js';
+    import { createAudioEngine } from '/platform/audio.js';
 
     // Game registry — import all games
-    import { createGame as dodgeCreate } from '../games/dodge/game.js';
-    import { createGame as rhythmCreate } from '../games/rhythm/game.js';
-    import { createGame as territoryCreate } from '../games/territory/game.js';
-    import { createGame as stackCreate } from '../games/stack/game.js';
-    import { createGame as snakeCreate } from '../games/snake/game.js';
-    import { createGame as breakoutCreate } from '../games/breakout/game.js';
-    import { createGame as aimCreate } from '../games/aim/game.js';
-    import { createGame as balanceCreate } from '../games/balance/game.js';
-    import { createGame as pongCreate } from '../games/pong/game.js';
-    import { createGame as runnerCreate } from '../games/runner/game.js';
-    import { createGame as orbitCreate } from '../games/orbit/game.js';
-    import { createGame as meteorCreate } from '../games/meteor/game.js';
+    import { createGame as dodgeCreate } from '/games/dodge/game.js';
+    import { createGame as rhythmCreate } from '/games/rhythm/game.js';
+    import { createGame as territoryCreate } from '/games/territory/game.js';
+    import { createGame as stackCreate } from '/games/stack/game.js';
+    import { createGame as snakeCreate } from '/games/snake/game.js';
+    import { createGame as breakoutCreate } from '/games/breakout/game.js';
+    import { createGame as aimCreate } from '/games/aim/game.js';
+    import { createGame as balanceCreate } from '/games/balance/game.js';
+    import { createGame as pongCreate } from '/games/pong/game.js';
+    import { createGame as runnerCreate } from '/games/runner/game.js';
+    import { createGame as orbitCreate } from '/games/orbit/game.js';
+    import { createGame as meteorCreate } from '/games/meteor/game.js';
 
     const GAMES = [
       { name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '◇', createGame: dodgeCreate },
