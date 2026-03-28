@@ -28,18 +28,33 @@ export function createGame(config) {
       const tierCfg = CONTINUOUS_TIERS[tier];
       const game = new Game(REF_W, REF_H, {}, Math.random);
       game.startContinuous(tierCfg);
+      // Generate ambient stars once
+      const stars = [];
+      for (let i = 0; i < 80; i++) {
+        stars.push({
+          x: Math.random(), y: Math.random(),
+          size: 0.001 + Math.random() * 0.002,
+          bright: Math.random() > 0.7,
+          hue: Math.random() > 0.5 ? 180 + Math.random() * 60 : 220,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
       return {
         game,
         tier,
         tierCfg,
-        // Track events for audio
+        // Track events for audio/effects diffing
         lastChainCount: 0,
         lastScore: 0,
         lastCelebrationIdx: -1,
         pendingEvents: [],
         // Visual state
-        dotRender: new Map(), // dot index -> { trail, alpha, pulsePhase }
+        dotRender: new Map(),
         time: 0,
+        stars,
+        // Atmosphere
+        bgPulse: 0,
+        feverIntensity: 0,
       };
     },
 
@@ -65,8 +80,24 @@ export function createGame(config) {
       // Collect events emitted by game-core
       if (game.events.length > 0) {
         state.pendingEvents.push(...game.events);
+        // Drive atmosphere from events
+        for (const ev of game.events) {
+          if (ev.type === 'dotCaught') {
+            state.bgPulse = Math.min(0.3, state.bgPulse + 0.03);
+            if (game.totalDots > 0) {
+              const pct = ev.chainCount / game.totalDots;
+              if (pct >= 0.45) state.feverIntensity = Math.min(1.0, state.feverIntensity + 0.15);
+              else if (pct >= 0.25) state.feverIntensity = Math.min(0.6, state.feverIntensity + 0.1);
+              else if (pct >= 0.12) state.feverIntensity = Math.min(0.3, state.feverIntensity + 0.05);
+            }
+          }
+        }
         game.events = [];
       }
+
+      // Atmosphere decay
+      if (state.bgPulse > 0.001) state.bgPulse *= 0.93; else state.bgPulse = 0;
+      if (state.feverIntensity > 0.001) state.feverIntensity *= 0.97; else state.feverIntensity = 0;
 
       // Update dot visual state
       state.time += dt;
@@ -91,14 +122,15 @@ export function createGame(config) {
       const { game } = state;
       const DOT_R = 0.012;     // base dot radius in game space
       const GLOW_R = DOT_R * 4; // glow radius
-      const TRAIL_LEN = 8;
+      const bp = state.bgPulse;
 
-      // ── Background: radial gradient + vignette ──
+      // ── Background: radial gradient with pulse + vignette ──
+      const bgBright = Math.floor(bp * 80);
       draw.clear(0.008, 0.008, 0.06);
       draw.circle(0.5, 0.55, 0.7, {
         gradient: [
-          { stop: 0, color: 'rgba(14,14,40,1)' },
-          { stop: 0.5, color: 'rgba(8,8,26,1)' },
+          { stop: 0, color: `rgba(${14 + bgBright},${14 + Math.floor(bgBright * 0.5)},${40 + bgBright},1)` },
+          { stop: 0.5, color: `rgba(${8 + Math.floor(bgBright * 0.5)},${8 + Math.floor(bgBright * 0.3)},${26 + Math.floor(bgBright * 0.6)},1)` },
           { stop: 1, color: 'rgba(4,4,15,1)' },
         ],
       });
@@ -110,6 +142,29 @@ export function createGame(config) {
           { stop: 1, color: 'rgba(0,0,0,0.45)' },
         ],
       });
+
+      // Fever glow — screen-wide hue-shifting glow during big chains
+      if (state.feverIntensity > 0) {
+        const fh = (state.time * 50) % 360;
+        draw.circle(0.5, 0.5, 0.5, {
+          gradient: [
+            { stop: 0, color: `hsla(${fh}, 80%, 50%, 1)` },
+            { stop: 1, color: `hsla(${fh + 30}, 60%, 30%, 0)` },
+          ], blend: 'lighter', alpha: state.feverIntensity * 0.04,
+        });
+      }
+
+      // Ambient stars
+      for (const s of state.stars) {
+        const twinkle = 0.5 + 0.5 * Math.sin(state.time * 1.5 + s.phase);
+        const starAlpha = (s.bright ? 0.5 : 0.2) * twinkle;
+        draw.circle(s.x, s.y, s.size, {
+          gradient: [
+            { stop: 0, color: `hsla(${s.hue}, 40%, 80%, ${starAlpha})` },
+            { stop: 1, color: `hsla(${s.hue}, 30%, 60%, 0)` },
+          ], blend: 'lighter',
+        });
+      }
 
       // ── Connections between nearby dots ──
       const eR = game.explosionRadius / REF_W;

@@ -318,8 +318,8 @@ export function createEffectsEngine() {
     // Particles
     pool.draw(ctx);
 
-    // Floating text
-    const baseSize = Math.max(14, dim() * 0.022);
+    // Floating text — dark outline for readability against bright effects
+    const baseSize = Math.max(16, dim() * 0.028);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const ft of floatingTexts) {
@@ -329,11 +329,18 @@ export function createEffectsEngine() {
         const sz = Math.round(baseSize * 3 * ft.scale * entryScale);
         ctx.save();
         ctx.globalAlpha = a;
+        ctx.font = `900 ${sz}px Inter, system-ui, sans-serif`;
+        // Dark outline for readability
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = Math.max(3, sz * 0.08);
+        ctx.lineJoin = 'round';
+        ctx.strokeText(ft.text, ft.x, ft.y);
+        // Colored fill with glow
         ctx.shadowColor = `hsla(${ft.hue}, 90%, 60%, 0.8)`;
         ctx.shadowBlur = 20;
-        ctx.font = `900 ${sz}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = `hsl(${ft.hue}, 90%, 75%)`;
         ctx.fillText(ft.text, ft.x, ft.y);
+        // Extra glow pass
         ctx.shadowBlur = 40;
         ctx.globalAlpha = a * 0.5;
         ctx.fillText(ft.text, ft.x, ft.y);
@@ -343,9 +350,15 @@ export function createEffectsEngine() {
         const sz = Math.round(baseSize * scale * ft.scale);
         ctx.save();
         ctx.globalAlpha = a;
+        ctx.font = `600 ${sz}px Inter, system-ui, sans-serif`;
+        // Dark outline
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.lineWidth = Math.max(2, sz * 0.07);
+        ctx.lineJoin = 'round';
+        ctx.strokeText(ft.text, ft.x, ft.y);
+        // Colored fill with subtle glow
         ctx.shadowColor = `hsla(${ft.hue}, 80%, 60%, 0.5)`;
         ctx.shadowBlur = 8;
-        ctx.font = `600 ${sz}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = `hsl(${ft.hue}, 80%, 78%)`;
         ctx.fillText(ft.text, ft.x, ft.y);
         ctx.restore();
