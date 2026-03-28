@@ -19,10 +19,11 @@
 // new config keys.
 // =========================================================================
 
-const { CONTINUOUS_TIERS, BOT_PROFILES } = require('./game-core.js');
-const { runContinuous } = require('./continuous-sim.js');
-const { computeQuality, printQuality, compareExperiments, printComparison } = require('./quality.js');
-const fs = require('fs');
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { CONTINUOUS_TIERS, BOT_PROFILES } from './game-core.js';
+import { runContinuous } from './continuous-sim.js';
+import { computeQuality, printQuality, compareExperiments, printComparison } from './quality.js';
 
 // =========================================================================
 // CONFIG
@@ -166,7 +167,7 @@ function printSweepTable(sweepResults, paramName) {
 // CLI
 // =========================================================================
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const args = process.argv.slice(2);
 
     let variantConfig = {};
@@ -228,4 +229,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { runExperiment, runSweep };
+export { runExperiment, runSweep };

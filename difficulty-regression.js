@@ -21,8 +21,9 @@
 //   node difficulty-regression.js --tier FLOW
 // =========================================================================
 
-const { CONTINUOUS_TIERS, BOT_PROFILES } = require('./game-core.js');
-const { runContinuous } = require('./continuous-sim.js');
+import { fileURLToPath } from 'url';
+import { CONTINUOUS_TIERS, BOT_PROFILES } from './game-core.js';
+import { runContinuous } from './continuous-sim.js';
 
 // =========================================================================
 // TEST RUNNER
@@ -143,7 +144,7 @@ function runTierTests(tierName, tier, opts) {
 // CLI
 // =========================================================================
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const args = process.argv.slice(2);
     const fast = args.includes('--fast');
     const tierFilter = args.includes('--tier') ? args[args.indexOf('--tier') + 1] : null;

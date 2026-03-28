@@ -293,7 +293,7 @@ function printComparison(comparison) {
 // EXPORTS
 // =========================================================================
 
-module.exports = {
+export {
     computeQuality,
     compareExperiments,
     printQuality,

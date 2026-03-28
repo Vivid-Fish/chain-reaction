@@ -14,7 +14,9 @@
 //   node continuous-sim.js --tier FLOW             # Run a difficulty tier
 // =========================================================================
 
-const { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, CONTINUOUS_TIERS, createRNG } = require('./game-core.js');
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, CONTINUOUS_TIERS, createRNG } from './game-core.js';
 
 // --- Continuous play defaults (backward-compat re-export) ---
 const CONTINUOUS_DEFAULTS = {
@@ -153,21 +155,18 @@ function runContinuous(opts) {
 // EXPORTS
 // =========================================================================
 
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        ContinuousSimulation,
-        ContinuousBots,
-        CONTINUOUS_DEFAULTS,
-        runContinuous,
-    };
-}
+export {
+    ContinuousSimulation,
+    ContinuousBots,
+    CONTINUOUS_DEFAULTS,
+    runContinuous,
+};
 
 // =========================================================================
 // CLI
 // =========================================================================
 
-if (require.main === module) {
-    const fs = require('fs');
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const args = process.argv.slice(2);
     const opts = {
         bot: 'greedy',

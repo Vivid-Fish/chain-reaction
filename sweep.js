@@ -14,8 +14,9 @@
 //   node sweep.js --mechanics        # Test mechanic variations too
 // =========================================================================
 
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
-const os = require('os');
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+import os from 'os';
+import { fileURLToPath } from 'url';
 
 // =========================================================================
 // WORKER CODE (runs inside each thread)
@@ -328,8 +329,7 @@ if (!isMainThread) {
 
     const result = runMetrics(W, H, config, runs, round);
     parentPort.postMessage(result);
-    return;
-}
+} else {
 
 // =========================================================================
 // MAIN THREAD — Orchestrate parallel workers
@@ -446,7 +446,7 @@ function buildConfigs(mechanics) {
 
 async function runWorker(config, W, H, round, runs) {
     return new Promise((resolve, reject) => {
-        const worker = new Worker(__filename, {
+        const worker = new Worker(fileURLToPath(import.meta.url), {
             workerData: { config: config.config, W, H, round, runs, configLabel: config.label }
         });
         worker.on('message', resolve);
@@ -538,3 +538,4 @@ async function main() {
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
+} // end else (isMainThread)

@@ -16,7 +16,8 @@
 //   node sim.js --compare '{"speedMin":0.6}' '{"speedMin":1.0}'  # A/B test
 // =========================================================================
 
-const { Game, Bots, DEFAULTS, getRoundParams, getMultiplier, createRNG } = require('./game-core.js');
+import { fileURLToPath } from 'url';
+import { Game, Bots, DEFAULTS, getRoundParams, getMultiplier, createRNG } from './game-core.js';
 
 // Backward-compat alias
 const DEFAULT_CONFIG = DEFAULTS;
@@ -501,15 +502,13 @@ function printResult(obj) {
 // EXPORTS (backward-compatible)
 // =========================================================================
 
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { Simulation, DEFAULT_CONFIG, getRoundParams, getMultiplier, Bots, Metrics, createRNG };
-}
+export { Simulation, DEFAULT_CONFIG, getRoundParams, getMultiplier, Bots, Metrics, createRNG };
 
 // =========================================================================
 // MAIN (only when run directly)
 // =========================================================================
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const opts = parseArgs();
     const [W, H] = opts.viewport.split('x').map(Number);
     const config = { ...DEFAULT_CONFIG, ...opts.config };
