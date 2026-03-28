@@ -70,17 +70,22 @@ const pool = {
       if (alpha < 0.01) continue;
       ctx.globalAlpha = alpha;
       const h = this.hue[i];
-      if (s > 3) {
+      const px = this.x[i], py = this.y[i];
+      if (s > 2) {
+        // Radial gradient glow — soft circular particle
         const gr = s * 2;
-        const grd = ctx.createRadialGradient(this.x[i], this.y[i], 0, this.x[i], this.y[i], gr);
+        const grd = ctx.createRadialGradient(px, py, 0, px, py, gr);
         grd.addColorStop(0, `hsla(${h}, 100%, ${70 + a * 20}%, 0.7)`);
         grd.addColorStop(0.5, `hsla(${h}, 90%, ${55 + a * 15}%, 0.15)`);
         grd.addColorStop(1, `hsla(${h}, 80%, 50%, 0)`);
         ctx.fillStyle = grd;
-        ctx.fillRect(this.x[i] - gr, this.y[i] - gr, gr * 2, gr * 2);
+        ctx.fillRect(px - gr, py - gr, gr * 2, gr * 2);
       } else {
+        // Tiny particles — circle, not square
         ctx.fillStyle = `hsl(${h}, 100%, ${60 + a * 25}%)`;
-        ctx.fillRect(this.x[i] - s * 0.5, this.y[i] - s * 0.5, s, s);
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(0.5, s * 0.5), 0, Math.PI * 2);
+        ctx.fill();
       }
     }
     ctx.globalAlpha = 1;
