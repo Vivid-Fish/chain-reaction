@@ -89,23 +89,30 @@ export function createGame(config) {
 
     render(state, draw, alpha) {
       const { game } = state;
+      const DOT_R = 0.012;     // base dot radius in game space
+      const GLOW_R = DOT_R * 4; // glow radius
+      const TRAIL_LEN = 8;
 
-      // Background
-      draw.clear(0.016, 0.016, 0.06);
+      // ── Background: radial gradient + vignette ──
+      draw.clear(0.008, 0.008, 0.06);
+      draw.circle(0.5, 0.55, 0.7, {
+        gradient: [
+          { stop: 0, color: 'rgba(14,14,40,1)' },
+          { stop: 0.5, color: 'rgba(8,8,26,1)' },
+          { stop: 1, color: 'rgba(4,4,15,1)' },
+        ],
+      });
+      // Vignette
+      draw.circle(0.5, 0.5, 0.75, {
+        gradient: [
+          { stop: 0, color: 'rgba(0,0,0,0)' },
+          { stop: 0.6, color: 'rgba(0,0,0,0)' },
+          { stop: 1, color: 'rgba(0,0,0,0.45)' },
+        ],
+      });
 
-      // Vignette effect
-      const ctx = draw.ctx;
-      if (ctx) {
-        const cw = ctx.canvas.width, ch = ctx.canvas.height;
-        const vg = ctx.createRadialGradient(cw/2, ch/2, cw * 0.2, cw/2, ch/2, cw * 0.7);
-        vg.addColorStop(0, 'rgba(0,0,0,0)');
-        vg.addColorStop(1, 'rgba(0,0,0,0.4)');
-        ctx.fillStyle = vg;
-        ctx.fillRect(0, 0, cw, ch);
-      }
-
-      // Draw connections between nearby dots (showing chainable pairs)
-      const eR = game.explosionRadius / REF_W; // normalized explosion radius
+      // ── Connections between nearby dots ──
+      const eR = game.explosionRadius / REF_W;
       for (let i = 0; i < game.dots.length; i++) {
         const a = game.dots[i];
         if (!a.active) continue;
@@ -114,137 +121,199 @@ export function createGame(config) {
           const b = game.dots[j];
           if (!b.active) continue;
           const bx = b.x / REF_W, by = b.y / REF_H;
-          const dist = Math.hypot((ax - bx) * (REF_W / REF_H), ay - by);
+          const dist = Math.hypot(ax - bx, ay - by);
           if (dist < eR * 2.2) {
-            const opacity = Math.max(0, 1 - dist / (eR * 2.2)) * 0.08;
-            draw.line(ax, ay, bx, by, { color: `rgba(100,180,255,${opacity})`, width: 1 });
+            const t = 1 - dist / (eR * 2.2);
+            // Connection line
+            draw.line(ax, ay, bx, by, {
+              color: `rgba(100,180,255,${t * 0.08})`, width: 1,
+            });
+            // Aura glow at midpoint
+            if (t > 0.5) {
+              draw.circle((ax + bx) / 2, (ay + by) / 2, eR * 0.3, {
+                gradient: [
+                  { stop: 0, color: `hsla(200, 60%, 70%, ${t * 0.06})` },
+                  { stop: 1, color: 'hsla(200, 60%, 50%, 0)' },
+                ], blend: 'lighter',
+              });
+            }
           }
         }
       }
 
-      // Draw dot trails
+      // ── Dot trails (additive gradient blobs) ──
       for (let i = 0; i < game.dots.length; i++) {
         const d = game.dots[i];
         const dr = state.dotRender.get(i);
         if (!dr || !d.active) continue;
+        const hue = getDotHue(d);
         for (let t = 0; t < dr.trail.length - 1; t++) {
           const pt = dr.trail[t];
           const tp = (t + 1) / dr.trail.length;
-          const hue = getDotHue(d);
-          draw.circle(pt.x, pt.y, 0.004 * tp, {
-            fill: `hsla(${hue}, 70%, 60%, ${tp * 0.15 * dr.alpha})`,
+          const tr = DOT_R * tp * 0.8;
+          draw.circle(pt.x, pt.y, tr * 2, {
+            gradient: [
+              { stop: 0, color: `hsla(${hue}, 70%, 60%, ${tp * 0.12 * dr.alpha})` },
+              { stop: 1, color: `hsla(${hue}, 70%, 60%, 0)` },
+            ], blend: 'lighter',
           });
         }
       }
 
-      // Draw explosions
+      // ── Explosions ──
       for (const e of game.explosions) {
         if (e.phase === 'done') continue;
         const ex = e.x / REF_W, ey = e.y / REF_H;
         const er = e.radius / REF_W;
-        const maxR = e.maxRadius / REF_W;
 
         let opacity = 1;
         if (e.phase === 'shrink') {
           const t = (e.age - DEFAULTS.EXPLOSION_GROW_MS - e.holdMs) / DEFAULTS.EXPLOSION_SHRINK_MS;
           opacity = Math.max(0, 1 - t * t);
         }
+        const hue = e.generation === 0 ? 200
+          : e.dotType === 'gravity' ? 270
+          : e.dotType === 'volatile' ? 30 : 195;
 
-        // Outer glow
+        // Ambient glow (gen 1+)
         if (e.generation > 0) {
-          const genHue = e.dotType === 'gravity' ? 270 : e.dotType === 'volatile' ? 15 : 200;
-          draw.circle(ex, ey, er * 1.8, {
-            fill: `hsla(${genHue}, 60%, 50%, ${opacity * 0.08})`,
+          draw.circle(ex, ey, er * 2.5, {
+            gradient: [
+              { stop: 0, color: `hsla(${hue}, 60%, 60%, ${opacity * 0.12})` },
+              { stop: 0.4, color: `hsla(${hue}, 50%, 50%, ${opacity * 0.04})` },
+              { stop: 1, color: `hsla(${hue}, 50%, 40%, 0)` },
+            ], blend: 'lighter',
           });
         }
 
-        // Core explosion circle
-        const coreHue = e.generation === 0 ? 200 : (e.dotType === 'gravity' ? 270 : e.dotType === 'volatile' ? 30 : 195);
+        // Flash at birth
+        if (e.phase === 'grow') {
+          const flashT = e.age / DEFAULTS.EXPLOSION_GROW_MS;
+          draw.circle(ex, ey, er * 1.2, {
+            gradient: [
+              { stop: 0, color: `hsla(${hue}, 80%, 95%, ${(1 - flashT) * opacity * 0.4})` },
+              { stop: 1, color: `hsla(${hue}, 80%, 80%, 0)` },
+            ], blend: 'lighter',
+          });
+        }
+
+        // Core gradient
         draw.circle(ex, ey, er, {
-          fill: `hsla(${coreHue}, 70%, 65%, ${opacity * 0.25})`,
-          stroke: `hsla(${coreHue}, 80%, 75%, ${opacity * 0.5})`,
-          strokeWidth: 2,
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 90%, 85%, ${opacity * 0.35})` },
+            { stop: 0.4, color: `hsla(${hue}, 80%, 65%, ${opacity * 0.2})` },
+            { stop: 0.8, color: `hsla(${hue}, 70%, 50%, ${opacity * 0.08})` },
+            { stop: 1, color: `hsla(${hue}, 60%, 40%, 0)` },
+          ],
         });
 
         // Edge ring
-        draw.circle(ex, ey, er * 0.95, {
-          stroke: `hsla(${coreHue}, 90%, 85%, ${opacity * 0.3})`,
-          strokeWidth: 1,
+        draw.circle(ex, ey, er, {
+          stroke: `hsla(${hue}, 90%, 80%, ${opacity * 0.35})`,
+          strokeWidth: 1.5, alpha: opacity,
         });
+
+        // Shockwave ring (expanding outward during grow)
+        if (e.phase === 'grow') {
+          const t = e.age / DEFAULTS.EXPLOSION_GROW_MS;
+          draw.circle(ex, ey, er * (1 + t * 0.5), {
+            stroke: `hsla(${hue}, 70%, 75%, ${(1 - t) * opacity * 0.25})`,
+            strokeWidth: 2 * (1 - t) + 0.5,
+          });
+        }
       }
 
-      // Draw dots
+      // ── Dots ──
       for (let i = 0; i < game.dots.length; i++) {
         const d = game.dots[i];
+
+        // Detonation bloom (inactive dots fading out)
         if (!d.active) {
-          // Bloom flash on detonation
           if (d.bloomTimer > 0) {
             const bt = 1 - d.bloomTimer / 12;
             const dx = d.x / REF_W, dy = d.y / REF_H;
             const hue = getDotHue(d);
-            const br = 0.01 * (1 + bt * 5);
+            const br = DOT_R * (1 + bt * 5);
             draw.circle(dx, dy, br, {
-              fill: `hsla(${hue}, 70%, 95%, ${(1 - bt) * 0.7})`,
-              glow: br * 0.5,
-              glowColor: `hsla(${hue}, 80%, 70%, ${(1 - bt) * 0.4})`,
+              gradient: [
+                { stop: 0, color: `hsla(${hue}, 70%, 95%, ${(1 - bt) * 0.9})` },
+                { stop: 0.3, color: `hsla(${hue}, 80%, 70%, ${(1 - bt) * 0.5})` },
+                { stop: 1, color: `hsla(${hue}, 80%, 60%, 0)` },
+              ], blend: 'lighter',
             });
             d.bloomTimer--;
           }
           continue;
         }
+
         const dr = state.dotRender.get(i);
         const a = dr ? dr.alpha : 1;
         const hue = getDotHue(d);
         const pulse = dr ? Math.sin(dr.pulsePhase) * 0.2 + 0.8 : 1;
         const massMult = d._massMult || 1;
-        const r = 0.012 * pulse * Math.sqrt(massMult);
+        const r = DOT_R * pulse * Math.sqrt(massMult);
         const dx = d.x / REF_W, dy = d.y / REF_H;
 
-        // Outer glow
-        draw.circle(dx, dy, r * 3, {
-          fill: `hsla(${hue}, 85%, 70%, ${a * 0.12})`,
+        // Outer glow (additive, cluster-aware)
+        const neighbors = d._neighbors || 0;
+        const connectBoost = Math.min(1, neighbors * 0.12);
+        const glowA = a * (0.14 + pulse * 0.08 + connectBoost * 0.15);
+        draw.circle(dx, dy, GLOW_R * (1 + connectBoost * 0.3), {
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 85%, 70%, ${glowA})` },
+            { stop: 0.4, color: `hsla(${hue}, 80%, 55%, ${glowA * 0.4})` },
+            { stop: 1, color: `hsla(${hue}, 80%, 50%, 0)` },
+          ], blend: 'lighter',
         });
 
-        // Core dot
+        // Core (radial gradient with offset highlight)
         draw.circle(dx, dy, r, {
-          fill: `hsla(${hue}, 85%, ${65 + pulse * 10}%, ${a})`,
-          glow: r * 0.8,
-          glowColor: `hsla(${hue}, 80%, 60%, ${a * 0.3})`,
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 60%, 95%, ${a})` },
+            { stop: 0.4, color: `hsla(${hue}, 85%, ${65 + pulse * 10}%, ${a})` },
+            { stop: 1, color: `hsla(${hue}, 90%, ${45 + pulse * 10}%, ${a * 0.9})` },
+          ],
+          gradientOffset: { x: -r * 0.15, y: -r * 0.15 },
         });
 
-        // Type indicators
+        // Gravity: inward spiral lines
         if (d.type === 'gravity') {
-          // Spiral lines toward center
           const t = state.time * 2;
           for (let s = 0; s < 3; s++) {
             const angle = t + s * (Math.PI * 2 / 3);
-            const outerR = r * 4;
-            const ox = dx + Math.cos(angle) * outerR;
-            const oy = dy + Math.sin(angle) * outerR;
-            draw.line(ox, oy, dx + Math.cos(angle + 0.3) * r * 1.5, dy + Math.sin(angle + 0.3) * r * 1.5, {
-              color: `hsla(270, 60%, 75%, ${a * 0.2})`, width: 1,
-            });
+            const outerR = GLOW_R * 1.8;
+            const innerR = r * 1.5;
+            const oRad = outerR * (0.6 + 0.4 * Math.sin(t * 1.5 + s));
+            draw.line(
+              dx + Math.cos(angle) * oRad, dy + Math.sin(angle) * oRad,
+              dx + Math.cos(angle + 0.3) * innerR, dy + Math.sin(angle + 0.3) * innerR,
+              { color: `hsla(270, 60%, 75%, ${a * 0.2})`, width: 1, blend: 'lighter' }
+            );
           }
         }
+
+        // Volatile: jittery sparks
         if (d.type === 'volatile') {
-          // Jittery sparks
           const t = state.time * 4;
           for (let s = 0; s < 4; s++) {
             const sa = t + s * (Math.PI / 2) + Math.sin(t * 3 + s) * 0.5;
             const sr = r * (1.5 + 0.8 * Math.sin(t * 5 + s * 2));
-            draw.circle(dx + Math.cos(sa) * sr, dy + Math.sin(sa) * sr, 0.002, {
-              fill: `hsla(15, 100%, 70%, ${a * (0.3 + 0.2 * Math.sin(t * 6 + s))})`,
-            });
+            const sparkA = a * (0.3 + 0.2 * Math.sin(t * 6 + s));
+            draw.rect(
+              dx + Math.cos(sa) * sr, dy + Math.sin(sa) * sr,
+              0.003, 0.003,
+              { fill: `hsla(15, 100%, 70%, ${sparkA})`, blend: 'lighter' }
+            );
           }
         }
       }
 
-      // HUD — Score
+      // ── HUD ──
       draw.text(`${game.score}`, 0.5, 0.04, {
         size: 0.04, align: 'center', color: 'rgba(255,255,255,0.9)', weight: 'bold',
+        shadow: 'rgba(0,0,0,0.5)', shadowBlur: 4,
       });
 
-      // Chain count during resolution
       if (game.gameState === 'resolving' && game.chainCount > 0) {
         const pct = game.totalDots > 0 ? game.chainCount / game.totalDots : 0;
         const chainHue = pct > 0.5 ? 50 : 200;
@@ -253,36 +322,32 @@ export function createGame(config) {
         });
       }
 
-      // Multiplier
       if (game.currentMultiplier > 1) {
         draw.text(`x${game.currentMultiplier}`, 0.5, 0.13, {
           size: 0.03, align: 'center', color: 'hsla(50, 90%, 70%, 0.9)', weight: 'bold',
+          shadow: 'hsla(50, 80%, 50%, 0.4)', shadowBlur: 12,
         });
       }
 
-      // Momentum
       if (game.momentum > 0) {
         draw.text(`MOMENTUM x${game.momentum}`, 0.5, 0.17, {
           size: 0.02, align: 'center', color: 'hsla(30, 90%, 65%, 0.8)',
         });
       }
 
-      // Cooldown indicator
+      // Cooldown bar
       if (game._continuous && !game.canTap()) {
         const elapsed = game.time - game._lastTapTime;
-        const cooldown = game._contCfg.cooldown;
-        const pct = Math.min(1, elapsed / cooldown);
-        // Cooldown bar at bottom
+        const pct = Math.min(1, elapsed / game._contCfg.cooldown);
         draw.rect(0.5, 0.97, pct, 0.006, { fill: 'hsla(200, 80%, 60%, 0.5)', radius: 0.003 });
         draw.rect(0.5, 0.97, 1, 0.006, { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 1, radius: 0.003 });
       }
 
-      // Density meter (left edge)
+      // Density meter
       if (game._continuous) {
         const activeDots = game.dots.filter(d => d.active).length;
         const density = game._contCfg.maxDots > 0 ? activeDots / game._contCfg.maxDots : 0;
-        const barH = 0.6;
-        const barY = 0.2;
+        const barH = 0.6, barY = 0.2;
         const fillH = barH * Math.min(1, density);
         const dangerHue = density > 0.6 ? 0 : density > 0.4 ? 40 : 120;
         draw.rect(0.02, barY + barH / 2, 0.008, barH, { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 1, radius: 0.004 });
@@ -293,7 +358,6 @@ export function createGame(config) {
         }
       }
 
-      // Tier label
       draw.text(state.tier, 0.98, 0.04, {
         size: 0.018, align: 'right', color: 'rgba(255,255,255,0.3)',
       });
@@ -302,6 +366,7 @@ export function createGame(config) {
       if (game.overflowed) {
         draw.text('OVERFLOW', 0.5, 0.35, {
           size: 0.06, align: 'center', color: '#fff', weight: 'bold',
+          shadow: 'rgba(255,255,255,0.6)', shadowBlur: 20,
         });
         draw.text(`Score: ${game.score}`, 0.5, 0.45, {
           size: 0.03, align: 'center', color: 'rgba(255,255,255,0.7)',
@@ -316,7 +381,6 @@ export function createGame(config) {
           });
         }
       }
-
     },
 
     // =====================================================================

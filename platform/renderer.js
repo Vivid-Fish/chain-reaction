@@ -1,6 +1,8 @@
 // platform/renderer.js — Canvas 2D renderer with normalized [0,1] coordinates
 // Games call draw.rect(), draw.circle(), draw.text(), etc.
 // Renderer maps from game space [0,1] to physical pixels.
+// Designed so the backend (Canvas 2D today) can be swapped to WebGL later
+// without changing any game code.
 
 export function createRenderer() {
   let ctx = null;
@@ -29,6 +31,8 @@ export function createRenderer() {
       const rHeight = gy(rh);
 
       ctx.save();
+      if (opts.blend) ctx.globalCompositeOperation = opts.blend;
+      if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
       if (opts.rotation) {
         ctx.translate(gx(cx), gy(cy));
         ctx.rotate(opts.rotation);
@@ -47,49 +51,96 @@ export function createRenderer() {
       ctx.restore();
     },
 
+    // circle with optional radial gradient, blend mode, and glow
+    //
+    // Gradient format: { gradient: [{ stop: 0, color: 'hsla(...)' }, ...] }
+    //   Creates a radial gradient from center (stop 0) to edge (stop 1).
+    //   Use instead of flat `fill` for glows, cores, auras.
+    //
+    // Blend modes: { blend: 'lighter' } for additive glow
+    //   Maps to ctx.globalCompositeOperation. Common: 'lighter' (additive),
+    //   'screen', 'multiply'. Default: 'source-over' (normal).
+    //
+    // Alpha: { alpha: 0.5 } for overall transparency
+    //
     circle(cx, cy, r, opts = {}) {
-      const pixR = px(r);
-      ctx.beginPath();
-      ctx.arc(gx(cx), gy(cy), pixR, 0, Math.PI * 2);
+      const pixX = gx(cx), pixY = gy(cy), pixR = px(r);
+      if (pixR < 0.1) return;
 
-      if (opts.glow && opts.glowColor) {
-        ctx.save();
+      ctx.save();
+      if (opts.blend) ctx.globalCompositeOperation = opts.blend;
+      if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
+
+      if (opts.gradient) {
+        // Radial gradient from center to edge
+        const grad = ctx.createRadialGradient(
+          pixX + px(opts.gradientOffset?.x || 0),
+          pixY + px(opts.gradientOffset?.y || 0),
+          0, pixX, pixY, pixR
+        );
+        for (const stop of opts.gradient) {
+          grad.addColorStop(stop.stop, stop.color);
+        }
+        ctx.fillStyle = grad;
+        ctx.fillRect(pixX - pixR, pixY - pixR, pixR * 2, pixR * 2);
+      } else if (opts.glow && opts.glowColor) {
+        ctx.beginPath();
+        ctx.arc(pixX, pixY, pixR, 0, Math.PI * 2);
         ctx.shadowBlur = px(opts.glow);
         ctx.shadowColor = opts.glowColor;
         if (opts.fill) { ctx.fillStyle = opts.fill; ctx.fill(); }
-        ctx.restore();
       } else if (opts.fill) {
+        ctx.beginPath();
+        ctx.arc(pixX, pixY, pixR, 0, Math.PI * 2);
         ctx.fillStyle = opts.fill;
         ctx.fill();
       }
 
       if (opts.stroke) {
+        ctx.beginPath();
+        ctx.arc(pixX, pixY, pixR, 0, Math.PI * 2);
         ctx.strokeStyle = opts.stroke;
         ctx.lineWidth = opts.strokeWidth || 1;
         ctx.stroke();
       }
+      ctx.restore();
     },
 
     line(x1, y1, x2, y2, opts = {}) {
+      ctx.save();
+      if (opts.blend) ctx.globalCompositeOperation = opts.blend;
+      if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
       ctx.beginPath();
       ctx.moveTo(gx(x1), gy(y1));
       ctx.lineTo(gx(x2), gy(y2));
       ctx.strokeStyle = opts.color || '#fff';
       ctx.lineWidth = opts.width || 1;
       ctx.stroke();
+      ctx.restore();
     },
 
     text(str, cx, cy, opts = {}) {
       const size = px(opts.size || 0.03);
+      ctx.save();
+      if (opts.blend) ctx.globalCompositeOperation = opts.blend;
+      if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
+      if (opts.shadow) {
+        ctx.shadowColor = opts.shadow;
+        ctx.shadowBlur = opts.shadowBlur || 8;
+      }
       ctx.font = `${opts.weight || 'bold'} ${size}px ${opts.font || 'monospace'}`;
       ctx.fillStyle = opts.color || '#fff';
       ctx.textAlign = opts.align || 'center';
       ctx.textBaseline = opts.baseline || 'middle';
       ctx.fillText(str, gx(cx), gy(cy));
+      ctx.restore();
     },
 
     polygon(points, opts = {}) {
       if (points.length < 2) return;
+      ctx.save();
+      if (opts.blend) ctx.globalCompositeOperation = opts.blend;
+      if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
       ctx.beginPath();
       ctx.moveTo(gx(points[0].x), gy(points[0].y));
       for (let i = 1; i < points.length; i++) {
@@ -98,16 +149,22 @@ export function createRenderer() {
       ctx.closePath();
       if (opts.fill) { ctx.fillStyle = opts.fill; ctx.fill(); }
       if (opts.stroke) { ctx.strokeStyle = opts.stroke; ctx.lineWidth = opts.strokeWidth || 1; ctx.stroke(); }
+      ctx.restore();
     },
 
     arc(cx, cy, r, startAngle, endAngle, opts = {}) {
+      ctx.save();
+      if (opts.blend) ctx.globalCompositeOperation = opts.blend;
+      if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
       ctx.beginPath();
       ctx.arc(gx(cx), gy(cy), px(r), startAngle, endAngle);
       if (opts.fill) { ctx.fillStyle = opts.fill; ctx.fill(); }
       if (opts.stroke) { ctx.strokeStyle = opts.stroke; ctx.lineWidth = opts.strokeWidth || 1; ctx.stroke(); }
+      ctx.restore();
     },
 
-    // Raw canvas access for games that need it
+    // Raw canvas access — escape hatch for truly game-specific rendering.
+    // Prefer gradient/blend/alpha options on draw primitives over raw ctx.
     get ctx() { return ctx; },
     get width() { return w; },
     get height() { return h; },
