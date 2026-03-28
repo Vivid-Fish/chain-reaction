@@ -1340,4 +1340,6 @@ class BotRunner {
 // EXPORTS (isomorphic)
 // =====================================================================
 
-export { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, BLAST_DEFAULTS, CONTINUOUS_TIERS, DOT_TYPES, getRoundParams, getMultiplier, createRNG };
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, BLAST_DEFAULTS, CONTINUOUS_TIERS, DOT_TYPES, getRoundParams, getMultiplier, createRNG };
+}

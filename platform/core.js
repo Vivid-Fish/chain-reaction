@@ -3,6 +3,7 @@
 // Games are pure modules: init/step/render/audio/score/status
 
 import { createRNG } from './rng.js';
+import { createEffectsEngine } from './effects.js';
 
 // ---------------------------------------------------------------------------
 // Headless runner — runs a game to completion without rendering
@@ -82,6 +83,9 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
     ? g.bot(botDifficulty, rng.fork('bot2'))
     : null;
 
+  // Effects engine — particles, shake, floating text
+  const effects = createEffectsEngine();
+
   // These are injected by the shell/platform
   let inputCapture = null;
   let renderer = null;
@@ -126,6 +130,15 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
         }
       }
 
+      // Process visual effects (particles, shake, floating text)
+      if (g.effects) {
+        const fxEvents = g.effects(prevState, state);
+        if (fxEvents && fxEvents.length > 0) {
+          effects.process(fxEvents);
+        }
+      }
+      effects.update();
+
       const s = g.status(state);
       if (s !== 'playing') {
         running = false;
@@ -140,6 +153,8 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
       const alpha = accumulator / tickMs;
       renderer.begin(canvas);
       g.render(state, renderer.draw, alpha);
+      // Platform effects layer on top of game rendering
+      effects.render(renderer.draw.ctx);
       renderer.end();
     }
 
@@ -173,6 +188,8 @@ export function createBrowserRunner(game, canvas, { seed, params = {}, mode = 'p
       running = true;
       lastTime = 0;
       accumulator = 0;
+      effects.resize(canvas.width, canvas.height);
+      effects.reset();
       rafId = requestAnimationFrame(tick);
     },
 

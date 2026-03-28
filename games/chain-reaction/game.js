@@ -317,22 +317,86 @@ export function createGame(config) {
         }
       }
 
-      // Celebrations (check thresholds)
-      if (game.totalDots > 0 && game.chainCount > 0) {
-        const pct = game.chainCount / game.totalDots;
-        for (const c of DEFAULTS.CELEBRATIONS) {
-          if (pct >= c.pct && c.pct > (state.lastCelebrationIdx >= 0 ? DEFAULTS.CELEBRATIONS[state.lastCelebrationIdx].pct : -1)) {
-            // Show celebration text briefly (rendered here, tracked by celebration index)
-            state.lastCelebrationIdx = DEFAULTS.CELEBRATIONS.indexOf(c);
-          }
+    },
+
+    // =====================================================================
+    // EFFECTS — declarative visual events for the platform effects engine
+    // Particles, shake, floating text, rings — all handled by platform
+    // =====================================================================
+    effects(prev, state) {
+      const fx = [];
+      const { game } = state;
+
+      // Process game-core events into platform effects
+      for (const ev of state.pendingEvents) {
+        if (ev.type === 'dotCaught') {
+          const hue = ev.dotType === 'gravity' ? 270 : ev.dotType === 'volatile' ? 15 : 195;
+          const gen = Math.min(8, ev.generation || 0);
+          fx.push({
+            type: 'burst',
+            x: ev.x / REF_W, y: ev.y / REF_H,
+            hue,
+            count: 8 + gen * 2,
+            intensity: 1 + gen * 0.2,
+          });
+          fx.push({
+            type: 'float',
+            x: ev.x / REF_W, y: ev.y / REF_H - 0.02,
+            text: `+${ev.points}`, hue,
+          });
+          fx.push({ type: 'shake', trauma: 0.06 + gen * 0.02 });
         }
-        if (state.lastCelebrationIdx >= 0) {
-          const c = DEFAULTS.CELEBRATIONS[state.lastCelebrationIdx];
-          draw.text(c.text, 0.5, 0.3, {
-            size: 0.05 * c.size, align: 'center', color: `hsla(${c.hue}, 90%, 70%, 0.9)`, weight: 'bold',
+        if (ev.type === 'blastForce') {
+          const hue = ev.dotType === 'gravity' ? 270 : ev.dotType === 'volatile' ? 30 : 210;
+          fx.push({
+            type: 'ring',
+            x: ev.x / REF_W, y: ev.y / REF_H,
+            radius: ev.radius / REF_W,
+            hue, duration: 18,
+          });
+        }
+        if (ev.type === 'celebration') {
+          fx.push({
+            type: 'float',
+            x: 0.5, y: 0.35,
+            text: ev.text, hue: ev.hue,
+            celebration: true, scale: ev.scale,
+          });
+        }
+        if (ev.type === 'multiplierUp') {
+          fx.push({
+            type: 'float',
+            x: 0.5, y: 0.25,
+            text: `x${ev.mult}!`, hue: 50,
+          });
+        }
+        if (ev.type === 'chainEnd' && ev.momentum >= 3) {
+          fx.push({
+            type: 'float',
+            x: 0.5, y: 0.20,
+            text: `MOMENTUM x${ev.momentum}`, hue: 50,
           });
         }
       }
+
+      // Check celebration thresholds
+      if (game.totalDots > 0 && game.chainCount > 0) {
+        const pct = game.chainCount / game.totalDots;
+        for (let i = 0; i < DEFAULTS.CELEBRATIONS.length; i++) {
+          const c = DEFAULTS.CELEBRATIONS[i];
+          if (pct >= c.pct && i > state.lastCelebrationIdx) {
+            state.lastCelebrationIdx = i;
+            fx.push({
+              type: 'float',
+              x: 0.5, y: 0.35,
+              text: c.text, hue: c.hue,
+              celebration: true, scale: c.size,
+            });
+          }
+        }
+      }
+
+      return fx;
     },
 
     audio(prev, state) {
