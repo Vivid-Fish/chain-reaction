@@ -340,71 +340,77 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      // Target hit: burst + float score at hit location
+      for (const effect of state.hitEffects) {
+        if (effect.time < 0.02) {
+          const hue = effect.accuracy > 0.7 ? 120 : effect.accuracy > 0.4 ? 60 : 30;
+          fx.push({ type: 'burst', x: effect.x, y: effect.y, hue, count: 8 + Math.floor(effect.accuracy * 12), intensity: 0.3 + effect.accuracy * 0.4 });
+          fx.push({ type: 'float', x: effect.x, y: effect.y, text: `+${effect.points}`, hue, scale: 0.8 + effect.accuracy * 0.4 });
+          fx.push({ type: 'ring', x: effect.x, y: effect.y, radius: effect.radius * 1.5, hue, duration: 0.3 });
+        }
+      }
+      // Target expired (missed): small red burst at expired location
+      if (state.targetsMissed > prev.targetsMissed) {
+        // Find targets that were in prev but not in state (expired)
+        for (const pt of prev.targets) {
+          if (pt.life <= 0 + 1/60 && pt.life > 0) { // about to expire
+            fx.push({ type: 'burst', x: pt.x, y: pt.y, hue: 0, count: 6, intensity: 0.2 });
+          }
+        }
+        fx.push({ type: 'shake', trauma: 0.1 });
+      }
+      // Combo milestone (every 5): celebration burst
+      if (state.combo >= 5 && state.combo > prev.combo && state.combo % 5 === 0) {
+        fx.push({ type: 'float', x: 0.5, y: 0.1, text: `${state.combo}x COMBO!`, hue: Math.min(120, state.combo * 12), celebration: true, scale: 1.2 });
+        fx.push({ type: 'burst', x: 0.5, y: 0.1, hue: Math.min(120, state.combo * 12), count: 20, intensity: 0.6 });
+      }
+      // Combo break
+      if (prev.combo >= 3 && state.combo === 0) {
+        fx.push({ type: 'shake', trauma: 0.15 });
+      }
+      // Death: big flash + shake
+      if (prev.health > 0 && state.health <= 0) {
+        fx.push({ type: 'flash', intensity: 0.5 });
+        fx.push({ type: 'shake', trauma: 0.4 });
+        fx.push({ type: 'burst', x: 0.5, y: 9/32, hue: 0, count: 40, intensity: 1.0, spread: 0.2 });
+      }
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
 
-      // Hit sound — satisfying pop, pitch varies by accuracy
+      // Hit sound: pentatonic note, index rises with combo
       if (state.targetsHit > prev.targetsHit) {
+        const noteIndex = Math.min(state.combo, 19);
         const recentHit = state.hitEffects.find(e => e.time < 0.02);
         const accuracy = recentHit ? recentHit.accuracy : 0.5;
-        // Higher accuracy = higher pitch pop
-        const freq = 400 + accuracy * 600; // 400-1000 Hz range
-        events.push({
-          type: 'tone',
-          freq,
-          duration: 0.08,
-          gain: 0.25,
-          wave: 'sine',
-          env: 'pluck',
-        });
+        events.push({ type: 'note', index: noteIndex, gain: 0.2 + accuracy * 0.1 });
+        events.push({ type: 'tap' });
       }
 
-      // Miss sound — low thud when target expires (health decreased)
+      // Miss sound: target expired
       if (state.targetsMissed > prev.targetsMissed) {
-        events.push({
-          type: 'noise',
-          filter: 'lowpass',
-          filterFreq: 300,
-          duration: 0.15,
-          gain: 0.2,
-        });
+        events.push({ type: 'miss' });
       }
 
-      // Combo chime — ascending tone when combo reaches multiples of 5
+      // Combo chime: chord at multiples of 5
       if (state.combo >= 5 && state.combo > prev.combo && state.combo % 5 === 0) {
-        const comboLevel = Math.min(state.combo / 5, 4);
-        events.push({
-          type: 'sweep',
-          freqStart: 500 + comboLevel * 100,
-          freqEnd: 800 + comboLevel * 150,
-          duration: 0.2,
-          gain: 0.15,
-          wave: 'triangle',
-        });
+        const base = Math.min(state.combo, 15);
+        events.push({ type: 'chord', notes: [base, base + 2, base + 4], delay: 0.05 });
       }
 
-      // Combo break sound
+      // Combo break
       if (prev.combo >= 3 && state.combo === 0) {
-        events.push({
-          type: 'tone',
-          freq: 150,
-          duration: 0.2,
-          gain: 0.15,
-          wave: 'sawtooth',
-          env: 'pluck',
-        });
+        events.push({ type: 'miss' });
+        events.push({ type: 'drum', freq: 80, duration: 0.15, gain: 0.15 });
       }
 
-      // Death sound
+      // Death
       if (prev.health > 0 && state.health <= 0) {
-        events.push({
-          type: 'sweep',
-          freqStart: 600,
-          freqEnd: 80,
-          duration: 0.6,
-          gain: 0.3,
-          wave: 'sawtooth',
-        });
+        events.push({ type: 'gameover' });
       }
 
       return events;

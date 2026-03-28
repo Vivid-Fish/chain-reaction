@@ -240,13 +240,51 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      const laneWidth = 1 / 3;
+      const lanePositions = [laneWidth / 2, 0.5, 1 - laneWidth / 2];
+      // Death: burst + shake + flash at player position
+      if (prev.alive && !state.alive) {
+        fx.push({ type: 'burst', x: state.player.x, y: state.player.y, hue: 200, count: 25, intensity: 0.7, spread: 0.08 });
+        fx.push({ type: 'shake', trauma: 0.45 });
+        fx.push({ type: 'flash', intensity: 0.35 });
+      }
+      // Coin collect: burst + float at coin location
+      const coinCollected = state.score > prev.score && state.score !== Math.floor(state.distance * 100);
+      if (coinCollected) {
+        // Find a recently collected coin
+        for (const coin of prev.coins) {
+          if (!coin.collected && coin.lane === state.player.lane && Math.abs(coin.y - state.player.y) < 0.04) {
+            fx.push({ type: 'burst', x: coin.x, y: coin.y, hue: 50, count: 8, intensity: 0.3 });
+            fx.push({ type: 'float', x: coin.x, y: coin.y, text: '+10', hue: 50 });
+            break;
+          }
+        }
+      }
+      // Jump: small ring at launch point
+      if (state.player.jumping && !prev.player.jumping) {
+        fx.push({ type: 'ring', x: state.player.x, y: state.player.y, radius: 0.03, hue: 200, duration: 0.2 });
+      }
+      // Distance milestone every 1000m
+      const curKm = Math.floor(state.distance * 100 / 1000);
+      const prevKm = Math.floor(prev.distance * 100 / 1000);
+      if (curKm > prevKm) {
+        fx.push({ type: 'float', x: 0.5, y: 0.2, text: `${curKm * 1000}m!`, hue: 120, celebration: true, scale: 1.2 });
+        fx.push({ type: 'burst', x: 0.5, y: 0.2, hue: 120, count: 15, intensity: 0.5 });
+      }
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
+      // Death
       if (prev.alive && !state.alive) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.4, gain: 0.3 });
-        events.push({ type: 'drum', freq: 60, duration: 0.3, gain: 0.2 });
+        events.push({ type: 'gameover' });
       }
+      // Jump
       if (state.player.jumping && !prev.player.jumping) {
+        events.push({ type: 'tap' });
         events.push({ type: 'sweep', freqStart: 300, freqEnd: 600, duration: 0.1, gain: 0.1 });
       }
       // Landing
@@ -255,18 +293,20 @@ export function createGame(config) {
       }
       // Lane change
       if (state.player.lane !== prev.player.lane) {
-        events.push({ type: 'tone', freq: 500, duration: 0.03, gain: 0.06, wave: 'triangle' });
+        events.push({ type: 'tap' });
       }
-      // Coin collect
-      if (state.score > prev.score && Math.floor(state.distance * 100) === state.score) {
-        // Coins give +10
-      } else if (state.score > prev.score) {
-        events.push({ type: 'tone', freq: 800, duration: 0.05, gain: 0.1 });
-        events.push({ type: 'tone', freq: 1200, duration: 0.03, gain: 0.06 });
+      // Coin collect: ascending note based on score
+      const coinCollected = state.score > prev.score && state.score !== Math.floor(state.distance * 100);
+      if (coinCollected) {
+        const noteIdx = Math.min(Math.floor(state.score / 10) % 20, 19);
+        events.push({ type: 'note', index: noteIdx, gain: 0.15 });
       }
-      // Speed milestones every 1000m
-      if (Math.floor(state.distance * 100 / 1000) > Math.floor(prev.distance * 100 / 1000)) {
-        events.push({ type: 'sweep', freqStart: 500, freqEnd: 1000, duration: 0.15, gain: 0.1 });
+      // Speed milestones every 1000m: celebration chord
+      const curKm = Math.floor(state.distance * 100 / 1000);
+      const prevKm = Math.floor(prev.distance * 100 / 1000);
+      if (curKm > prevKm) {
+        const base = Math.min(curKm * 3, 15);
+        events.push({ type: 'chord', notes: [base, base + 2, base + 4], delay: 0.06 });
       }
       return events;
     },

@@ -202,24 +202,90 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      const p0Hue = 210; // blue
+      const p1Hue = 15;  // red/orange
+
+      // Paddle hit: burst at ball position
+      if (state.rally > prev.rally) {
+        const hitterSide = state.ball.vx > 0 ? 0 : 1;
+        fx.push({ type: 'burst', x: state.ball.x, y: state.ball.y, hue: hitterSide === 0 ? p0Hue : p1Hue, count: 8, intensity: 0.4 });
+        // Long rally bursts get bigger
+        if (state.rally > 5) {
+          fx.push({ type: 'shake', trauma: 0.05 + Math.min(state.rally * 0.01, 0.15) });
+        }
+      }
+
+      // Wall bounce: small burst
+      if (state.ball.vy * prev.ball.vy < 0 && state.rally === prev.rally) {
+        fx.push({ type: 'burst', x: state.ball.x, y: state.ball.y, hue: 60, count: 4, intensity: 0.2 });
+      }
+
+      // Score: big burst + shake + flash + float
+      if (state.scores[0] > prev.scores[0]) {
+        fx.push({ type: 'burst', x: 0.0, y: state.ball.y, hue: p0Hue, count: 20, intensity: 0.7, spread: 0.5 });
+        fx.push({ type: 'shake', trauma: 0.3 });
+        fx.push({ type: 'flash', intensity: 0.2 });
+        fx.push({ type: 'float', x: 0.35, y: 0.15, text: `${state.scores[0]}`, hue: p0Hue, scale: 1.5 });
+        fx.push({ type: 'ring', x: 0.0, y: state.ball.y, radius: 0.15, hue: p0Hue });
+      }
+      if (state.scores[1] > prev.scores[1]) {
+        fx.push({ type: 'burst', x: 1.0, y: state.ball.y, hue: p1Hue, count: 20, intensity: 0.7, spread: 0.5 });
+        fx.push({ type: 'shake', trauma: 0.3 });
+        fx.push({ type: 'flash', intensity: 0.2 });
+        fx.push({ type: 'float', x: 0.65, y: 0.15, text: `${state.scores[1]}`, hue: p1Hue, scale: 1.5 });
+        fx.push({ type: 'ring', x: 1.0, y: state.ball.y, radius: 0.15, hue: p1Hue });
+      }
+
+      // Match won: big celebration
+      const done = state.scores[0] >= state.maxScore || state.scores[1] >= state.maxScore;
+      const wasDone = prev.scores[0] >= prev.maxScore || prev.scores[1] >= prev.maxScore;
+      if (done && !wasDone) {
+        const winnerHue = state.scores[0] >= state.maxScore ? p0Hue : p1Hue;
+        fx.push({ type: 'burst', x: 0.5, y: 0.5, hue: winnerHue, count: 40, intensity: 1.0, spread: 1.0 });
+        fx.push({ type: 'flash', intensity: 0.4 });
+        fx.push({ type: 'shake', trauma: 0.5 });
+      }
+
+      // Rally milestone (every 5 hits)
+      if (state.rally > prev.rally && state.rally % 5 === 0 && state.rally > 0) {
+        fx.push({ type: 'float', x: 0.5, y: 0.5, text: `Rally ${state.rally}!`, hue: 50, celebration: true });
+        fx.push({ type: 'ring', x: 0.5, y: 0.5, radius: 0.1, hue: 50 });
+      }
+
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
-      // Paddle hit — pitch rises with rally length
+      // Paddle hit — ascending note with rally
       if (state.rally > prev.rally) {
-        events.push({ type: 'tone', freq: 300 + state.rally * 20, duration: 0.06, gain: 0.12, wave: 'square' });
+        events.push({ type: 'note', index: Math.min(19, state.rally), gain: 0.12 });
       }
-      // Wall bounce (ball.vy changed sign)
+      // Wall bounce
       if (state.ball.vy * prev.ball.vy < 0 && state.rally === prev.rally) {
-        events.push({ type: 'tone', freq: 200, duration: 0.03, gain: 0.06, wave: 'triangle' });
+        events.push({ type: 'tap' });
       }
       // Score
       if (state.scores[0] > prev.scores[0] || state.scores[1] > prev.scores[1]) {
+        events.push({ type: 'miss' });
         events.push({ type: 'drum', freq: 120, duration: 0.2, gain: 0.2 });
-        events.push({ type: 'sweep', freqStart: 200, freqEnd: 100, duration: 0.3, gain: 0.1 });
       }
-      // Serve (rally goes from 0 to moving)
+      // Serve
       if (prev.ball.vx === 0 && state.ball.vx !== 0) {
-        events.push({ type: 'tone', freq: 440, duration: 0.05, gain: 0.08 });
+        events.push({ type: 'tap' });
+      }
+      // Match won
+      const done = state.scores[0] >= state.maxScore || state.scores[1] >= state.maxScore;
+      const wasDone = prev.scores[0] >= prev.maxScore || prev.scores[1] >= prev.maxScore;
+      if (done && !wasDone) {
+        events.push({ type: 'clear' });
+      }
+      // Rally milestone chord every 5 hits
+      if (state.rally > prev.rally && state.rally % 5 === 0 && state.rally > 0) {
+        const base = Math.min(15, state.rally);
+        events.push({ type: 'chord', notes: [base, base + 2, base + 4], gain: 0.1 });
       }
       return events;
     },

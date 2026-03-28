@@ -305,14 +305,41 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      // Eat food: burst + float at food location + ring
+      if (state.score > prev.score && prev.food) {
+        fx.push({ type: 'burst', x: prev.food.x, y: prev.food.y, hue: 0, count: 12, intensity: 0.5 });
+        fx.push({ type: 'float', x: prev.food.x, y: prev.food.y, text: `+1`, hue: 120 });
+        fx.push({ type: 'ring', x: prev.food.x, y: prev.food.y, radius: 0.04, hue: 120, duration: 0.3 });
+        // Every 5 food: celebration
+        if (state.score % 5 === 0) {
+          fx.push({ type: 'float', x: 0.5, y: 0.12, text: `${state.score}!`, hue: 60, celebration: true, scale: 1.3 });
+          fx.push({ type: 'burst', x: 0.5, y: 0.12, hue: 60, count: 16, intensity: 0.5 });
+        }
+      }
+      // Death: burst at head + shake + flash
+      if (prev.alive && !state.alive) {
+        const head = state.snake[0];
+        fx.push({ type: 'burst', x: head.x, y: head.y, hue: 120, count: 30, intensity: 0.8, spread: 0.1 });
+        fx.push({ type: 'shake', trauma: 0.45 });
+        fx.push({ type: 'flash', intensity: 0.35 });
+      }
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
 
-      // Eat sound: pop with rising pitch as score increases
+      // Eat sound: ascending pentatonic note
       if (state.score > prev.score) {
-        const pitch = 400 + state.score * 20;
-        events.push({ type: 'tone', freq: pitch, duration: 0.08, gain: 0.2 });
-        events.push({ type: 'tone', freq: pitch * 1.5, duration: 0.05, gain: 0.1 });
+        const noteIdx = Math.min(state.score % 20, 19);
+        events.push({ type: 'note', index: noteIdx, gain: 0.2 });
+        // Every 5 food: celebration chord
+        if (state.score % 5 === 0) {
+          const base = Math.min(state.score % 15, 14);
+          events.push({ type: 'chord', notes: [base, base + 2, base + 4], delay: 0.05 });
+        }
       }
 
       // Turning click
@@ -323,16 +350,14 @@ export function createGame(config) {
         const dy = head.y - prevHead.y;
         const pdx = prevHead.x - (prev.snake[1]?.x || prevHead.x);
         const pdy = prevHead.y - (prev.snake[1]?.y || prevHead.y);
-        // Detect direction change via cross product
         if (Math.abs(dx * pdy - dy * pdx) > 0.0001) {
-          events.push({ type: 'tone', freq: 600, duration: 0.02, gain: 0.04, wave: 'triangle' });
+          events.push({ type: 'tap' });
         }
       }
 
       // Death sound
       if (prev.alive && !state.alive) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 150, duration: 0.6, gain: 0.35 });
-        events.push({ type: 'tone', freq: 120, duration: 0.3, gain: 0.2 });
+        events.push({ type: 'gameover' });
       }
 
       return events;

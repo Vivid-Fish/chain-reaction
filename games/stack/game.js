@@ -275,48 +275,67 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      const height = state.tower.length;
+
+      if (state.justPlaced) {
+        const top = state.tower[state.tower.length - 1];
+        const hue = ((height - 1) * 17) % 360;
+
+        if (state.wasPerfect) {
+          // Perfect — big burst and ring
+          fx.push({ type: 'burst', x: top.x, y: 0.35, hue: hue, count: 12, intensity: 0.9 });
+          fx.push({ type: 'ring', x: top.x, y: 0.35, radius: 0.15, hue: hue });
+          fx.push({ type: 'float', x: top.x, y: 0.3, text: 'PERFECT', hue: 50, celebration: true, scale: 1.5 });
+          fx.push({ type: 'shake', trauma: 0.1 });
+
+          // Streak milestones
+          if (state.perfectStreak >= 3) {
+            fx.push({ type: 'flash', intensity: 0.2 });
+            fx.push({ type: 'float', x: 0.5, y: 0.25, text: `x${state.perfectStreak}`, hue: 50, celebration: true, scale: 2.0 });
+          }
+        } else {
+          // Normal placement — smaller burst
+          fx.push({ type: 'burst', x: top.x, y: 0.35, hue: hue, count: 5, intensity: 0.4 });
+          fx.push({ type: 'shake', trauma: 0.05 });
+        }
+      }
+
+      // Game over — heavy shake and flash
+      if (prev.alive && !state.alive) {
+        fx.push({ type: 'shake', trauma: 0.5 });
+        fx.push({ type: 'flash', intensity: 0.5 });
+      }
+
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
+      const height = state.tower.length;
 
-      // Block placed — rising click based on height
+      // Block placed (non-perfect) — note rises with height
       if (state.justPlaced && !state.wasPerfect) {
-        const height = state.tower.length;
-        events.push({
-          type: 'tone',
-          freq: 300 + height * 20,
-          duration: 0.08,
-          gain: 0.2,
-        });
+        const noteIndex = Math.min(height, 19);
+        events.push({ type: 'note', index: noteIndex, gain: 0.2 });
+        events.push({ type: 'tap' });
       }
 
-      // Perfect drop — special harmonic chord
+      // Perfect drop — chord that rises with height
       if (state.justPlaced && state.wasPerfect) {
-        const height = state.tower.length;
-        // Base note rises with height
-        events.push({
-          type: 'tone',
-          freq: 400 + height * 25,
-          duration: 0.15,
-          gain: 0.25,
-        });
-        // Harmonic fifth above
-        events.push({
-          type: 'tone',
-          freq: (400 + height * 25) * 1.5,
-          duration: 0.12,
-          gain: 0.15,
-        });
+        const base = Math.min(height, 14);
+        events.push({ type: 'chord', notes: [base, base + 4, base + 7], gain: 0.25 });
+
+        // Big streak milestone
+        if (state.perfectStreak >= 3 && state.perfectStreak % 3 === 0) {
+          events.push({ type: 'chord', notes: [base + 2, base + 5, base + 9, base + 12], delay: 0.08, gain: 0.15 });
+        }
       }
 
-      // Game over — low thud
+      // Game over
       if (prev.alive && !state.alive) {
-        events.push({
-          type: 'noise',
-          filter: 'lowpass',
-          freq: 150,
-          duration: 0.6,
-          gain: 0.35,
-        });
+        events.push({ type: 'gameover' });
       }
 
       return events;

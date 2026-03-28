@@ -255,19 +255,68 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      // Death: burst + shake + flash
+      if (prev.alive && !state.alive) {
+        const sy = state.ship.y - state.cameraY;
+        fx.push({ type: 'burst', x: state.ship.x, y: sy, hue: 200, count: 25, intensity: 0.8 });
+        fx.push({ type: 'shake', trauma: 0.4 });
+        fx.push({ type: 'flash', intensity: 0.3 });
+        fx.push({ type: 'float', x: state.ship.x, y: sy - 0.04, text: 'LOST', hue: 0, scale: 1.3 });
+      }
+      // Orbit grab: ring at ship
+      if (prev.orbiting === null && state.orbiting !== null) {
+        const sy = state.ship.y - state.cameraY;
+        fx.push({ type: 'ring', x: state.ship.x, y: sy, radius: 0.05, hue: 200, duration: 0.3 });
+        fx.push({ type: 'burst', x: state.ship.x, y: sy, hue: 200, count: 6, intensity: 0.3 });
+      }
+      // Orbit release: burst outward
+      if (prev.orbiting !== null && state.orbiting === null && state.alive) {
+        const sy = state.ship.y - state.cameraY;
+        fx.push({ type: 'burst', x: state.ship.x, y: sy, hue: 180, count: 8, intensity: 0.4, spread: 0.3 });
+      }
+      // Star collection: burst + float
+      for (const star of prev.starSpawns || []) {
+        if (star.collected) continue;
+        const curr = state.starSpawns.find(s => s.x === star.x && s.y === star.y);
+        if (curr && curr.collected) {
+          const sy = star.y - state.cameraY;
+          fx.push({ type: 'burst', x: star.x, y: sy, hue: 50, count: 10, intensity: 0.5 });
+          fx.push({ type: 'float', x: star.x, y: sy - 0.03, text: '+100', hue: 50 });
+        }
+      }
+      // Altitude milestones every 500
+      if (Math.floor(state.score / 500) > Math.floor(prev.score / 500)) {
+        const sy = state.ship.y - state.cameraY;
+        fx.push({ type: 'float', x: 0.5, y: 0.1, text: `${state.score}m`, hue: 280, celebration: true, scale: 1.2 });
+        fx.push({ type: 'ring', x: state.ship.x, y: sy, radius: 0.12, hue: 280, duration: 0.5 });
+      }
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
+      // Death
       if (prev.alive && !state.alive) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 150, duration: 0.5, gain: 0.3 });
+        events.push({ type: 'gameover' });
       }
+      // Orbit grab
       if (prev.orbiting === null && state.orbiting !== null) {
-        events.push({ type: 'tone', freq: 500, duration: 0.08, gain: 0.1 });
+        events.push({ type: 'tap' });
       }
-      if (prev.orbiting !== null && state.orbiting === null) {
+      // Orbit release
+      if (prev.orbiting !== null && state.orbiting === null && state.alive) {
         events.push({ type: 'sweep', freqStart: 400, freqEnd: 700, duration: 0.1, gain: 0.08 });
       }
+      // Star collection — ascending note based on score
       if (state.score > prev.score && (state.score - prev.score) >= 100) {
-        events.push({ type: 'tone', freq: 800, duration: 0.05, gain: 0.1, wave: 'triangle' });
+        events.push({ type: 'note', index: Math.min(19, Math.floor(state.score / 100) % 20), gain: 0.1 });
+      }
+      // Altitude milestones every 500
+      if (Math.floor(state.score / 500) > Math.floor(prev.score / 500)) {
+        const level = Math.floor(state.score / 500);
+        events.push({ type: 'chord', notes: [level % 20, (level + 3) % 20, (level + 7) % 20], gain: 0.12 });
       }
       return events;
     },

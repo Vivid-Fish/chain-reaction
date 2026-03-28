@@ -514,47 +514,91 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+
+      // Check new judgments by comparing arrays
+      const newJudgments = state.judgments.filter(j => j.age < 0.02);
+
+      for (const j of newJudgments) {
+        const laneIndex = Math.floor(j.x / LANE_WIDTH);
+        const hue = LANE_HUES[Math.min(laneIndex, LANE_HUES.length - 1)] || 0;
+
+        if (j.type === 'perfect') {
+          // Big burst + ring for perfects
+          fx.push({ type: 'burst', x: j.x, y: j.y, hue: hue, count: 10, intensity: 0.8 });
+          fx.push({ type: 'ring', x: j.x, y: j.y, radius: 0.08, hue: hue });
+          fx.push({ type: 'shake', trauma: 0.05 });
+        } else if (j.type === 'good') {
+          // Smaller burst for goods
+          fx.push({ type: 'burst', x: j.x, y: j.y, hue: hue, count: 5, intensity: 0.4 });
+        } else if (j.type === 'miss') {
+          // Miss — red flash burst
+          fx.push({ type: 'burst', x: j.x, y: j.y, hue: 0, count: 3, intensity: 0.3 });
+          fx.push({ type: 'shake', trauma: 0.1 });
+        }
+      }
+
+      // Score float on score change
+      if (state.score > prev.score) {
+        const gain = state.score - prev.score;
+        // Place it at the most recent judgment position
+        const recent = newJudgments[newJudgments.length - 1];
+        if (recent) {
+          fx.push({ type: 'float', x: recent.x, y: recent.y - 0.05, text: `+${gain}`, hue: 50 });
+        }
+      }
+
+      // Combo milestones
+      if (state.combo > 0 && state.combo !== prev.combo && state.combo % 10 === 0) {
+        fx.push({ type: 'flash', intensity: 0.15 });
+        fx.push({ type: 'ring', x: 0.5, y: STRIKE_Y, radius: 0.3, hue: 50, duration: 0.5 });
+        fx.push({ type: 'float', x: 0.5, y: 0.4, text: `${state.combo}x COMBO`, hue: 50, celebration: true, scale: 1.8 });
+      }
+
+      // Combo break — subtle shake
+      if (prev.combo >= 5 && state.combo === 0) {
+        fx.push({ type: 'shake', trauma: 0.15 });
+      }
+
+      // Death — heavy
+      if (prev.alive && !state.alive) {
+        fx.push({ type: 'shake', trauma: 0.5 });
+        fx.push({ type: 'flash', intensity: 0.5 });
+      }
+
+      // Low health warning flash
+      if (state.alive && state.health <= 20 && state.health > 0 &&
+          Math.floor(state.time * 2) > Math.floor(prev.time * 2)) {
+        fx.push({ type: 'flash', intensity: 0.05 });
+      }
+
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
 
-      // --- Hit sounds: check for new judgments ---
-      // Compare judgment counts to detect new ones
+      // --- Hit sounds via new judgment detection ---
       const prevJudged = prev.perfects + prev.goods + prev.misses;
       const currJudged = state.perfects + state.goods + state.misses;
 
       if (currJudged > prevJudged) {
-        // New perfects
+        // New perfects — note scaled by combo
         if (state.perfects > prev.perfects) {
           const count = state.perfects - prev.perfects;
           for (let i = 0; i < count; i++) {
-            // Bright, satisfying tone — higher pitch for longer combos
-            const comboBoost = Math.min(state.combo * 5, 200);
-            events.push({
-              type: 'tone',
-              freq: 440 + comboBoost,
-              duration: 0.12,
-              gain: 0.18,
-            });
-            // Harmonic shimmer
-            events.push({
-              type: 'tone',
-              freq: (440 + comboBoost) * 1.5,
-              duration: 0.08,
-              gain: 0.06,
-            });
+            const noteIndex = Math.min(5 + Math.floor(state.combo / 4), 19);
+            events.push({ type: 'note', index: noteIndex, gain: 0.18 });
           }
         }
 
-        // New goods
+        // New goods — lower note
         if (state.goods > prev.goods) {
           const count = state.goods - prev.goods;
           for (let i = 0; i < count; i++) {
-            events.push({
-              type: 'tone',
-              freq: 330 + Math.min(state.combo * 3, 100),
-              duration: 0.08,
-              gain: 0.12,
-            });
+            const noteIndex = Math.min(3 + Math.floor(state.combo / 6), 12);
+            events.push({ type: 'note', index: noteIndex, gain: 0.12 });
           }
         }
 
@@ -562,77 +606,27 @@ export function createGame(config) {
         if (state.misses > prev.misses) {
           const count = state.misses - prev.misses;
           for (let i = 0; i < count; i++) {
-            events.push({
-              type: 'noise',
-              filter: 'lowpass',
-              freq: 300,
-              duration: 0.15,
-              gain: 0.12,
-            });
+            events.push({ type: 'miss' });
           }
         }
       }
 
-      // --- Combo milestone sweep ---
-      if (
-        state.combo > 0 &&
-        state.combo !== prev.combo &&
-        state.combo % 25 === 0
-      ) {
-        // Ascending sweep for big combo milestones
-        events.push({
-          type: 'tone',
-          freq: 300,
-          duration: 0.3,
-          gain: 0.15,
-          sweep: 900,
-        });
-      } else if (
-        state.combo > 0 &&
-        state.combo !== prev.combo &&
-        state.combo % 10 === 0
-      ) {
-        // Smaller sweep for every 10 combo
-        events.push({
-          type: 'tone',
-          freq: 400,
-          duration: 0.15,
-          gain: 0.10,
-          sweep: 600,
-        });
+      // --- Combo milestone chords ---
+      if (state.combo > 0 && state.combo !== prev.combo && state.combo % 25 === 0) {
+        events.push({ type: 'chord', notes: [7, 11, 14, 18], delay: 0.04, gain: 0.18 });
+      } else if (state.combo > 0 && state.combo !== prev.combo && state.combo % 10 === 0) {
+        events.push({ type: 'chord', notes: [5, 9, 12], delay: 0.05, gain: 0.12 });
       }
 
-      // --- Death sound ---
+      // --- Death ---
       if (prev.alive && !state.alive) {
-        events.push({
-          type: 'noise',
-          filter: 'lowpass',
-          freq: 150,
-          duration: 0.8,
-          gain: 0.25,
-        });
-        events.push({
-          type: 'tone',
-          freq: 200,
-          duration: 0.4,
-          gain: 0.15,
-          sweep: 80,
-        });
+        events.push({ type: 'gameover' });
       }
 
       // --- Low health warning pulse ---
-      if (
-        state.alive &&
-        state.health <= 20 &&
-        state.health > 0 &&
-        Math.floor(state.time * 4) > Math.floor(prev.time * 4)
-      ) {
-        events.push({
-          type: 'tone',
-          freq: 180,
-          duration: 0.05,
-          gain: 0.06,
-        });
+      if (state.alive && state.health <= 20 && state.health > 0 &&
+          Math.floor(state.time * 4) > Math.floor(prev.time * 4)) {
+        events.push({ type: 'note', index: 0, gain: 0.06 });
       }
 
       return events;

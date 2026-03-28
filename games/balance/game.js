@@ -195,10 +195,41 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+      // Death: burst + shake + flash at ball position
+      if (prev.alive && !state.alive) {
+        fx.push({ type: 'burst', x: state.ball.x, y: state.ball.y, hue: 0, count: 30, intensity: 0.8 });
+        fx.push({ type: 'shake', trauma: 0.4 });
+        fx.push({ type: 'flash', intensity: 0.3 });
+        fx.push({ type: 'float', x: state.ball.x, y: state.ball.y - 0.04, text: 'FELL OFF', hue: 0, scale: 1.5 });
+      }
+      // Score milestones every 50 pts
+      if (Math.floor(state.score / 50) > Math.floor(prev.score / 50)) {
+        const milestone = Math.floor(state.score / 50) * 50;
+        fx.push({ type: 'float', x: 0.5, y: 0.12, text: `+${milestone - Math.floor(prev.score / 50) * 50}`, hue: 200, celebration: true });
+        fx.push({ type: 'ring', x: state.ball.x, y: state.ball.y, radius: 0.08, hue: 200, duration: 0.4 });
+      }
+      // Hazard near-miss: ball close to active hazard but survives
+      if (state.alive) {
+        for (const h of state.hazards) {
+          if (h.life > h.maxLife * 0.3) continue;
+          const hdx = state.ball.x - h.x;
+          const hdy = state.ball.y - h.y;
+          const hdist = Math.sqrt(hdx * hdx + hdy * hdy);
+          if (hdist < state.ball.radius + h.radius * 1.5 && hdist >= state.ball.radius + h.radius * 0.5) {
+            fx.push({ type: 'burst', x: h.x, y: h.y, hue: 0, count: 5, intensity: 0.3 });
+          }
+        }
+      }
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
+      // Death
       if (prev.alive && !state.alive) {
-        events.push({ type: 'drum', freq: 80, duration: 0.4, gain: 0.3 });
+        events.push({ type: 'gameover' });
       }
       // Proximity warning
       if (state.alive) {
@@ -207,12 +238,17 @@ export function createGame(config) {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const danger = dist / state.platform.radius;
         if (danger > 0.7 && Math.floor(state.elapsed * 4) > Math.floor(prev.elapsed * 4)) {
-          events.push({ type: 'tone', freq: 300 + danger * 400, duration: 0.05, gain: 0.05 * danger });
+          events.push({ type: 'note', index: Math.min(19, Math.floor(danger * 15)), gain: 0.05 * danger });
         }
       }
-      // Score milestones
+      // Score milestones every 50
       if (Math.floor(state.score / 50) > Math.floor(prev.score / 50)) {
-        events.push({ type: 'sweep', freqStart: 400, freqEnd: 800, duration: 0.15, gain: 0.1 });
+        const level = Math.floor(state.score / 50);
+        events.push({ type: 'chord', notes: [level % 20, (level + 4) % 20, (level + 7) % 20], gain: 0.12 });
+      }
+      // Score ticks every 10
+      if (Math.floor(state.score / 10) > Math.floor(prev.score / 10)) {
+        events.push({ type: 'note', index: Math.min(19, Math.floor(state.score / 10) % 20), gain: 0.04 });
       }
       return events;
     },

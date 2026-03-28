@@ -33,6 +33,10 @@ export function createGame(config) {
         thrust: 0,
         invincible: 0, // seconds of invincibility after respawn
         elapsed: 0,
+        lastHitPos: null,      // {x, y, hue, size} of last asteroid destroyed
+        lastShipHit: false,    // ship took damage this frame
+        lastScoreGain: 0,      // points gained this frame
+        lastFired: false,      // bullet fired this frame
       };
     },
 
@@ -41,6 +45,12 @@ export function createGame(config) {
 
       state.elapsed += dt;
       if (state.invincible > 0) state.invincible -= dt;
+
+      // Reset per-frame flags
+      state.lastHitPos = null;
+      state.lastShipHit = false;
+      state.lastScoreGain = 0;
+      state.lastFired = false;
 
       // Ship control via thumb direction relative to center
       if (state.alive && input.thumb && input.thumb.active) {
@@ -94,6 +104,7 @@ export function createGame(config) {
             vy: Math.sin(state.ship.angle) * bulletSpeed + state.ship.vy * 0.3,
             life: 1.5,
           });
+          state.lastFired = true;
         }
       }
 
@@ -159,7 +170,10 @@ export function createGame(config) {
           if (dx * dx + dy * dy < a.radius * a.radius) {
             // Hit!
             state.bullets.splice(bi, 1);
-            state.score += (3 - a.size) * 50;
+            const hitScore = (3 - a.size) * 50;
+            state.score += hitScore;
+            state.lastScoreGain += hitScore;
+            state.lastHitPos = { x: a.x, y: a.y, hue: a.hue, size: a.size };
 
             // Spawn particles
             for (let p = 0; p < 4; p++) {
@@ -205,6 +219,7 @@ export function createGame(config) {
           const dy = state.ship.y - a.y;
           if (dx * dx + dy * dy < (state.ship.radius + a.radius) * (state.ship.radius + a.radius)) {
             state.lives--;
+            state.lastShipHit = true;
             if (state.lives <= 0) {
               state.alive = false;
             } else {
@@ -332,28 +347,81 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+
+      // Asteroid destroyed — burst at hit position
+      if (state.lastHitPos) {
+        const p = state.lastHitPos;
+        const count = (3 - p.size) * 4 + 4; // more particles for smaller (harder) asteroids
+        fx.push({ type: 'burst', x: p.x, y: p.y, hue: p.hue, count: count, intensity: 0.7 });
+        fx.push({ type: 'ring', x: p.x, y: p.y, radius: 0.05 + (2 - p.size) * 0.03, hue: p.hue });
+
+        // Score float
+        if (state.lastScoreGain > 0) {
+          fx.push({ type: 'float', x: p.x, y: p.y, text: `+${state.lastScoreGain}`, hue: p.hue });
+        }
+
+        // Shake proportional to asteroid size
+        fx.push({ type: 'shake', trauma: 0.05 + (2 - p.size) * 0.03 });
+      }
+
+      // Ship hit — heavy shake and flash
+      if (state.lastShipHit) {
+        fx.push({ type: 'shake', trauma: 0.4 });
+        fx.push({ type: 'flash', intensity: 0.35 });
+        fx.push({ type: 'burst', x: state.ship.x, y: state.ship.y, hue: 200, count: 15, intensity: 1.0 });
+        fx.push({ type: 'ring', x: state.ship.x, y: state.ship.y, radius: 0.12, hue: 0 });
+      }
+
+      // Death — maximum impact
+      if (prev.alive && !state.alive) {
+        fx.push({ type: 'shake', trauma: 0.5 });
+        fx.push({ type: 'flash', intensity: 0.6 });
+      }
+
+      // New wave — celebration ring
+      if (state.wave > prev.wave) {
+        fx.push({ type: 'ring', x: 0.5, y: 0.5, radius: 0.4, hue: 180, duration: 0.8 });
+        fx.push({ type: 'float', x: 0.5, y: 0.45, text: `WAVE ${state.wave}`, hue: 180, celebration: true, scale: 2.0 });
+        fx.push({ type: 'flash', intensity: 0.15 });
+      }
+
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
-      if (state.score > prev.score) {
-        const gained = state.score - prev.score;
-        if (gained >= 100) {
-          events.push({ type: 'tone', freq: 600, duration: 0.08, gain: 0.12 });
-        } else {
-          events.push({ type: 'tone', freq: 400, duration: 0.04, gain: 0.06 });
-        }
+
+      // Asteroid destroyed — note scales with score gain
+      if (state.lastHitPos) {
+        const size = state.lastHitPos.size;
+        // Small asteroids = higher notes (harder kills)
+        const noteIndex = Math.min((2 - size) * 4 + 5, 16);
+        events.push({ type: 'note', index: noteIndex, gain: 0.12 });
       }
-      if (state.bullets.length > prev.bullets.length) {
-        events.push({ type: 'noise', filter: 'highpass', freq: 3000, duration: 0.04, gain: 0.04 });
+
+      // Bullet fired — tap
+      if (state.lastFired) {
+        events.push({ type: 'tap' });
       }
-      if (prev.alive && !state.alive) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.6, gain: 0.3 });
-      }
-      if (state.lives < prev.lives && state.alive) {
+
+      // Ship hit but survived — miss sound
+      if (state.lastShipHit && state.alive) {
+        events.push({ type: 'miss' });
         events.push({ type: 'drum', freq: 100, duration: 0.3, gain: 0.2 });
       }
-      if (state.wave > prev.wave) {
-        events.push({ type: 'sweep', freqStart: 300, freqEnd: 600, duration: 0.3, gain: 0.1 });
+
+      // Death
+      if (prev.alive && !state.alive) {
+        events.push({ type: 'gameover' });
       }
+
+      // New wave — victory chord
+      if (state.wave > prev.wave) {
+        events.push({ type: 'clear' });
+      }
+
       return events;
     },
 

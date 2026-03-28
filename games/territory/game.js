@@ -401,54 +401,84 @@ export function createGame(config) {
       }
     },
 
-    audio(prev, state) {
-      const events = [];
+    effects(prev, state) {
+      const fx = [];
+      const p0Hue = 210; // blue
+      const p1Hue = 0;   // red
 
-      // Piece placement tone
-      if (state.moveCount > prev.moveCount) {
-        const player = state.lastMove ? state.lastMove.player : 0;
-        const freq = player === 0 ? 440 : 330; // blue higher, red lower
-        events.push({
-          type: 'tone',
-          freq,
-          duration: 0.1,
-          gain: 0.2,
-          wave: 'sine',
-        });
+      const padding = 0.06;
+      const gridArea = 1 - 2 * padding;
+      const cellSize = gridArea / state.size;
 
-        // Capture sweep — pitch rises with number of captures
-        const numCaptures = state.lastCaptures ? state.lastCaptures.length : 0;
+      // Piece placement: burst at placed cell
+      if (state.moveCount > prev.moveCount && state.lastMove) {
+        const { row, col, player, captures } = state.lastMove;
+        const cx = padding + (col + 0.5) * cellSize;
+        const cy = padding + (row + 0.5) * cellSize;
+        const hue = player === 0 ? p0Hue : p1Hue;
+
+        fx.push({ type: 'burst', x: cx, y: cy, hue, count: 8, intensity: 0.4 });
+
+        // Captures: burst on each flipped cell + shake proportional to captures
+        const numCaptures = captures ? captures.length : 0;
         if (numCaptures > 0) {
-          events.push({
-            type: 'sweep',
-            freqStart: 300,
-            freqEnd: 300 + numCaptures * 80,
-            duration: 0.15 + numCaptures * 0.03,
-            gain: 0.15,
-            wave: 'triangle',
-          });
+          for (const [cr, cc] of captures) {
+            const capX = padding + (cc + 0.5) * cellSize;
+            const capY = padding + (cr + 0.5) * cellSize;
+            fx.push({ type: 'burst', x: capX, y: capY, hue, count: 4, intensity: 0.3 });
+          }
+          fx.push({ type: 'shake', trauma: Math.min(0.1 + numCaptures * 0.05, 0.4) });
+          fx.push({ type: 'float', x: cx, y: cy - 0.04, text: `+${numCaptures}`, hue });
+        }
+
+        // Big capture (4+): ring effect
+        if (numCaptures >= 4) {
+          fx.push({ type: 'ring', x: cx, y: cy, radius: 0.1, hue, duration: 0.4 });
         }
       }
 
-      // Game end drum
+      // Game end
       if (state.ended && !prev.ended) {
-        events.push({
-          type: 'drum',
-          freq: 60,
-          noiseGain: 0.4,
-          toneGain: 0.6,
-          duration: 0.3,
-        });
-        // Victory chord
+        fx.push({ type: 'flash', intensity: 0.3 });
+        fx.push({ type: 'shake', trauma: 0.3 });
         if (state.winner !== null) {
-          const baseFreq = state.winner === 0 ? 261 : 220;
-          events.push({
-            type: 'chord',
-            freqs: [baseFreq, baseFreq * 1.25, baseFreq * 1.5],
-            duration: 0.6,
-            gain: 0.2,
-            wave: 'triangle',
-          });
+          const winHue = state.winner === 0 ? p0Hue : p1Hue;
+          fx.push({ type: 'burst', x: 0.5, y: 0.5, hue: winHue, count: 35, intensity: 1.0, spread: 0.8 });
+          fx.push({ type: 'float', x: 0.5, y: 0.35, text: state.winner === 0 ? 'BLUE WINS' : 'RED WINS', hue: winHue, celebration: true, scale: 1.5 });
+        } else {
+          fx.push({ type: 'float', x: 0.5, y: 0.35, text: 'DRAW', hue: 60, scale: 1.5 });
+        }
+      }
+
+      return fx;
+    },
+
+    audio(prev, state) {
+      const events = [];
+
+      // Piece placement — note based on move count
+      if (state.moveCount > prev.moveCount) {
+        events.push({ type: 'tap' });
+        events.push({ type: 'note', index: Math.min(19, state.moveCount % 20), gain: 0.15 });
+
+        // Capture sweep — ascending notes for captures
+        const numCaptures = state.lastCaptures ? state.lastCaptures.length : 0;
+        if (numCaptures > 0) {
+          events.push({ type: 'note', index: Math.min(19, numCaptures + 5), generation: 1, gain: 0.12 });
+        }
+        // Big capture chord (4+)
+        if (numCaptures >= 4) {
+          const base = Math.min(14, numCaptures);
+          events.push({ type: 'chord', notes: [base, base + 2, base + 5], delay: 0.05, gain: 0.1 });
+        }
+      }
+
+      // Game end
+      if (state.ended && !prev.ended) {
+        if (state.winner !== null) {
+          events.push({ type: 'clear' });
+        } else {
+          events.push({ type: 'gameover' });
         }
       }
 

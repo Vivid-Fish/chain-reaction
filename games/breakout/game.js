@@ -139,6 +139,9 @@ export function createGame(config) {
         lastPaddleHit: false,  // for audio: did ball hit paddle this frame
         lastPowerup: false,    // for audio: was a power-up collected this frame
         lastBallLost: false,   // for audio: was a ball lost this frame
+        lastLevelComplete: false, // for effects/audio: level just completed
+        lastBrickPos: null,    // {x, y, hue} of last brick hit for effects
+        lastScoreGain: 0,      // points gained this frame
         particles: [],         // visual particles from brick destruction
       };
     },
@@ -156,11 +159,14 @@ export function createGame(config) {
         }
       }
 
-      // Reset audio flags
+      // Reset per-frame flags
       state.lastBrickHit = false;
       state.lastPaddleHit = false;
       state.lastPowerup = false;
       state.lastBallLost = false;
+      state.lastLevelComplete = false;
+      state.lastBrickPos = null;
+      state.lastScoreGain = 0;
 
       // --- Paddle movement: smooth follow toward thumb.x ---
       if (input.thumb && input.thumb.active) {
@@ -290,11 +296,18 @@ export function createGame(config) {
 
             // Score: base 10 per hit, multiplied by combo
             const comboMult = Math.min(state.combo, 10);
-            state.score += 10 * comboMult;
+            const hitScore = 10 * comboMult;
+            state.score += hitScore;
+            state.lastScoreGain += hitScore;
+            state.lastBrickPos = {
+              x: brick.x, y: brick.y,
+              hue: BRICK_COLORS[Math.min(brick.maxHp, BRICK_COLORS.length - 1)]?.h || 0,
+            };
 
             if (brick.hp <= 0) {
               // Brick destroyed — bonus score
               state.score += 20;
+              state.lastScoreGain += 20;
 
               // Spawn particles
               for (let p = 0; p < 4; p++) {
@@ -368,6 +381,8 @@ export function createGame(config) {
       if (state.bricks.length === 0 && state.lives > 0) {
         state.level++;
         state.score += 100 * state.level; // level bonus
+        state.lastLevelComplete = true;
+        state.lastScoreGain += 100 * state.level;
 
         // Generate new bricks with increasing difficulty
         const rows = Math.min(state.brickRows + Math.floor(state.level / 2), 8);
@@ -626,36 +641,98 @@ export function createGame(config) {
       }
     },
 
+    effects(prev, state) {
+      const fx = [];
+
+      // Brick hit — burst at brick position
+      if (state.lastBrickHit && state.lastBrickPos) {
+        const p = state.lastBrickPos;
+        fx.push({ type: 'burst', x: p.x, y: p.y, hue: p.hue, count: 6, intensity: 0.6 });
+        // Floating score text
+        if (state.lastScoreGain > 0) {
+          fx.push({ type: 'float', x: p.x, y: p.y, text: `+${state.lastScoreGain}`, hue: p.hue });
+        }
+        // Shake on brick hit (light)
+        fx.push({ type: 'shake', trauma: 0.08 });
+      }
+
+      // Combo milestone — ring effect
+      if (state.combo >= 5 && state.combo !== prev.combo && state.combo % 5 === 0 && state.lastBrickPos) {
+        const p = state.lastBrickPos;
+        fx.push({ type: 'ring', x: p.x, y: p.y, radius: 0.15, hue: 50 });
+        fx.push({ type: 'float', x: 0.5, y: 0.45, text: `${state.combo}x COMBO`, hue: 50, celebration: true, scale: 1.5 });
+      }
+
+      // Paddle hit — subtle burst
+      if (state.lastPaddleHit) {
+        fx.push({ type: 'burst', x: state.paddle.x, y: state.paddle.y, hue: 200, count: 3, intensity: 0.3 });
+      }
+
+      // Power-up collected — celebratory burst
+      if (state.lastPowerup) {
+        fx.push({ type: 'burst', x: state.paddle.x, y: state.paddle.y, hue: 300, count: 10, intensity: 0.8 });
+        fx.push({ type: 'ring', x: state.paddle.x, y: state.paddle.y, radius: 0.1, hue: 300 });
+      }
+
+      // Ball lost — flash and shake
+      if (state.lastBallLost) {
+        fx.push({ type: 'shake', trauma: 0.35 });
+        fx.push({ type: 'flash', intensity: 0.3 });
+      }
+
+      // Death — heavy shake and flash
+      if (prev.lives > 0 && state.lives <= 0) {
+        fx.push({ type: 'shake', trauma: 0.5 });
+        fx.push({ type: 'flash', intensity: 0.5 });
+      }
+
+      // Level complete — big celebration
+      if (state.lastLevelComplete) {
+        fx.push({ type: 'flash', intensity: 0.4 });
+        fx.push({ type: 'ring', x: 0.5, y: 0.3, radius: 0.4, hue: 120, duration: 0.8 });
+        fx.push({ type: 'float', x: 0.5, y: 0.35, text: `LEVEL ${state.level}`, hue: 120, celebration: true, scale: 2.0 });
+      }
+
+      return fx;
+    },
+
     audio(prev, state) {
       const events = [];
 
-      // Paddle bounce — satisfying click
+      // Paddle bounce — tap confirmation
       if (state.lastPaddleHit) {
-        events.push({ type: 'tone', freq: 440, duration: 0.06, gain: 0.15 });
+        events.push({ type: 'tap' });
       }
 
-      // Brick hit — higher pitched, pitch scales with combo
+      // Brick hit — note scales with combo
       if (state.lastBrickHit) {
-        const comboFreq = 600 + state.combo * 40;
-        events.push({ type: 'tone', freq: Math.min(comboFreq, 1200), duration: 0.04, gain: 0.12 });
+        const noteIndex = Math.min(state.combo, 15);
+        events.push({ type: 'note', index: noteIndex, gain: 0.15 });
       }
 
-      // Power-up collected — drum-like thump
+      // Power-up collected — chord
       if (state.lastPowerup) {
-        events.push({ type: 'tone', freq: 150, duration: 0.12, gain: 0.25 });
-        events.push({ type: 'tone', freq: 800, duration: 0.05, gain: 0.1 });
+        events.push({ type: 'chord', notes: [5, 9, 12], gain: 0.2 });
       }
 
-      // Ball lost — noise burst
-      if (state.lastBallLost) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 300, duration: 0.4, gain: 0.25 });
+      // Ball lost — miss sound
+      if (state.lastBallLost && state.lives > 0) {
+        events.push({ type: 'miss' });
       }
 
-      // Level complete detection: bricks went from some to none
-      if (prev.bricks && prev.bricks.length > 0 && state.bricks.length > 0 && state.level > prev.level) {
-        events.push({ type: 'tone', freq: 523, duration: 0.1, gain: 0.15 });
-        events.push({ type: 'tone', freq: 659, duration: 0.1, gain: 0.15 });
-        events.push({ type: 'tone', freq: 784, duration: 0.15, gain: 0.2 });
+      // Game over
+      if (prev.lives > 0 && state.lives <= 0) {
+        events.push({ type: 'gameover' });
+      }
+
+      // Level complete — victory chord
+      if (state.lastLevelComplete) {
+        events.push({ type: 'clear' });
+      }
+
+      // Combo milestones — celebratory chord
+      if (state.combo >= 5 && state.combo !== prev.combo && state.combo % 5 === 0) {
+        events.push({ type: 'chord', notes: [7, 11, 14, 17], delay: 0.05, gain: 0.15 });
       }
 
       return events;

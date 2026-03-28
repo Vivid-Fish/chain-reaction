@@ -141,28 +141,66 @@ export function createGame(config) {
       }
     },
 
-    audio(prev, state) {
-      const events = [];
+    effects(prev, state) {
+      const fx = [];
+      // Death: burst + shake + flash at player position
       if (prev.alive && !state.alive) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.5, gain: 0.3 });
-        events.push({ type: 'drum', freq: 60, duration: 0.3, gain: 0.2 });
+        fx.push({ type: 'burst', x: state.player.x, y: state.player.y, hue: 200, count: 30, intensity: 0.8, spread: 0.1 });
+        fx.push({ type: 'shake', trauma: 0.5 });
+        fx.push({ type: 'flash', intensity: 0.4 });
       }
-      // Near-miss: swoosh when obstacle passes close to player
+      // Near-miss: subtle ring at player
       if (state.alive) {
         for (const obs of state.obstacles) {
           const dx = Math.abs(state.player.x - obs.x) - obs.width / 2;
           if (dx < 0.04 && dx > -0.01 && Math.abs(obs.y - state.player.y) < 0.05) {
-            // Check if this obstacle just entered near-miss range
             const prevObs = prev.obstacles?.find(po => po === obs || (Math.abs(po.x - obs.x) < 0.01 && Math.abs(po.y - obs.y + state.speed * (1/60)) < 0.03));
             if (!prevObs || Math.abs(state.player.x - prevObs.x) - prevObs.width / 2 >= 0.04) {
-              events.push({ type: 'sweep', freqStart: 800, freqEnd: 200, duration: 0.08, gain: 0.06 });
+              fx.push({ type: 'ring', x: state.player.x, y: state.player.y, radius: 0.04, hue: 50, duration: 0.2 });
             }
           }
         }
       }
-      // Speed milestone every 50m
-      if (Math.floor(state.distance * 2) > Math.floor(prev.distance * 2)) {
-        events.push({ type: 'tone', freq: 400 + state.speed * 80, duration: 0.04, gain: 0.06, wave: 'triangle' });
+      // Distance milestone every 50m: floating text
+      const curDist = Math.floor(state.distance * 2);
+      const prevDist = Math.floor(prev.distance * 2);
+      if (curDist > prevDist) {
+        const meters = Math.floor(state.distance * 100);
+        fx.push({ type: 'float', x: 0.5, y: 0.15, text: `${meters}m`, hue: 180, celebration: curDist % 10 === 0 });
+        if (curDist % 10 === 0) {
+          fx.push({ type: 'burst', x: 0.5, y: 0.15, hue: 180, count: 12, intensity: 0.4 });
+        }
+      }
+      return fx;
+    },
+
+    audio(prev, state) {
+      const events = [];
+      // Death
+      if (prev.alive && !state.alive) {
+        events.push({ type: 'gameover' });
+      }
+      // Near-miss: miss sound
+      if (state.alive) {
+        for (const obs of state.obstacles) {
+          const dx = Math.abs(state.player.x - obs.x) - obs.width / 2;
+          if (dx < 0.04 && dx > -0.01 && Math.abs(obs.y - state.player.y) < 0.05) {
+            const prevObs = prev.obstacles?.find(po => po === obs || (Math.abs(po.x - obs.x) < 0.01 && Math.abs(po.y - obs.y + state.speed * (1/60)) < 0.03));
+            if (!prevObs || Math.abs(state.player.x - prevObs.x) - prevObs.width / 2 >= 0.04) {
+              events.push({ type: 'miss' });
+            }
+          }
+        }
+      }
+      // Speed milestone every 50m: ascending note
+      const curDist = Math.floor(state.distance * 2);
+      const prevDist = Math.floor(prev.distance * 2);
+      if (curDist > prevDist) {
+        events.push({ type: 'note', index: Math.min(curDist, 19), generation: curDist });
+        // Every 500m (10 intervals): chord
+        if (curDist % 10 === 0) {
+          events.push({ type: 'chord', notes: [curDist % 20, (curDist + 4) % 20, (curDist + 7) % 20] });
+        }
       }
       return events;
     },
