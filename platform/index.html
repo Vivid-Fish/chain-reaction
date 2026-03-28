@@ -329,6 +329,7 @@
 
     // Register all games
     const gameModules = await Promise.all([
+      import('/games/chain-reaction/game.js').then(m => ({ id: 'chain-reaction', name: 'Chain Reaction', desc: 'One tap, cascading explosions', tags: 'taps · physics · chains', color: '#e94', icon: '\u2737', createGame: m.createGame })),
       import('/games/dodge/game.js').then(m => ({ id: 'dodge', name: 'Dodge', desc: 'Steer to avoid obstacles', tags: 'thumb · survive', color: '#4af', icon: '\u25C7', createGame: m.createGame })),
       import('/games/rhythm/game.js').then(m => ({ id: 'rhythm', name: 'Rhythm', desc: 'Tap beats to the music', tags: 'taps · timing', color: '#f4a', icon: '\u266A', createGame: m.createGame })),
       import('/games/territory/game.js').then(m => ({ id: 'territory', name: 'Territory', desc: 'Capture the board (2P)', tags: 'taps · strategy · pvp', color: '#4fa', icon: '\u25C8', createGame: m.createGame })),
