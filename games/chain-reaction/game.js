@@ -8,6 +8,31 @@ import { Game, Bots, BotRunner, BOT_PROFILES, DEFAULTS, CONTINUOUS_TIERS, DOT_TY
 const REF_W = 390;
 const REF_H = 844;
 
+// Epoch background color targets (continuous mode density-based atmosphere)
+const EPOCH_COLORS = {
+  dawn:          { r: 14, g: 14, b: 40 },   // density < 0.20 — dark blue/purple
+  gathering:     { r: 22, g: 16, b: 42 },   // density < 0.40 — slightly warmer
+  flow:          { r: 14, g: 28, b: 46 },   // density < 0.60 — blue-green shift
+  surge:         { r: 40, g: 24, b: 18 },   // density < 0.80 — orange/amber warmth
+  transcendence: { r: 50, g: 30, b: 14 },   // density < 1.01 — intense warm glow
+};
+
+function getEpochForDensity(density) {
+  if (density < 0.20) return 'dawn';
+  if (density < 0.40) return 'gathering';
+  if (density < 0.60) return 'flow';
+  if (density < 0.80) return 'surge';
+  return 'transcendence';
+}
+
+function lerpColor(a, b, t) {
+  return {
+    r: Math.round(a.r + (b.r - a.r) * t),
+    g: Math.round(a.g + (b.g - a.g) * t),
+    b: Math.round(a.b + (b.b - a.b) * t),
+  };
+}
+
 export function createGame(config) {
   const TICK_RATE = 60;
   const DT_MS = 1000 / TICK_RATE; // game-core.step() expects ms
@@ -24,10 +49,15 @@ export function createGame(config) {
     },
 
     init(params) {
+      const mode = params.mode || 'continuous';
       const tier = params.tier || 'FLOW';
       const tierCfg = CONTINUOUS_TIERS[tier];
       const game = new Game(REF_W, REF_H, {}, Math.random);
-      game.startContinuous(tierCfg);
+      if (mode === 'rounds') {
+        game.setupRound(1);
+      } else {
+        game.startContinuous(tierCfg);
+      }
       // Generate ambient stars once
       const stars = [];
       for (let i = 0; i < 80; i++) {
@@ -41,6 +71,7 @@ export function createGame(config) {
       }
       return {
         game,
+        mode,
         tier,
         tierCfg,
         // Track events for audio/effects diffing
@@ -55,6 +86,17 @@ export function createGame(config) {
         // Atmosphere
         bgPulse: 0,
         feverIntensity: 0,
+        // Epoch tracking (continuous mode background colors)
+        epoch: 'dawn',
+        epochColor: { r: 14, g: 14, b: 40 },
+        densitySamples: [],
+        // Round mode state
+        round: 1,
+        consecutiveClears: 0,
+        supernovaActive: false,
+        mercyBonus: 0,
+        consecutiveFails: 0,
+        roundTapsUsed: 0,
       };
     },
 
@@ -64,6 +106,12 @@ export function createGame(config) {
       // Process taps — convert from normalized [0,1] to pixel coords
       if (input.taps) {
         for (const tap of input.taps) {
+          if (state.mode === 'rounds') {
+            // Round mode: 1 tap allowed (supernova grants 3 extra during resolution)
+            const maxTaps = state.supernovaActive && game.gameState === 'resolving' ? 4 : 1;
+            if (state.roundTapsUsed >= maxTaps) continue;
+            state.roundTapsUsed++;
+          }
           const px = tap.x * REF_W;
           const py = tap.y * REF_H;
           game.tap(px, py);
@@ -76,6 +124,32 @@ export function createGame(config) {
 
       // game-core step expects dt in milliseconds
       game.step(DT_MS);
+
+      // Round mode: check for round completion
+      if (state.mode === 'rounds' && game.gameState === 'done') {
+        if (game.chainCount >= game.roundTarget) {
+          // Round cleared
+          state.consecutiveClears++;
+          state.consecutiveFails = 0;
+          state.mercyBonus = 0;
+          // Supernova: 3 consecutive clears activates for next round
+          if (state.consecutiveClears >= 3 && !state.supernovaActive) {
+            state.supernovaActive = true;
+          } else {
+            state.supernovaActive = false;
+          }
+          state.round++;
+        } else {
+          // Round failed
+          state.consecutiveFails++;
+          state.consecutiveClears = 0;
+          state.supernovaActive = false;
+          state.mercyBonus = Math.min(0.15, state.mercyBonus + 0.05);
+          state.round = Math.max(1, state.round - 2);
+        }
+        state.roundTapsUsed = 0;
+        game.setupRound(state.round);
+      }
 
       // Collect events emitted by game-core
       if (game.events.length > 0) {
@@ -91,8 +165,52 @@ export function createGame(config) {
               else if (pct >= 0.12) state.feverIntensity = Math.min(0.3, state.feverIntensity + 0.05);
             }
           }
+          // Feature 1: Blast-enhanced trails — tag pushed dots
+          if (ev.type === 'blastForce') {
+            const blastHue = ev.dotType === 'gravity' ? 270 : ev.dotType === 'volatile' ? 30 : 210;
+            for (const p of ev.pushed) {
+              const dot = game.dots[p.dotIndex];
+              if (dot) {
+                dot._blastTrailTimer = 24;
+                dot._blastHue = blastHue;
+              }
+            }
+          }
         }
         game.events = [];
+      }
+
+      // Feature 1: Tick down blast trail timers
+      for (let i = 0; i < game.dots.length; i++) {
+        const d = game.dots[i];
+        if (d._blastTrailTimer > 0) d._blastTrailTimer--;
+      }
+
+      // Feature 2: Near-miss detection — dot within 1.5x explosion radius but not caught
+      for (let i = 0; i < game.dots.length; i++) {
+        const d = game.dots[i];
+        if (d._nearMiss > 0) d._nearMiss--;
+        if (!d.active) continue;
+        for (const e of game.explosions) {
+          if (e.phase !== 'grow' && e.phase !== 'hold') continue;
+          const dist = Math.hypot(d.x - e.x, d.y - e.y);
+          if (dist < e.radius * 1.5 && dist > e.radius && !e.caught.has(i)) {
+            d._nearMiss = 20;
+          }
+        }
+      }
+
+      // Feature 3: Epoch background colors (continuous mode density tracking)
+      if (game._continuous && game._contCfg) {
+        const activeDots = game.dots.filter(dd => dd.active).length;
+        const density = game._contCfg.maxDots > 0 ? activeDots / game._contCfg.maxDots : 0;
+        state.densitySamples.push(density);
+        if (state.densitySamples.length > 60) state.densitySamples.shift();
+        const meanDensity = state.densitySamples.reduce((s, v) => s + v, 0) / state.densitySamples.length;
+        const targetEpoch = getEpochForDensity(meanDensity);
+        state.epoch = targetEpoch;
+        const target = EPOCH_COLORS[targetEpoch];
+        state.epochColor = lerpColor(state.epochColor, target, 0.03);
       }
 
       // Atmosphere decay
@@ -124,13 +242,14 @@ export function createGame(config) {
       const GLOW_R = DOT_R * 4; // glow radius
       const bp = state.bgPulse;
 
-      // ── Background: radial gradient with pulse + vignette ──
+      // ── Background: radial gradient with pulse + vignette + epoch tint ──
       const bgBright = Math.floor(bp * 80);
+      const ec = state.epochColor;
       draw.clear(0.008, 0.008, 0.06);
       draw.circle(0.5, 0.55, 0.7, {
         gradient: [
-          { stop: 0, color: `rgba(${14 + bgBright},${14 + Math.floor(bgBright * 0.5)},${40 + bgBright},1)` },
-          { stop: 0.5, color: `rgba(${8 + Math.floor(bgBright * 0.5)},${8 + Math.floor(bgBright * 0.3)},${26 + Math.floor(bgBright * 0.6)},1)` },
+          { stop: 0, color: `rgba(${ec.r + bgBright},${ec.g + Math.floor(bgBright * 0.5)},${ec.b + bgBright},1)` },
+          { stop: 0.5, color: `rgba(${Math.floor(ec.r * 0.6) + Math.floor(bgBright * 0.5)},${Math.floor(ec.g * 0.6) + Math.floor(bgBright * 0.3)},${Math.floor(ec.b * 0.65) + Math.floor(bgBright * 0.6)},1)` },
           { stop: 1, color: 'rgba(4,4,15,1)' },
         ],
       });
@@ -196,20 +315,26 @@ export function createGame(config) {
         }
       }
 
-      // ── Dot trails (additive gradient blobs) ──
+      // ── Dot trails (additive gradient blobs, blast-enhanced when pushed) ──
       for (let i = 0; i < game.dots.length; i++) {
         const d = game.dots[i];
         const dr = state.dotRender.get(i);
         if (!dr || !d.active) continue;
         const hue = getDotHue(d);
+        const blasting = d._blastTrailTimer > 0;
+        const blastHue = d._blastHue || hue;
         for (let t = 0; t < dr.trail.length - 1; t++) {
           const pt = dr.trail[t];
           const tp = (t + 1) / dr.trail.length;
-          const tr = DOT_R * tp * 0.8;
+          // Blast trails: ~50% larger and brighter, tinted with blast hue
+          const sizeMult = blasting ? 1.5 : 1;
+          const alphaMult = blasting ? 1.8 : 1;
+          const trailHue = blasting ? blastHue : hue;
+          const tr = DOT_R * tp * 0.8 * sizeMult;
           draw.circle(pt.x, pt.y, tr * 2, {
             gradient: [
-              { stop: 0, color: `hsla(${hue}, 70%, 60%, ${tp * 0.12 * dr.alpha})` },
-              { stop: 1, color: `hsla(${hue}, 70%, 60%, 0)` },
+              { stop: 0, color: `hsla(${trailHue}, 70%, ${blasting ? 75 : 60}%, ${tp * 0.12 * dr.alpha * alphaMult})` },
+              { stop: 1, color: `hsla(${trailHue}, 70%, ${blasting ? 75 : 60}%, 0)` },
             ], blend: 'lighter',
           });
         }
@@ -332,6 +457,23 @@ export function createGame(config) {
           clip: true, alpha: a,
         });
 
+        // Feature 2: Near-miss red pulse — pulsing red ring when barely missed
+        if (d._nearMiss > 0) {
+          const nmT = d._nearMiss / 20;
+          const nmPulse = 0.5 + 0.5 * Math.sin(state.time * 12);
+          const nmAlpha = nmT * nmPulse * 0.6;
+          draw.circle(dx, dy, r * 2.2, {
+            stroke: `hsla(0, 90%, 60%, ${nmAlpha})`,
+            strokeWidth: 2, blend: 'lighter',
+          });
+          draw.circle(dx, dy, r * 2.5, {
+            gradient: [
+              { stop: 0, color: `hsla(0, 90%, 55%, ${nmAlpha * 0.3})` },
+              { stop: 1, color: 'hsla(0, 90%, 50%, 0)' },
+            ], blend: 'lighter',
+          });
+        }
+
         // Gravity: inward spiral lines
         if (d.type === 'gravity') {
           const t = state.time * 2;
@@ -391,52 +533,92 @@ export function createGame(config) {
         });
       }
 
-      // Cooldown bar
-      if (game._continuous && !game.canTap()) {
-        const elapsed = game.time - game._lastTapTime;
-        const pct = Math.min(1, elapsed / game._contCfg.cooldown);
-        draw.rect(0.5, 0.97, pct, 0.006, { fill: 'hsla(200, 80%, 60%, 0.5)', radius: 0.003 });
-        draw.rect(0.5, 0.97, 1, 0.006, { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 1, radius: 0.003 });
-      }
-
-      // Density meter
-      if (game._continuous) {
-        const activeDots = game.dots.filter(d => d.active).length;
-        const density = game._contCfg.maxDots > 0 ? activeDots / game._contCfg.maxDots : 0;
-        const barH = 0.6, barY = 0.2;
-        const fillH = barH * Math.min(1, density);
-        const dangerHue = density > 0.6 ? 0 : density > 0.4 ? 40 : 120;
-        draw.rect(0.02, barY + barH / 2, 0.008, barH, { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 1, radius: 0.004 });
-        if (fillH > 0) {
-          draw.rect(0.02, barY + barH - fillH / 2, 0.008, fillH, {
-            fill: `hsla(${dangerHue}, 70%, 55%, 0.5)`, radius: 0.004,
+      if (state.mode === 'rounds') {
+        // Round mode HUD: round number and target progress
+        draw.text(`Round ${state.round}`, 0.02, 0.04, {
+          size: 0.022, align: 'left', color: 'rgba(255,255,255,0.7)', weight: 'bold',
+        });
+        const targetText = `Target: ${game.chainCount}/${game.roundTarget}`;
+        const targetMet = game.chainCount >= game.roundTarget;
+        draw.text(targetText, 0.02, 0.075, {
+          size: 0.018, align: 'left',
+          color: targetMet ? 'hsla(120, 70%, 65%, 0.9)' : 'rgba(255,255,255,0.5)',
+        });
+        // Supernova indicator
+        if (state.supernovaActive) {
+          draw.text('SUPERNOVA', 0.98, 0.08, {
+            size: 0.018, align: 'right', color: 'hsla(50, 100%, 70%, 0.9)', weight: 'bold',
+            shadow: 'hsla(50, 100%, 60%, 0.6)', shadowBlur: 10,
           });
         }
-      }
-
-      draw.text(state.tier, 0.98, 0.04, {
-        size: 0.018, align: 'right', color: 'rgba(255,255,255,0.3)',
-      });
-
-      // Game over
-      if (game.overflowed) {
-        draw.text('OVERFLOW', 0.5, 0.35, {
-          size: 0.06, align: 'center', color: '#fff', weight: 'bold',
-          shadow: 'rgba(255,255,255,0.6)', shadowBlur: 20,
-        });
-        draw.text(`Score: ${game.score}`, 0.5, 0.45, {
-          size: 0.03, align: 'center', color: 'rgba(255,255,255,0.7)',
-        });
-        draw.text(`Chains: ${game.chainLengths.length}`, 0.5, 0.52, {
-          size: 0.025, align: 'center', color: 'rgba(255,255,255,0.5)',
-        });
-        if (game.chainLengths.length > 0) {
-          const best = Math.max(...game.chainLengths);
-          draw.text(`Best chain: ${best}`, 0.5, 0.58, {
+        // Mercy bonus indicator
+        if (state.mercyBonus > 0) {
+          draw.text(`Mercy +${Math.round(state.mercyBonus * 100)}%`, 0.98, 0.11, {
+            size: 0.016, align: 'right', color: 'hsla(200, 60%, 70%, 0.7)',
+          });
+        }
+        // Game over (round mode)
+        if (game.gameState === 'gameover') {
+          draw.text('GAME OVER', 0.5, 0.35, {
+            size: 0.06, align: 'center', color: '#fff', weight: 'bold',
+            shadow: 'rgba(255,255,255,0.6)', shadowBlur: 20,
+          });
+          draw.text(`Score: ${game.score}`, 0.5, 0.45, {
+            size: 0.03, align: 'center', color: 'rgba(255,255,255,0.7)',
+          });
+          draw.text(`Reached Round ${state.round}`, 0.5, 0.52, {
             size: 0.025, align: 'center', color: 'rgba(255,255,255,0.5)',
           });
         }
+      } else {
+        // Continuous mode HUD
+        // Cooldown bar
+        if (game._continuous && !game.canTap()) {
+          const elapsed = game.time - game._lastTapTime;
+          const pct = Math.min(1, elapsed / game._contCfg.cooldown);
+          draw.rect(0.5, 0.97, pct, 0.006, { fill: 'hsla(200, 80%, 60%, 0.5)', radius: 0.003 });
+          draw.rect(0.5, 0.97, 1, 0.006, { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 1, radius: 0.003 });
+        }
+
+        // Density meter
+        if (game._continuous) {
+          const activeDots = game.dots.filter(d => d.active).length;
+          const density = game._contCfg.maxDots > 0 ? activeDots / game._contCfg.maxDots : 0;
+          const barH = 0.6, barY = 0.2;
+          const fillH = barH * Math.min(1, density);
+          const dangerHue = density > 0.6 ? 0 : density > 0.4 ? 40 : 120;
+          draw.rect(0.02, barY + barH / 2, 0.008, barH, { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 1, radius: 0.004 });
+          if (fillH > 0) {
+            draw.rect(0.02, barY + barH - fillH / 2, 0.008, fillH, {
+              fill: `hsla(${dangerHue}, 70%, 55%, 0.5)`, radius: 0.004,
+            });
+          }
+        }
+
+        // Game over (continuous mode)
+        if (game.overflowed) {
+          draw.text('OVERFLOW', 0.5, 0.35, {
+            size: 0.06, align: 'center', color: '#fff', weight: 'bold',
+            shadow: 'rgba(255,255,255,0.6)', shadowBlur: 20,
+          });
+          draw.text(`Score: ${game.score}`, 0.5, 0.45, {
+            size: 0.03, align: 'center', color: 'rgba(255,255,255,0.7)',
+          });
+          draw.text(`Chains: ${game.chainLengths.length}`, 0.5, 0.52, {
+            size: 0.025, align: 'center', color: 'rgba(255,255,255,0.5)',
+          });
+          if (game.chainLengths.length > 0) {
+            const best = Math.max(...game.chainLengths);
+            draw.text(`Best chain: ${best}`, 0.5, 0.58, {
+              size: 0.025, align: 'center', color: 'rgba(255,255,255,0.5)',
+            });
+          }
+        }
       }
+
+      draw.text(state.mode === 'rounds' ? `R${state.round}` : state.tier, 0.98, 0.04, {
+        size: 0.018, align: 'right', color: 'rgba(255,255,255,0.3)',
+      });
     },
 
     // =====================================================================
@@ -474,6 +656,45 @@ export function createGame(config) {
             radius: ev.radius / REF_W,
             hue, duration: 18,
           });
+          // Check if blast pushed dots into new chain-able clusters
+          // Group active same-type dots within explosion radius
+          const blastR = ev.radius;
+          const activeDots = game.dots.filter(d => d.active);
+          const visited = new Set();
+          for (let i = 0; i < activeDots.length; i++) {
+            if (visited.has(i)) continue;
+            const d = activeDots[i];
+            const group = [i];
+            visited.add(i);
+            // BFS: find all same-type dots within blast radius of each other
+            const queue = [i];
+            while (queue.length > 0) {
+              const ci = queue.shift();
+              const cd = activeDots[ci];
+              for (let j = 0; j < activeDots.length; j++) {
+                if (visited.has(j)) continue;
+                const od = activeDots[j];
+                if (od.type !== cd.type) continue;
+                const dist = Math.hypot(cd.x - od.x, cd.y - od.y);
+                if (dist < blastR) {
+                  visited.add(j);
+                  group.push(j);
+                  queue.push(j);
+                }
+              }
+            }
+            if (group.length >= 3) {
+              const groupHue = d.type === 'gravity' ? 270 : d.type === 'volatile' ? 15 : 195;
+              fx.push({
+                type: 'cluster',
+                points: group.map(idx => ({
+                  x: activeDots[idx].x / REF_W,
+                  y: activeDots[idx].y / REF_H,
+                })),
+                hue: groupHue,
+              });
+            }
+          }
         }
         if (ev.type === 'celebration') {
           fx.push({
@@ -589,21 +810,29 @@ export function createGame(config) {
 
     score(state) {
       const { game } = state;
+      const breakdown = {
+        chains: game.chainLengths.length,
+        bestChain: game.chainLengths.length > 0 ? Math.max(...game.chainLengths) : 0,
+        taps: game.totalTaps,
+        dotsCaught: game.totalDotsCaught,
+      };
+      if (state.mode === 'rounds') {
+        breakdown.round = state.round;
+      }
       return {
         primary: game.score,
         label: 'Score',
         unit: '',
-        breakdown: {
-          chains: game.chainLengths.length,
-          bestChain: game.chainLengths.length > 0 ? Math.max(...game.chainLengths) : 0,
-          taps: game.totalTaps,
-          dotsCaught: game.totalDotsCaught,
-        },
+        breakdown,
         normalized: null,
       };
     },
 
     status(state) {
+      if (state.mode === 'rounds') {
+        if (state.game.gameState === 'gameover') return { ended: true, reason: 'gameover' };
+        return 'playing';
+      }
       if (state.game.overflowed) return { ended: true, reason: 'overflow' };
       return 'playing';
     },
@@ -642,6 +871,11 @@ export function createGame(config) {
 
     configure() {
       return [
+        {
+          key: 'mode', label: 'Mode', type: 'select',
+          options: ['continuous', 'rounds'],
+          default: 'continuous',
+        },
         {
           key: 'tier', label: 'Difficulty', type: 'select',
           options: Object.keys(CONTINUOUS_TIERS),

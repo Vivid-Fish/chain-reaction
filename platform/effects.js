@@ -120,6 +120,11 @@ let screenFlash = 0;
 let rings = [];
 
 // =========================================================================
+// CLUSTER GLOWS — soft glow around grouped dots pushed together by blast
+// =========================================================================
+let clusters = [];
+
+// =========================================================================
 // PUBLIC API — createEffectsEngine()
 // =========================================================================
 export function createEffectsEngine() {
@@ -239,6 +244,16 @@ export function createEffectsEngine() {
             age: 0, maxAge: ev.duration || 18,
           });
           break;
+
+        // Cluster glow — soft glow around nearby grouped dots
+        // { type: 'cluster', points: [{x, y}, ...], hue }
+        case 'cluster':
+          clusters.push({
+            points: ev.points.map(p => ({ x: gx(p.x), y: gy(p.y) })),
+            hue: ev.hue || 200,
+            age: 0, maxAge: 40,
+          });
+          break;
       }
     }
   }
@@ -260,6 +275,9 @@ export function createEffectsEngine() {
 
     // Rings
     rings = rings.filter(r => { r.age++; return r.age < r.maxAge; });
+
+    // Clusters
+    clusters = clusters.filter(c => { c.age++; return c.age < c.maxAge; });
 
     // Shake decay
     if (shakeTrauma > 0.001) {
@@ -310,6 +328,29 @@ export function createEffectsEngine() {
         ctx.strokeStyle = `hsla(${ring.hue}, 50%, 80%, 1)`;
         ctx.lineWidth = 1.5 * (1 - t);
         ctx.stroke();
+      }
+    }
+    // Clusters — soft radial glow per point, fade in then out
+    for (const cl of clusters) {
+      const t = cl.age / cl.maxAge;
+      // Fade in 0-30%, fade out 30-100%
+      let alpha;
+      if (t < 0.3) {
+        alpha = t / 0.3; // 0 -> 1 over first 30%
+      } else {
+        alpha = 1 - (t - 0.3) / 0.7; // 1 -> 0 over remaining 70%
+      }
+      alpha *= 0.45; // peak intensity
+      ctx.globalCompositeOperation = 'lighter';
+      for (const pt of cl.points) {
+        const gr = 28 + alpha * 12;
+        ctx.globalAlpha = alpha;
+        const grd = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, gr);
+        grd.addColorStop(0, `hsla(${cl.hue}, 80%, 70%, 0.6)`);
+        grd.addColorStop(0.4, `hsla(${cl.hue}, 70%, 55%, 0.2)`);
+        grd.addColorStop(1, `hsla(${cl.hue}, 60%, 45%, 0)`);
+        ctx.fillStyle = grd;
+        ctx.fillRect(pt.x - gr, pt.y - gr, gr * 2, gr * 2);
       }
     }
     ctx.globalAlpha = 1;
@@ -376,6 +417,7 @@ export function createEffectsEngine() {
     pool.clear();
     floatingTexts = [];
     rings = [];
+    clusters = [];
     shakeTrauma = 0;
     shakeX = 0; shakeY = 0;
     screenFlash = 0;
