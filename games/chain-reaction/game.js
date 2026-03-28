@@ -404,38 +404,64 @@ export function createGame(config) {
       const { game } = state;
       const prevGame = prev.game;
 
-      // New dot caught
+      // Musical chain note — pentatonic scale, beat-quantized, layered harmonics
       if (game.chainCount > prev.lastChainCount) {
-        const gen = game.explosions.length > 0 ? Math.min(game.explosions[game.explosions.length - 1].generation, 4) : 0;
-        const freq = 300 + gen * 80 + game.chainCount * 5;
-        events.push({ type: 'tone', freq, duration: 0.06, gain: 0.08, wave: 'triangle' });
+        const gen = game.explosions.length > 0
+          ? Math.min(game.explosions[game.explosions.length - 1].generation, 4) : 0;
+        events.push({
+          type: 'note',
+          index: Math.min(game.chainCount, 19),
+          generation: gen,
+        });
       }
 
-      // Chain ended
+      // Process game-core events
       for (const ev of state.pendingEvents) {
+        if (ev.type === 'dotCaught') {
+          // Tap confirmation on first catch
+          if (ev.generation === 0) {
+            events.push({ type: 'tap' });
+          }
+        }
         if (ev.type === 'chainEnd') {
           if (ev.chainLength >= 5) {
-            events.push({ type: 'sweep', freqStart: 400, freqEnd: 800, duration: 0.15, gain: 0.1, wave: 'sine' });
+            events.push({ type: 'clear' });
           }
-          if (ev.momentum > 1) {
-            events.push({ type: 'tone', freq: 600 + ev.momentum * 40, duration: 0.1, gain: 0.06, wave: 'sine' });
+          if (ev.momentum >= 3) {
+            events.push({ type: 'chord', notes: [8, 10, 12, 14], delay: 0.06 });
           }
+        }
+        if (ev.type === 'celebration') {
+          const level = DEFAULTS.CELEBRATIONS.findIndex(c => c.text === ev.text);
+          const baseIdx = Math.min(10, (level >= 0 ? level : 0) * 2);
+          events.push({
+            type: 'chord',
+            notes: [baseIdx, baseIdx + 1, baseIdx + 2, baseIdx + 3],
+            delay: 0.08,
+            gain: 0.14,
+          });
         }
       }
 
-      // Celebration
+      // Celebration from threshold check
       if (state.lastCelebrationIdx > prev.lastCelebrationIdx) {
-        events.push({ type: 'sweep', freqStart: 500, freqEnd: 1200, duration: 0.2, gain: 0.12, wave: 'sine' });
-        events.push({ type: 'tone', freq: 800, duration: 0.15, gain: 0.1, wave: 'triangle' });
+        const level = state.lastCelebrationIdx;
+        const baseIdx = Math.min(10, level * 2);
+        events.push({
+          type: 'chord',
+          notes: [baseIdx, baseIdx + 1, baseIdx + 2, baseIdx + 3],
+          delay: 0.08,
+          gain: 0.14,
+        });
       }
 
-      // Overflow
+      // Overflow — game over
       if (game.overflowed && !prevGame.overflowed) {
-        events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.8, gain: 0.3 });
-        events.push({ type: 'drum', freq: 40, duration: 0.5, gain: 0.25 });
+        events.push({ type: 'gameover' });
+        events.push({ type: 'noise', filter: 'lowpass', freq: 200, duration: 0.8, gain: 0.2 });
       }
 
-      // Drain pending events
+      // Drain pending events (audio runs after effects, so safe to drain here)
       state.pendingEvents = [];
 
       return events;
