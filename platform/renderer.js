@@ -82,7 +82,17 @@ export function createRenderer() {
           grad.addColorStop(stop.stop, stop.color);
         }
         ctx.fillStyle = grad;
-        ctx.fillRect(pixX - pixR, pixY - pixR, pixR * 2, pixR * 2);
+        if (opts.clip) {
+          // Circle-clipped: crisp circular edge with gradient fill inside
+          // Use for solid objects (dots, balls, bullets)
+          ctx.beginPath();
+          ctx.arc(pixX, pixY, pixR, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Unclipped: square gradient blob that fades to transparent
+          // Use for glows, auras, ambient effects
+          ctx.fillRect(pixX - pixR, pixY - pixR, pixR * 2, pixR * 2);
+        }
       } else if (opts.glow && opts.glowColor) {
         ctx.beginPath();
         ctx.arc(pixX, pixY, pixR, 0, Math.PI * 2);

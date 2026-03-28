@@ -197,14 +197,14 @@ export function createGame(config) {
           });
         }
 
-        // Core gradient
+        // Core gradient (unclipped — soft-edged explosion fill)
         draw.circle(ex, ey, er, {
           gradient: [
             { stop: 0, color: `hsla(${hue}, 90%, 85%, ${opacity * 0.35})` },
-            { stop: 0.4, color: `hsla(${hue}, 80%, 65%, ${opacity * 0.2})` },
-            { stop: 0.8, color: `hsla(${hue}, 70%, 50%, ${opacity * 0.08})` },
+            { stop: 0.3, color: `hsla(${hue}, 80%, 65%, ${opacity * 0.25})` },
+            { stop: 0.6, color: `hsla(${hue}, 70%, 50%, ${opacity * 0.12})` },
             { stop: 1, color: `hsla(${hue}, 60%, 40%, 0)` },
-          ],
+          ], blend: 'lighter',
         });
 
         // Edge ring
@@ -266,14 +266,15 @@ export function createGame(config) {
           ], blend: 'lighter',
         });
 
-        // Core (radial gradient with offset highlight)
+        // Core (circle-clipped radial gradient with offset highlight)
         draw.circle(dx, dy, r, {
           gradient: [
-            { stop: 0, color: `hsla(${hue}, 60%, 95%, ${a})` },
-            { stop: 0.4, color: `hsla(${hue}, 85%, ${65 + pulse * 10}%, ${a})` },
-            { stop: 1, color: `hsla(${hue}, 90%, ${45 + pulse * 10}%, ${a * 0.9})` },
+            { stop: 0, color: `hsla(${hue}, 60%, 95%, 1)` },
+            { stop: 0.4, color: `hsla(${hue}, 85%, ${65 + pulse * 10}%, 1)` },
+            { stop: 1, color: `hsla(${hue}, 90%, ${45 + pulse * 10}%, 0.9)` },
           ],
           gradientOffset: { x: -r * 0.15, y: -r * 0.15 },
+          clip: true, alpha: a,
         });
 
         // Gravity: inward spiral lines
