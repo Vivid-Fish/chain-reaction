@@ -245,8 +245,14 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Background
+      // Background with vignette
       draw.clear(0.05, 0.07, 0.05);
+      draw.circle(0.5, 0.45, 0.6, {
+        gradient: [
+          { stop: 0, color: 'hsla(120, 20%, 10%, 0.25)' },
+          { stop: 1, color: 'hsla(120, 20%, 3%, 0)' },
+        ],
+      });
 
       const padding = 0.06;
       const gridArea = 1 - 2 * padding;
@@ -257,13 +263,16 @@ export function createGame(config) {
       const colorsDim = ['rgba(68, 136, 255, 0.3)', 'rgba(255, 68, 68, 0.3)'];
       const colorsGlow = ['rgba(68, 136, 255, 0.5)', 'rgba(255, 68, 68, 0.5)'];
 
-      // Draw grid background
+      // Grid background with gradient
       draw.rect(padding, padding, gridArea, gridArea, {
-        fill: 'rgba(0, 0, 0, 0.3)',
+        gradient: [
+          { stop: 0, color: 'rgba(10, 10, 10, 0.35)' },
+          { stop: 1, color: 'rgba(0, 0, 0, 0.25)' },
+        ],
         radius: 0.01,
       });
 
-      // Draw grid lines
+      // Grid lines
       for (let i = 0; i <= state.size; i++) {
         const x = padding + i * cellSize;
         const y = padding + i * cellSize;
@@ -277,11 +286,11 @@ export function createGame(config) {
         });
       }
 
-      // Get valid moves for current player (for indicators)
+      // Valid moves
       const validMoves = state.ended ? [] : getValidMoves(state.grid, state.currentPlayer, state.size);
       const validSet = new Set(validMoves.map(m => `${m.row},${m.col}`));
 
-      // Draw cells
+      // Cells
       for (let r = 0; r < state.size; r++) {
         for (let c = 0; c < state.size; c++) {
           const cx = padding + (c + 0.5) * cellSize;
@@ -298,20 +307,28 @@ export function createGame(config) {
 
             // Piece glow for recently captured/placed
             if ((isLastMove || isLastCapture) && state.captureFlash > 0) {
-              draw.circle(cx, cy, pieceRadius * 1.3, {
-                fill: colorsGlow[player],
-                opacity: state.captureFlash / 0.4,
+              draw.circle(cx, cy, pieceRadius * 1.5, {
+                gradient: [
+                  { stop: 0, color: colorsGlow[player] },
+                  { stop: 1, color: colorsGlow[player].replace('0.5)', '0)') },
+                ],
+                alpha: state.captureFlash / 0.4,
+                blend: 'lighter',
               });
             }
 
-            // Piece
+            // Piece with glossy gradient
+            const hue = player === 0 ? 215 : 0;
             draw.circle(cx, cy, pieceRadius, {
-              fill: colors[player],
-              glow: 0.005,
-              glowColor: colorsGlow[player],
+              gradient: [
+                { stop: 0, color: `hsla(${hue}, 65%, 88%, 1)` },
+                { stop: 0.35, color: `hsla(${hue}, 75%, 62%, 1)` },
+                { stop: 1, color: `hsla(${hue}, 80%, 38%, 0.9)` },
+              ],
+              gradientOffset: { x: -pieceRadius * 0.15, y: -pieceRadius * 0.15 },
+              clip: true,
             });
           } else if (validSet.has(`${r},${c}`)) {
-            // Valid move indicator
             draw.circle(cx, cy, pieceRadius * 0.3, {
               fill: colorsDim[state.currentPlayer],
             });
@@ -319,23 +336,39 @@ export function createGame(config) {
         }
       }
 
-      // Score display (top area above grid would need more space; use bottom)
+      // Score display
       const scoreY = padding + gridArea + 0.035;
 
-      // Player 0 (blue) score — left
-      draw.circle(0.12, scoreY, 0.015, { fill: colors[0] });
+      // Player 0 (blue) score
+      draw.circle(0.12, scoreY, 0.015, {
+        gradient: [
+          { stop: 0, color: 'hsla(215, 65%, 85%, 1)' },
+          { stop: 1, color: 'hsla(215, 80%, 45%, 0.9)' },
+        ],
+        clip: true,
+      });
       draw.text(`${state.scores[0]}`, 0.16, scoreY, {
         size: 0.03,
         align: 'left',
         color: colors[0],
+        shadow: 'rgba(68, 136, 255, 0.3)',
+        shadowBlur: 6,
       });
 
-      // Player 1 (red) score — right
-      draw.circle(0.88, scoreY, 0.015, { fill: colors[1] });
+      // Player 1 (red) score
+      draw.circle(0.88, scoreY, 0.015, {
+        gradient: [
+          { stop: 0, color: 'hsla(0, 65%, 85%, 1)' },
+          { stop: 1, color: 'hsla(0, 80%, 40%, 0.9)' },
+        ],
+        clip: true,
+      });
       draw.text(`${state.scores[1]}`, 0.84, scoreY, {
         size: 0.03,
         align: 'right',
         color: colors[1],
+        shadow: 'rgba(255, 68, 68, 0.3)',
+        shadowBlur: 6,
       });
 
       // Turn indicator
@@ -345,9 +378,10 @@ export function createGame(config) {
           size: 0.028,
           align: 'center',
           color: colors[state.currentPlayer],
+          shadow: state.currentPlayer === 0 ? 'rgba(68, 136, 255, 0.25)' : 'rgba(255, 68, 68, 0.25)',
+          shadowBlur: 6,
         });
 
-        // Turn timer (if enabled)
         if (state.turnTimer > 0) {
           const timerY = scoreY + 0.035;
           const timeLeft = Math.max(0, Math.ceil(state.turnTimeLeft));
@@ -380,16 +414,23 @@ export function createGame(config) {
           resultText = state.winner === 0 ? 'BLUE WINS' : 'RED WINS';
         }
 
+        const winColor = state.winner !== null ? colors[state.winner] : '#ffffff';
+        const winShadow = state.winner === 0 ? 'rgba(68, 136, 255, 0.6)' :
+          state.winner === 1 ? 'rgba(255, 68, 68, 0.6)' : 'rgba(255, 255, 255, 0.4)';
         draw.text(resultText, 0.5, 0.42, {
           size: 0.06,
           align: 'center',
-          color: state.winner !== null ? colors[state.winner] : '#ffffff',
+          color: winColor,
+          shadow: winShadow,
+          shadowBlur: 20,
         });
 
         draw.text(`${state.scores[0]} - ${state.scores[1]}`, 0.5, 0.52, {
           size: 0.04,
           align: 'center',
           color: 'rgba(255, 255, 255, 0.8)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
 
         const reasonText = state.endReason === 'full' ? 'Board Full' : 'No Moves Left';

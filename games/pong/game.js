@@ -134,6 +134,13 @@ export function createGame(config) {
 
     render(state, draw, alpha) {
       draw.clear(0.02, 0.02, 0.05);
+      // Subtle center glow
+      draw.circle(0.5, 0.5, 0.5, {
+        gradient: [
+          { stop: 0, color: 'hsla(230, 30%, 10%, 0.2)' },
+          { stop: 1, color: 'hsla(230, 30%, 4%, 0)' },
+        ],
+      });
 
       // Center line
       for (let y = 0; y < 1; y += 0.04) {
@@ -142,25 +149,47 @@ export function createGame(config) {
         });
       }
 
-      // Paddles
+      // Paddles with gradient
       for (let p = 0; p < 2; p++) {
         const px = p === 0 ? state.paddleX : 1 - state.paddleX;
-        const color = p === 0 ? '#4af' : '#f64';
+        const hue = p === 0 ? 210 : 10;
+        // Paddle glow
+        draw.rect(px, state.paddles[p].y, state.paddleWidth * 2, state.paddles[p].height * 1.2, {
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 80%, 60%, 0.1)` },
+            { stop: 1, color: `hsla(${hue}, 80%, 50%, 0)` },
+          ],
+          blend: 'lighter',
+        });
         draw.rect(px, state.paddles[p].y, state.paddleWidth, state.paddles[p].height, {
-          fill: color,
+          gradient: [
+            { stop: 0, color: `hsl(${hue}, 80%, 75%)` },
+            { stop: 1, color: `hsl(${hue}, 80%, 45%)` },
+          ],
           radius: 0.004,
         });
       }
 
-      // Ball
+      // Ball with glossy gradient
       if (!state.serving) {
+        // Ball glow trail
+        draw.circle(state.ball.x, state.ball.y, state.ballRadius * 2.5, {
+          gradient: [
+            { stop: 0, color: 'rgba(255, 255, 255, 0.1)' },
+            { stop: 1, color: 'rgba(255, 255, 255, 0)' },
+          ],
+          blend: 'lighter',
+        });
         draw.circle(state.ball.x, state.ball.y, state.ballRadius, {
-          fill: '#fff',
-          glow: 0.008,
-          glowColor: 'rgba(255,255,255,0.4)',
+          gradient: [
+            { stop: 0, color: 'hsla(0, 0%, 100%, 1)' },
+            { stop: 0.5, color: 'hsla(0, 0%, 90%, 1)' },
+            { stop: 1, color: 'hsla(220, 10%, 70%, 0.9)' },
+          ],
+          gradientOffset: { x: -state.ballRadius * 0.15, y: -state.ballRadius * 0.15 },
+          clip: true,
         });
       } else {
-        // Blinking during serve
         if (Math.floor(state.serveTimer * 6) % 2 === 0) {
           draw.circle(state.ball.x, state.ball.y, state.ballRadius, {
             fill: 'rgba(255,255,255,0.5)',
@@ -168,14 +197,18 @@ export function createGame(config) {
         }
       }
 
-      // Scores
+      // Scores with shadow
       draw.text(`${state.scores[0]}`, 0.35, 0.08, {
         size: 0.06,
         color: '#4af',
+        shadow: 'rgba(68, 170, 255, 0.3)',
+        shadowBlur: 10,
       });
       draw.text(`${state.scores[1]}`, 0.65, 0.08, {
         size: 0.06,
         color: '#f64',
+        shadow: 'rgba(255, 100, 68, 0.3)',
+        shadowBlur: 10,
       });
 
       // Rally counter
@@ -191,13 +224,18 @@ export function createGame(config) {
       if (done) {
         const winner = state.scores[0] >= state.maxScore ? 'BLUE' : 'RED';
         const color = state.scores[0] >= state.maxScore ? '#4af' : '#f64';
+        const shadowColor = state.scores[0] >= state.maxScore ? 'rgba(68, 170, 255, 0.6)' : 'rgba(255, 100, 68, 0.6)';
         draw.text(`${winner} WINS`, 0.5, 0.45, {
           size: 0.06,
           color,
+          shadow: shadowColor,
+          shadowBlur: 20,
         });
         draw.text(`${state.scores[0]} - ${state.scores[1]}`, 0.5, 0.55, {
           size: 0.035,
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
       }
     },

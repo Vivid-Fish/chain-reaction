@@ -165,6 +165,13 @@ export function createGame(config) {
 
     render(state, draw, alpha) {
       draw.clear(0.02, 0.02, 0.06);
+      // Space vignette
+      draw.circle(0.5, 0.4, 0.7, {
+        gradient: [
+          { stop: 0, color: 'hsla(240, 35%, 10%, 0.25)' },
+          { stop: 1, color: 'hsla(240, 35%, 3%, 0)' },
+        ],
+      });
 
       const cy = state.cameraY;
 
@@ -177,22 +184,36 @@ export function createGame(config) {
         });
       }
 
-      // Trail
+      // Trail with additive blending
       for (let i = 0; i < state.trail.length - 1; i++) {
         const t = i / state.trail.length;
         draw.circle(state.trail[i].x, state.trail[i].y - cy, 0.003 * t, {
           fill: `rgba(100, 200, 255, ${t * 0.3})`,
+          blend: 'lighter',
         });
       }
 
-      // Planets
+      // Planets with gradient
       for (const p of state.planets) {
         const screenY = p.y - cy;
         if (screenY < -0.1 || screenY > 1.1) continue;
+        // Planet glow aura
+        draw.circle(p.x, screenY, p.radius * 2.5, {
+          gradient: [
+            { stop: 0, color: p.color.replace(')', ', 0.12)').replace('hsl(', 'hsla(') },
+            { stop: 1, color: p.color.replace(')', ', 0)').replace('hsl(', 'hsla(') },
+          ],
+          blend: 'lighter',
+        });
+        // Planet body with gradient
         draw.circle(p.x, screenY, p.radius, {
-          fill: p.color,
-          glow: 0.015,
-          glowColor: p.color.replace('55%', '30%'),
+          gradient: [
+            { stop: 0, color: p.color.replace('55%)', '80%)') },
+            { stop: 0.5, color: p.color },
+            { stop: 1, color: p.color.replace('55%)', '35%)') },
+          ],
+          gradientOffset: { x: -p.radius * 0.15, y: -p.radius * 0.15 },
+          clip: true,
         });
         // Gravity ring
         draw.circle(p.x, screenY, p.radius + 0.08, {
@@ -201,28 +222,51 @@ export function createGame(config) {
         });
       }
 
-      // Stars
+      // Stars with gradient
       for (const star of state.starSpawns) {
         if (star.collected) continue;
         const screenY = star.y - cy;
         if (screenY < -0.05 || screenY > 1.05) continue;
         const pulse = 0.8 + 0.2 * Math.sin(state.elapsed * 5 + star.x * 10);
-        draw.circle(star.x, screenY, 0.008 * pulse, {
-          fill: '#fd0',
-          glow: 0.006,
-          glowColor: 'rgba(255, 220, 0, 0.3)',
+        const sr = 0.008 * pulse;
+        draw.circle(star.x, screenY, sr * 2, {
+          gradient: [
+            { stop: 0, color: 'hsla(50, 90%, 60%, 0.12)' },
+            { stop: 1, color: 'hsla(50, 90%, 50%, 0)' },
+          ],
+          blend: 'lighter',
+        });
+        draw.circle(star.x, screenY, sr, {
+          gradient: [
+            { stop: 0, color: 'hsla(50, 80%, 95%, 1)' },
+            { stop: 0.5, color: 'hsla(45, 90%, 65%, 1)' },
+            { stop: 1, color: 'hsla(40, 85%, 45%, 0.9)' },
+          ],
+          clip: true,
         });
       }
 
       // Ship
       if (state.alive) {
         const sy = state.ship.y - cy;
-        draw.circle(state.ship.x, sy, state.ship.radius, {
-          fill: '#fff',
-          glow: 0.01,
-          glowColor: 'rgba(200, 220, 255, 0.5)',
+        // Ship glow
+        draw.circle(state.ship.x, sy, state.ship.radius * 3, {
+          gradient: [
+            { stop: 0, color: 'rgba(200, 220, 255, 0.12)' },
+            { stop: 1, color: 'rgba(200, 220, 255, 0)' },
+          ],
+          blend: 'lighter',
         });
-        // Thrust indicator when orbiting
+        draw.circle(state.ship.x, sy, state.ship.radius, {
+          gradient: [
+            { stop: 0, color: 'hsla(0, 0%, 100%, 1)' },
+            { stop: 0.5, color: 'hsla(210, 20%, 90%, 1)' },
+            { stop: 1, color: 'hsla(220, 30%, 70%, 0.9)' },
+          ],
+          gradientOffset: { x: -state.ship.radius * 0.15, y: -state.ship.radius * 0.15 },
+          clip: true,
+        });
+        // Orbit indicator
         if (state.orbiting !== null) {
           draw.circle(state.ship.x, sy, state.ship.radius + 0.005, {
             stroke: 'rgba(100, 200, 255, 0.4)',
@@ -235,6 +279,8 @@ export function createGame(config) {
       draw.text(`${state.score}`, 0.5, 0.04, {
         size: 0.035,
         color: 'rgba(255,255,255,0.8)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       const hint = state.orbiting !== null ? 'TAP to release' : 'TAP to orbit';
@@ -247,10 +293,14 @@ export function createGame(config) {
         draw.text('LOST IN SPACE', 0.5, 0.4, {
           size: 0.05,
           color: '#fff',
+          shadow: 'rgba(100, 150, 255, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`Altitude: ${state.score}`, 0.5, 0.5, {
           size: 0.03,
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
       }
     },

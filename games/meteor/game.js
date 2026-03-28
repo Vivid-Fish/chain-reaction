@@ -248,12 +248,20 @@ export function createGame(config) {
 
     render(state, draw, alpha) {
       draw.clear(0.01, 0.01, 0.04);
+      // Deep space vignette
+      draw.circle(0.5, 0.5, 0.65, {
+        gradient: [
+          { stop: 0, color: 'hsla(230, 40%, 10%, 0.25)' },
+          { stop: 1, color: 'hsla(230, 40%, 3%, 0)' },
+        ],
+      });
 
-      // Particles
+      // Particles with additive blending
       for (const p of state.particles) {
         const a = p.life * 2;
         draw.circle(p.x, p.y, 0.004 * p.life * 2, {
           fill: `hsla(${p.hue}, 70%, 60%, ${a})`,
+          blend: 'lighter',
         });
       }
 
@@ -276,12 +284,17 @@ export function createGame(config) {
         });
       }
 
-      // Bullets
+      // Bullets with additive glow
       for (const b of state.bullets) {
+        draw.circle(b.x, b.y, 0.008, {
+          gradient: [
+            { stop: 0, color: 'rgba(255, 255, 100, 0.2)' },
+            { stop: 1, color: 'rgba(255, 255, 100, 0)' },
+          ],
+          blend: 'lighter',
+        });
         draw.circle(b.x, b.y, 0.003, {
           fill: '#ff8',
-          glow: 0.004,
-          glowColor: 'rgba(255, 255, 100, 0.4)',
         });
       }
 
@@ -290,7 +303,15 @@ export function createGame(config) {
         const s = state.ship;
         const blink = state.invincible > 0 && Math.floor(state.invincible * 8) % 2 === 0;
         if (!blink) {
-          // Triangle ship
+          // Ship glow aura
+          draw.circle(s.x, s.y, 0.03, {
+            gradient: [
+              { stop: 0, color: 'hsla(200, 85%, 70%, 0.1)' },
+              { stop: 1, color: 'hsla(200, 80%, 50%, 0)' },
+            ],
+            blend: 'lighter',
+          });
+
           const nose = { x: s.x + Math.cos(s.angle) * 0.02, y: s.y + Math.sin(s.angle) * 0.02 };
           const left = { x: s.x + Math.cos(s.angle + 2.4) * 0.015, y: s.y + Math.sin(s.angle + 2.4) * 0.015 };
           const right = { x: s.x + Math.cos(s.angle - 2.4) * 0.015, y: s.y + Math.sin(s.angle - 2.4) * 0.015 };
@@ -300,12 +321,20 @@ export function createGame(config) {
             strokeWidth: 1,
           });
 
-          // Thrust flame
+          // Thrust flame with additive blending
           if (state.thrust > 0.1) {
             const flameLen = 0.01 + state.thrust * 0.01;
             const tail = { x: s.x - Math.cos(s.angle) * flameLen, y: s.y - Math.sin(s.angle) * flameLen };
             draw.polygon([left, tail, right], {
               fill: `rgba(255, 150, 50, ${state.thrust * 0.6})`,
+            });
+            // Additive thrust glow
+            draw.circle(s.x - Math.cos(s.angle) * 0.01, s.y - Math.sin(s.angle) * 0.01, 0.015 * state.thrust, {
+              gradient: [
+                { stop: 0, color: `rgba(255, 180, 50, ${state.thrust * 0.25})` },
+                { stop: 1, color: 'rgba(255, 100, 20, 0)' },
+              ],
+              blend: 'lighter',
             });
           }
         }
@@ -315,12 +344,18 @@ export function createGame(config) {
       draw.text(`${state.score}`, 0.5, 0.04, {
         size: 0.035,
         color: 'rgba(255,255,255,0.8)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
-      // Lives
+      // Lives with gradient
       for (let i = 0; i < state.lives; i++) {
         draw.circle(0.05 + i * 0.03, 0.04, 0.008, {
-          fill: '#4af',
+          gradient: [
+            { stop: 0, color: 'hsla(200, 60%, 90%, 1)' },
+            { stop: 1, color: 'hsla(200, 85%, 50%, 0.9)' },
+          ],
+          clip: true,
         });
       }
 
@@ -335,10 +370,14 @@ export function createGame(config) {
         draw.text('DESTROYED', 0.5, 0.4, {
           size: 0.06,
           color: '#fff',
+          shadow: 'rgba(255, 100, 50, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`Score: ${state.score}`, 0.5, 0.5, {
           size: 0.03,
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
         draw.text(`Wave ${state.wave}`, 0.5, 0.56, {
           size: 0.02,

@@ -187,8 +187,14 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Background
+      // Background with radial center glow
       draw.clear(0.02, 0.04, 0.02);
+      draw.circle(0.5, 0.5, 0.6, {
+        gradient: [
+          { stop: 0, color: 'hsla(120, 25%, 10%, 0.3)' },
+          { stop: 1, color: 'hsla(120, 25%, 3%, 0)' },
+        ],
+      });
 
       // Subtle grid
       const gridSize = 0.05;
@@ -210,8 +216,7 @@ export function createGame(config) {
       const len = state.snake.length;
       for (let i = len - 1; i >= 0; i--) {
         const seg = state.snake[i];
-        const t = i / Math.max(1, len - 1); // 1 at head, 0 at tail
-        // Green gradient: bright head, dim tail
+        const t = i / Math.max(1, len - 1);
         const hue = 120;
         const lightness = 25 + t * 40;
         const saturation = 50 + t * 30;
@@ -219,17 +224,33 @@ export function createGame(config) {
         const radius = SEGMENT_RADIUS * (0.7 + t * 0.3);
 
         draw.circle(seg.x, seg.y, radius, {
-          fill: `hsla(${hue}, ${saturation}%, ${lightness}%, ${opacity})`,
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, ${saturation + 10}%, ${lightness + 15}%, ${opacity})` },
+            { stop: 1, color: `hsla(${hue}, ${saturation}%, ${lightness - 5}%, ${opacity * 0.8})` },
+          ],
+          clip: true,
         });
       }
 
-      // Head highlight
+      // Head glow aura
       if (state.snake.length > 0) {
         const head = state.snake[0];
+        draw.circle(head.x, head.y, SEGMENT_RADIUS * 3, {
+          gradient: [
+            { stop: 0, color: 'hsla(120, 80%, 65%, 0.12)' },
+            { stop: 1, color: 'hsla(120, 80%, 50%, 0)' },
+          ],
+          blend: 'lighter',
+        });
+        // Head with glossy gradient
         draw.circle(head.x, head.y, SEGMENT_RADIUS * 1.1, {
-          fill: '#6f6',
-          glow: 0.01,
-          glowColor: 'rgba(100, 255, 100, 0.4)',
+          gradient: [
+            { stop: 0, color: 'hsla(120, 60%, 92%, 1)' },
+            { stop: 0.4, color: 'hsla(120, 80%, 65%, 1)' },
+            { stop: 1, color: 'hsla(120, 85%, 40%, 0.9)' },
+          ],
+          gradientOffset: { x: -SEGMENT_RADIUS * 0.15, y: -SEGMENT_RADIUS * 0.15 },
+          clip: true,
         });
 
         // Eyes
@@ -249,18 +270,26 @@ export function createGame(config) {
         });
       }
 
-      // Food (pulsing)
+      // Food (pulsing) with gradient
       if (state.food) {
         const pulse = 1 + 0.15 * Math.sin(state.food.age * 6);
         const foodRadius = FOOD_RADIUS * pulse;
-        draw.circle(state.food.x, state.food.y, foodRadius, {
-          fill: '#f44',
-          glow: 0.012,
-          glowColor: 'rgba(255, 68, 68, 0.5)',
+        // Food glow
+        draw.circle(state.food.x, state.food.y, foodRadius * 2.5, {
+          gradient: [
+            { stop: 0, color: 'hsla(0, 85%, 60%, 0.12)' },
+            { stop: 1, color: 'hsla(0, 85%, 50%, 0)' },
+          ],
+          blend: 'lighter',
         });
-        // Inner highlight
-        draw.circle(state.food.x, state.food.y, foodRadius * 0.4, {
-          fill: 'rgba(255, 180, 180, 0.7)',
+        draw.circle(state.food.x, state.food.y, foodRadius, {
+          gradient: [
+            { stop: 0, color: 'hsla(0, 60%, 92%, 1)' },
+            { stop: 0.4, color: 'hsla(0, 80%, 60%, 1)' },
+            { stop: 1, color: 'hsla(0, 85%, 38%, 0.9)' },
+          ],
+          gradientOffset: { x: -foodRadius * 0.15, y: -foodRadius * 0.15 },
+          clip: true,
         });
       }
 
@@ -269,6 +298,8 @@ export function createGame(config) {
         size: 0.04,
         align: 'center',
         color: 'rgba(255,255,255,0.8)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       // Speed indicator
@@ -291,11 +322,15 @@ export function createGame(config) {
           size: 0.06,
           align: 'center',
           color: '#fff',
+          shadow: 'rgba(100, 255, 100, 0.5)',
+          shadowBlur: 20,
         });
         draw.text(`Score: ${state.score}`, 0.5, 0.48, {
           size: 0.03,
           align: 'center',
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
         draw.text(`Length: ${state.snake.length}`, 0.5, 0.54, {
           size: 0.025,

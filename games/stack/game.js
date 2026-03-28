@@ -149,45 +149,47 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Background — dark gradient feel
+      // Background with radial depth
       draw.clear(0.05, 0.05, 0.12);
+      draw.circle(0.5, 0.3, 0.7, {
+        gradient: [
+          { stop: 0, color: 'hsla(240, 30%, 16%, 0.3)' },
+          { stop: 1, color: 'hsla(240, 30%, 5%, 0)' },
+        ],
+      });
 
       const towerHeight = state.tower.length;
       const blockH = 0.04;
-      // Camera offset: scroll up so the action stays in the upper-middle area
-      // We want the current stacking level to be around y=0.35
       const stackingY = 0.35;
-      const currentLevel = towerHeight; // the level the swinging block is at
+      const currentLevel = towerHeight;
       const cameraOffset = Math.max(0, currentLevel * blockH - (1.0 - stackingY));
 
-      // Helper: convert tower index to screen Y
       function blockY(index) {
         return 1.0 - (index + 1) * blockH + cameraOffset;
       }
 
-      // Draw subtle grid lines for depth
+      // Subtle grid lines for depth
       for (let i = 0; i < 20; i++) {
         const gy = 1.0 - i * blockH + cameraOffset;
         if (gy < -0.1 || gy > 1.1) continue;
         draw.line(0, gy, 1, gy, { color: 'rgba(255,255,255,0.03)', width: 1 });
       }
 
-      // Draw placed tower blocks
+      // Placed tower blocks with gradient
       for (let i = 0; i < state.tower.length; i++) {
         const block = state.tower[i];
         const y = blockY(i);
-
-        // Skip blocks that are off-screen
         if (y > 1.1 || y + blockH < -0.1) continue;
 
-        // Color: hue cycles through spectrum based on height
         const hue = (i * 17) % 360;
         const saturation = 65 + (i % 3) * 10;
         const lightness = 50 + (i % 5) * 3;
-        const fill = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 
         draw.rect(block.x, y + blockH / 2, block.width, blockH * 0.9, {
-          fill: fill,
+          gradient: [
+            { stop: 0, color: `hsl(${hue}, ${saturation}%, ${lightness + 12}%)` },
+            { stop: 1, color: `hsl(${hue}, ${saturation}%, ${lightness - 8}%)` },
+          ],
           radius: 0.003,
         });
 
@@ -197,22 +199,31 @@ export function createGame(config) {
         });
       }
 
-      // Draw current swinging block (if alive)
+      // Current swinging block with glow
       if (state.alive) {
         const block = state.currentBlock;
         const y = blockY(towerHeight);
 
         const hue = (towerHeight * 17) % 360;
-        const fill = `hsl(${hue}, 70%, 60%)`;
 
-        draw.rect(block.x, y + blockH / 2, block.width, blockH * 0.9, {
-          fill: fill,
-          radius: 0.003,
-          glow: 0.008,
-          glowColor: `hsla(${hue}, 80%, 60%, 0.4)`,
+        // Glow behind active block
+        draw.rect(block.x, y + blockH / 2, block.width * 1.1, blockH * 1.3, {
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 80%, 60%, 0.15)` },
+            { stop: 1, color: `hsla(${hue}, 80%, 50%, 0)` },
+          ],
+          blend: 'lighter',
         });
 
-        // Guide line showing where the previous block is
+        draw.rect(block.x, y + blockH / 2, block.width, blockH * 0.9, {
+          gradient: [
+            { stop: 0, color: `hsl(${hue}, 75%, 72%)` },
+            { stop: 1, color: `hsl(${hue}, 70%, 48%)` },
+          ],
+          radius: 0.003,
+        });
+
+        // Guide lines
         if (state.tower.length > 0) {
           const prev = state.tower[state.tower.length - 1];
           draw.line(prev.x - prev.width / 2, y + blockH, prev.x - prev.width / 2, y, {
@@ -226,11 +237,13 @@ export function createGame(config) {
         }
       }
 
-      // Height counter (top center)
+      // Height counter
       draw.text(`${towerHeight}`, 0.5, 0.05, {
         size: 0.05,
         align: 'center',
         color: 'rgba(255,255,255,0.9)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       // Perfect streak indicator
@@ -238,10 +251,13 @@ export function createGame(config) {
         const streakText = state.perfectStreak >= 3
           ? `PERFECT x${state.perfectStreak}!`
           : 'PERFECT!';
+        const streakHue = 50 + state.perfectStreak * 20;
         draw.text(streakText, 0.5, 0.11, {
           size: 0.025,
           align: 'center',
-          color: `hsl(${50 + state.perfectStreak * 20}, 100%, 70%)`,
+          color: `hsl(${streakHue}, 100%, 70%)`,
+          shadow: `hsla(${streakHue}, 100%, 60%, 0.5)`,
+          shadowBlur: 10,
         });
       }
 
@@ -253,17 +269,21 @@ export function createGame(config) {
         color: 'rgba(255,255,255,0.4)',
       });
 
-      // Game over overlay
+      // Game over
       if (!state.alive) {
         draw.text('GAME OVER', 0.5, 0.35, {
           size: 0.06,
           align: 'center',
           color: '#fff',
+          shadow: 'rgba(255, 100, 50, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`Height: ${towerHeight} blocks`, 0.5, 0.43, {
           size: 0.03,
           align: 'center',
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
         if (state.totalPerfects > 0) {
           draw.text(`Perfect drops: ${state.totalPerfects}`, 0.5, 0.49, {

@@ -186,10 +186,15 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Dark background
+      // Dark background with subtle radial vignette
       draw.clear(0.06, 0.05, 0.08);
-
       const viewH = 9 / 16;
+      draw.circle(0.5, viewH * 0.45, 0.6, {
+        gradient: [
+          { stop: 0, color: 'hsla(270, 30%, 14%, 0.3)' },
+          { stop: 1, color: 'hsla(270, 30%, 5%, 0)' },
+        ],
+      });
 
       // Subtle grid lines for spatial reference
       for (let i = 1; i <= 4; i++) {
@@ -202,20 +207,32 @@ export function createGame(config) {
       // Draw targets
       for (const target of state.targets) {
         const currentRadius = target.radius * target.life;
-        const urgency = 1 - target.life; // 0 = fresh, 1 = about to expire
+        const urgency = 1 - target.life;
 
-        // Outer ring — timer indicator (shrinks with life)
+        // Outer ring — timer indicator
         draw.circle(target.x, target.y, target.radius, {
           stroke: `hsla(${target.hue}, 70%, 55%, 0.3)`,
           lineWidth: 0.002,
         });
 
-        // Inner filled circle — the actual target (shrinks)
-        const fillAlpha = 0.6 + urgency * 0.4;
+        // Target glow aura
+        draw.circle(target.x, target.y, currentRadius * 2.5, {
+          gradient: [
+            { stop: 0, color: `hsla(${target.hue}, 80%, 60%, ${0.08 + urgency * 0.08})` },
+            { stop: 1, color: `hsla(${target.hue}, 80%, 50%, 0)` },
+          ],
+          blend: 'lighter',
+        });
+
+        // Inner filled circle with glossy gradient
         draw.circle(target.x, target.y, currentRadius, {
-          fill: `hsla(${target.hue}, 80%, 60%, ${fillAlpha})`,
-          glow: 0.008 + urgency * 0.012,
-          glowColor: `hsla(${target.hue}, 90%, 70%, ${0.3 + urgency * 0.4})`,
+          gradient: [
+            { stop: 0, color: `hsla(${target.hue}, 60%, 90%, ${0.6 + urgency * 0.4})` },
+            { stop: 0.4, color: `hsla(${target.hue}, 80%, 65%, ${0.6 + urgency * 0.4})` },
+            { stop: 1, color: `hsla(${target.hue}, 85%, 40%, ${0.5 + urgency * 0.4})` },
+          ],
+          gradientOffset: { x: -currentRadius * 0.15, y: -currentRadius * 0.15 },
+          clip: true,
         });
 
         // Center dot — bullseye
@@ -223,7 +240,7 @@ export function createGame(config) {
           fill: '#fff',
         });
 
-        // Warning pulse when target is about to expire (last 30% of life)
+        // Warning pulse when target is about to expire
         if (target.life < 0.3) {
           const pulse = Math.sin(state.elapsed * 15) * 0.5 + 0.5;
           draw.circle(target.x, target.y, currentRadius + 0.005, {
@@ -239,14 +256,20 @@ export function createGame(config) {
         const expandRadius = effect.radius * (1 + progress * 2);
         const fadeAlpha = 1 - progress;
 
-        // Expanding ring
         const hue = effect.accuracy > 0.7 ? 120 : effect.accuracy > 0.4 ? 60 : 30;
+        // Additive glow burst on hit
+        draw.circle(effect.x, effect.y, expandRadius * 1.5, {
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 80%, 70%, ${fadeAlpha * 0.2})` },
+            { stop: 1, color: `hsla(${hue}, 80%, 50%, 0)` },
+          ],
+          blend: 'lighter',
+        });
         draw.circle(effect.x, effect.y, expandRadius, {
           stroke: `hsla(${hue}, 80%, 70%, ${fadeAlpha * 0.6})`,
           lineWidth: 0.002 * (1 - progress),
         });
 
-        // Floating score text
         const floatY = effect.y - progress * 0.05;
         draw.text(`+${effect.points}`, effect.x, floatY, {
           size: 0.02 + effect.accuracy * 0.01,
@@ -255,11 +278,13 @@ export function createGame(config) {
         });
       }
 
-      // HUD — Score and combo (top center)
+      // HUD — Score
       draw.text(`${state.score}`, 0.5, 0.025, {
         size: 0.035,
         align: 'center',
         color: 'rgba(255,255,255,0.9)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       // Combo display
@@ -270,37 +295,39 @@ export function createGame(config) {
           size: 0.018,
           align: 'center',
           color: `hsla(${comboHue}, 80%, 70%, ${comboAlpha})`,
+          shadow: `hsla(${comboHue}, 80%, 50%, 0.4)`,
+          shadowBlur: 8,
         });
       }
 
-      // Health bar (top left)
+      // Health bar
       const barW = 0.2;
       const barH = 0.012;
       const barX = 0.05;
       const barY = 0.02;
-      // Background
       draw.rect(barX + barW / 2, barY + barH / 2, barW, barH, {
         fill: 'rgba(255,255,255,0.1)',
         radius: 0.003,
       });
-      // Fill
       const healthFrac = state.health / 100;
-      const healthHue = healthFrac * 120; // red to green
+      const healthHue = healthFrac * 120;
       if (healthFrac > 0) {
         const fillW = barW * healthFrac;
         draw.rect(barX + fillW / 2, barY + barH / 2, fillW, barH, {
-          fill: `hsl(${healthHue}, 70%, 50%)`,
+          gradient: [
+            { stop: 0, color: `hsl(${healthHue}, 75%, 60%)` },
+            { stop: 1, color: `hsl(${healthHue}, 70%, 40%)` },
+          ],
           radius: 0.003,
         });
       }
-      // Health label
       draw.text('HP', barX - 0.015, barY + barH / 2 + 0.003, {
         size: 0.012,
         align: 'right',
         color: 'rgba(255,255,255,0.5)',
       });
 
-      // Stats (top right)
+      // Stats
       const accuracy = state.targetsHit + state.targetsMissed > 0
         ? Math.floor((state.targetsHit / (state.targetsHit + state.targetsMissed)) * 100)
         : 100;
@@ -317,7 +344,6 @@ export function createGame(config) {
 
       // Game over overlay
       if (state.health <= 0) {
-        // Dim background
         draw.rect(0.5, viewH / 2, 1, viewH, {
           fill: 'rgba(0,0,0,0.6)',
         });
@@ -326,11 +352,15 @@ export function createGame(config) {
           size: 0.06,
           align: 'center',
           color: '#fff',
+          shadow: 'rgba(255, 60, 60, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`Score: ${state.score}`, 0.5, viewH * 0.48, {
           size: 0.03,
           align: 'center',
           color: 'rgba(255,255,255,0.8)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
         draw.text(`Accuracy: ${accuracy}%  |  Max Combo: ${state.maxCombo}x`, 0.5, viewH * 0.58, {
           size: 0.018,

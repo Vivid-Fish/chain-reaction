@@ -487,14 +487,19 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // --- Background: dark with subtle grid pattern ---
+      // Background with radial vignette
       draw.clear(0.03, 0.02, 0.08);
+      draw.circle(0.5, 0.4, 0.65, {
+        gradient: [
+          { stop: 0, color: 'hsla(270, 35%, 13%, 0.3)' },
+          { stop: 1, color: 'hsla(270, 35%, 4%, 0)' },
+        ],
+      });
 
       // Subtle vertical lines
       for (let i = 1; i < 8; i++) {
         draw.line(i / 8, 0, i / 8, 1, { color: 'rgba(255,255,255,0.02)', width: 1 });
       }
-      // Subtle horizontal lines in brick area
       for (let i = 1; i <= 10; i++) {
         const y = 0.05 + i * 0.035;
         if (y < 0.45) {
@@ -502,11 +507,18 @@ export function createGame(config) {
         }
       }
 
-      // --- Bricks ---
+      // Bricks with gradient fill
       for (const brick of state.bricks) {
-        // Main brick body
+        const entry = BRICK_COLORS[Math.min(brick.hp, BRICK_COLORS.length - 1)];
+        const h = entry ? entry.h : 0;
+        const s = entry ? entry.s : 0;
+        const l = entry ? entry.l : 30;
+        const dimFactor = 0.6 + 0.4 * (brick.hp / brick.maxHp);
         draw.rect(brick.x, brick.y, brick.w, brick.h, {
-          fill: brickColor(brick.hp, brick.maxHp),
+          gradient: [
+            { stop: 0, color: `hsl(${h}, ${s}%, ${(l + 12) * dimFactor}%)` },
+            { stop: 1, color: `hsl(${h}, ${s}%, ${(l - 8) * dimFactor}%)` },
+          ],
           radius: 0.003,
         });
         // Highlight on top edge
@@ -516,23 +528,34 @@ export function createGame(config) {
         });
       }
 
-      // --- Particles ---
+      // Particles with additive blending
       for (const p of state.particles) {
-        const alpha = Math.max(0, p.life / p.maxLife);
-        draw.circle(p.x, p.y, 0.005 * alpha, {
-          fill: `hsla(${p.hue}, 80%, 60%, ${alpha})`,
+        const a = Math.max(0, p.life / p.maxLife);
+        draw.circle(p.x, p.y, 0.005 * a, {
+          fill: `hsla(${p.hue}, 80%, 60%, ${a})`,
+          blend: 'lighter',
         });
       }
 
-      // --- Falling power-ups ---
+      // Falling power-ups with gradient
       for (const pu of state.fallingPowerups) {
         const color = POWERUP_COLORS[pu.type] || '#fff';
-        draw.circle(pu.x, pu.y, pu.radius, {
-          fill: color,
-          glow: 0.01,
-          glowColor: color + '66',
+        // Glow aura
+        draw.circle(pu.x, pu.y, pu.radius * 2.5, {
+          gradient: [
+            { stop: 0, color: color + '30' },
+            { stop: 1, color: color + '00' },
+          ],
+          blend: 'lighter',
         });
-        // Label inside power-up
+        draw.circle(pu.x, pu.y, pu.radius, {
+          gradient: [
+            { stop: 0, color: '#ffffff' },
+            { stop: 0.5, color: color },
+            { stop: 1, color: color + 'aa' },
+          ],
+          clip: true,
+        });
         const label = pu.type === 'multiball' ? 'M' : pu.type === 'wide' ? 'W' : 'S';
         draw.text(label, pu.x, pu.y, {
           size: 0.015,
@@ -541,26 +564,40 @@ export function createGame(config) {
         });
       }
 
-      // --- Paddle ---
+      // Paddle with gradient
       const hasWide = state.powerups.some(p => p.type === 'wide');
-      const paddleColor = hasWide ? '#4af' : '#dde';
+      const padH = hasWide ? 200 : 220;
+      const padS = hasWide ? 85 : 15;
+      const padL = hasWide ? 65 : 88;
       draw.rect(state.paddle.x, state.paddle.y, state.paddle.width, state.paddle.height, {
-        fill: paddleColor,
+        gradient: [
+          { stop: 0, color: `hsl(${padH}, ${padS}%, ${padL + 10}%)` },
+          { stop: 1, color: `hsl(${padH}, ${padS}%, ${padL - 15}%)` },
+        ],
         radius: 0.005,
-        glow: 0.008,
-        glowColor: hasWide ? 'rgba(68,170,255,0.4)' : 'rgba(200,210,230,0.2)',
       });
 
-      // --- Balls ---
+      // Balls with glossy gradient
       for (const ball of state.balls) {
+        draw.circle(ball.x, ball.y, ball.radius * 2.5, {
+          gradient: [
+            { stop: 0, color: 'rgba(255, 255, 255, 0.1)' },
+            { stop: 1, color: 'rgba(255, 255, 255, 0)' },
+          ],
+          blend: 'lighter',
+        });
         draw.circle(ball.x, ball.y, ball.radius, {
-          fill: '#fff',
-          glow: 0.012,
-          glowColor: 'rgba(255,255,255,0.5)',
+          gradient: [
+            { stop: 0, color: 'hsla(0, 0%, 100%, 1)' },
+            { stop: 0.5, color: 'hsla(0, 0%, 90%, 1)' },
+            { stop: 1, color: 'hsla(220, 10%, 70%, 0.9)' },
+          ],
+          gradientOffset: { x: -ball.radius * 0.15, y: -ball.radius * 0.15 },
+          clip: true,
         });
       }
 
-      // --- Active power-up indicators (top-right) ---
+      // Active power-up indicators
       let puY = 0.04;
       for (const pu of state.powerups) {
         const color = POWERUP_COLORS[pu.type] || '#fff';
@@ -569,35 +606,49 @@ export function createGame(config) {
           size: 0.018,
           align: 'right',
           color,
+          shadow: color + '66',
+          shadowBlur: 6,
         });
         puY += 0.03;
       }
 
-      // --- Score display ---
+      // Score display
       draw.text(`${state.score}`, 0.5, 0.02, {
         size: 0.032,
         align: 'center',
         color: 'rgba(255,255,255,0.9)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
-      // --- Level indicator ---
+      // Level indicator
       draw.text(`LV ${state.level}`, 0.03, 0.02, {
         size: 0.02,
         align: 'left',
         color: 'rgba(255,255,255,0.5)',
       });
 
-      // --- Lives indicator ---
+      // Lives indicator with gradient
       for (let i = 0; i < state.maxLives; i++) {
         const lx = 0.03 + i * 0.03;
         const ly = 0.97;
         const alive = i < state.lives;
-        draw.circle(lx, ly, 0.008, {
-          fill: alive ? '#f55' : 'rgba(255,255,255,0.15)',
-        });
+        if (alive) {
+          draw.circle(lx, ly, 0.008, {
+            gradient: [
+              { stop: 0, color: 'hsla(0, 70%, 85%, 1)' },
+              { stop: 1, color: 'hsla(0, 80%, 45%, 0.9)' },
+            ],
+            clip: true,
+          });
+        } else {
+          draw.circle(lx, ly, 0.008, {
+            fill: 'rgba(255,255,255,0.15)',
+          });
+        }
       }
 
-      // --- Combo text (fades) ---
+      // Combo text (fades)
       if (state.comboDisplayTimer > 0 && state.comboDisplay >= 3) {
         const fadeAlpha = Math.min(1, state.comboDisplayTimer / 0.4);
         const yOff = 0.5 - (1 - fadeAlpha) * 0.05;
@@ -605,21 +656,24 @@ export function createGame(config) {
           size: 0.045 + state.comboDisplay * 0.002,
           align: 'center',
           color: `rgba(255, 220, 80, ${fadeAlpha})`,
+          shadow: `rgba(255, 180, 0, ${fadeAlpha * 0.5})`,
+          shadowBlur: 12,
         });
       }
 
-      // --- Slow-mo indicator ---
+      // Slow-mo indicator
       if (state.powerups.some(p => p.type === 'slow')) {
         draw.text('SLOW', 0.5, 0.96, {
           size: 0.018,
           align: 'center',
           color: 'rgba(80, 255, 160, 0.6)',
+          shadow: 'rgba(80, 255, 160, 0.3)',
+          shadowBlur: 8,
         });
       }
 
-      // --- Game over ---
+      // Game over
       if (state.lives <= 0) {
-        // Dim overlay
         draw.rect(0.5, 0.5, 1, 1, {
           fill: 'rgba(0,0,0,0.6)',
         });
@@ -627,11 +681,15 @@ export function createGame(config) {
           size: 0.06,
           align: 'center',
           color: '#fff',
+          shadow: 'rgba(140, 60, 255, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`Score: ${state.score}`, 0.5, 0.48, {
           size: 0.03,
           align: 'center',
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
         draw.text(`Level: ${state.level}`, 0.5, 0.54, {
           size: 0.025,

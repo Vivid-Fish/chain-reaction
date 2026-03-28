@@ -87,28 +87,49 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Background
+      // Background with radial gradient for depth
       draw.clear(0.02, 0.02, 0.06);
+      draw.circle(0.5, 0.3, 0.7, {
+        gradient: [
+          { stop: 0, color: 'hsla(230, 40%, 12%, 0.4)' },
+          { stop: 1, color: 'hsla(230, 40%, 4%, 0)' },
+        ],
+      });
 
       // Lane lines (subtle visual)
       for (let i = 1; i <= 4; i++) {
         draw.line(i * 0.2, 0, i * 0.2, 1, { color: 'rgba(255,255,255,0.05)', width: 1 });
       }
 
-      // Obstacles
+      // Obstacles with gradient
       for (const obs of state.obstacles) {
         draw.rect(obs.x, obs.y, obs.width, obs.height, {
-          fill: `hsl(${obs.hue}, 70%, 55%)`,
+          gradient: [
+            { stop: 0, color: `hsla(${obs.hue}, 75%, 70%, 1)` },
+            { stop: 1, color: `hsla(${obs.hue}, 70%, 40%, 0.9)` },
+          ],
           radius: 0.005,
         });
       }
 
-      // Player
+      // Player glow aura
       if (state.alive) {
+        draw.circle(state.player.x, state.player.y, state.player.radius * 3, {
+          gradient: [
+            { stop: 0, color: 'hsla(200, 85%, 70%, 0.15)' },
+            { stop: 1, color: 'hsla(200, 80%, 50%, 0)' },
+          ],
+          blend: 'lighter',
+        });
+        // Player with glossy gradient
         draw.circle(state.player.x, state.player.y, state.player.radius, {
-          fill: '#4af',
-          glow: 0.015,
-          glowColor: 'rgba(68, 170, 255, 0.4)',
+          gradient: [
+            { stop: 0, color: 'hsla(200, 60%, 95%, 1)' },
+            { stop: 0.4, color: 'hsla(200, 85%, 70%, 1)' },
+            { stop: 1, color: 'hsla(200, 90%, 45%, 0.9)' },
+          ],
+          gradientOffset: { x: -state.player.radius * 0.15, y: -state.player.radius * 0.15 },
+          clip: true,
         });
       }
 
@@ -117,6 +138,8 @@ export function createGame(config) {
         size: 0.035,
         align: 'center',
         color: 'rgba(255,255,255,0.8)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       // Speed indicator
@@ -132,11 +155,15 @@ export function createGame(config) {
           size: 0.06,
           align: 'center',
           color: '#fff',
+          shadow: 'rgba(255, 80, 80, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`Distance: ${Math.floor(state.distance * 100)}m`, 0.5, 0.5, {
           size: 0.03,
           align: 'center',
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
       }
     },

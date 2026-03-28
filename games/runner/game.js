@@ -157,16 +157,26 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Sky gradient (approximated)
+      // Sky with radial vignette
       draw.clear(0.05, 0.05, 0.12);
+      draw.circle(0.5, 0.3, 0.7, {
+        gradient: [
+          { stop: 0, color: 'hsla(240, 30%, 16%, 0.35)' },
+          { stop: 1, color: 'hsla(240, 30%, 5%, 0)' },
+        ],
+      });
 
-      // Ground
-      draw.rect(0.5, 0.85, 1, 0.3, { fill: 'rgba(30, 35, 40, 1)' });
+      // Ground with gradient
+      draw.rect(0.5, 0.85, 1, 0.3, {
+        gradient: [
+          { stop: 0, color: 'rgba(40, 45, 55, 1)' },
+          { stop: 1, color: 'rgba(20, 25, 30, 1)' },
+        ],
+      });
 
       // Lane dividers
       for (let i = 1; i < 3; i++) {
         const x = i / 3;
-        // Dashed line effect
         for (let y = -state.stripeOffset; y < 1; y += 0.05) {
           draw.rect(x, y, 0.003, 0.025, {
             fill: 'rgba(255, 255, 255, 0.1)',
@@ -174,41 +184,67 @@ export function createGame(config) {
         }
       }
 
-      // Obstacles
+      // Obstacles with gradient
       for (const obs of state.obstacles) {
-        const color = obs.type === 'high' ? '#f84' : '#e44';
+        const hue = obs.type === 'high' ? 25 : 0;
         const yOffset = obs.type === 'high' ? -0.04 : 0;
         draw.rect(obs.x, obs.y + yOffset, obs.width, obs.height, {
-          fill: color,
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 80%, 70%, 1)` },
+            { stop: 1, color: `hsla(${hue}, 75%, 42%, 0.9)` },
+          ],
           radius: 0.005,
         });
       }
 
-      // Coins
+      // Coins with gradient
       for (const coin of state.coins) {
         if (coin.collected) continue;
         const pulse = 0.8 + 0.2 * Math.sin(state.distance * 20 + coin.y * 10);
-        draw.circle(coin.x, coin.y, 0.015 * pulse, {
-          fill: '#fd0',
-          glow: 0.008,
-          glowColor: 'rgba(255, 220, 0, 0.3)',
+        const r = 0.015 * pulse;
+        draw.circle(coin.x, coin.y, r * 2, {
+          gradient: [
+            { stop: 0, color: 'hsla(50, 90%, 60%, 0.12)' },
+            { stop: 1, color: 'hsla(50, 90%, 50%, 0)' },
+          ],
+          blend: 'lighter',
+        });
+        draw.circle(coin.x, coin.y, r, {
+          gradient: [
+            { stop: 0, color: 'hsla(50, 80%, 95%, 1)' },
+            { stop: 0.5, color: 'hsla(45, 90%, 65%, 1)' },
+            { stop: 1, color: 'hsla(40, 85%, 45%, 0.9)' },
+          ],
+          gradientOffset: { x: -r * 0.15, y: -r * 0.15 },
+          clip: true,
         });
       }
 
       // Player
       if (state.alive) {
         const py = state.player.y - state.player.jumpHeight;
-        // Shadow
         if (state.player.jumping) {
           draw.circle(state.player.x, state.player.y, 0.02 * (1 - state.player.jumpHeight * 2), {
             fill: 'rgba(0, 0, 0, 0.2)',
           });
         }
-        // Body
+        // Glow aura
+        draw.circle(state.player.x, py, 0.022 * 2.5, {
+          gradient: [
+            { stop: 0, color: 'hsla(200, 85%, 70%, 0.12)' },
+            { stop: 1, color: 'hsla(200, 80%, 50%, 0)' },
+          ],
+          blend: 'lighter',
+        });
+        // Body with glossy gradient
         draw.circle(state.player.x, py, 0.022, {
-          fill: '#4af',
-          glow: 0.01,
-          glowColor: 'rgba(68, 170, 255, 0.4)',
+          gradient: [
+            { stop: 0, color: 'hsla(200, 60%, 95%, 1)' },
+            { stop: 0.4, color: 'hsla(200, 85%, 70%, 1)' },
+            { stop: 1, color: 'hsla(200, 90%, 45%, 0.9)' },
+          ],
+          gradientOffset: { x: -0.003, y: -0.003 },
+          clip: true,
         });
         // Direction indicator
         draw.circle(state.player.x, py - 0.012, 0.006, {
@@ -220,6 +256,8 @@ export function createGame(config) {
       draw.text(`${Math.floor(state.distance * 100)}m`, 0.5, 0.04, {
         size: 0.035,
         color: 'rgba(255,255,255,0.8)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       draw.text(`${state.speed.toFixed(1)}x`, 0.92, 0.04, {
@@ -232,10 +270,14 @@ export function createGame(config) {
         draw.text('CRASH', 0.5, 0.4, {
           size: 0.06,
           color: '#fff',
+          shadow: 'rgba(255, 80, 50, 0.6)',
+          shadowBlur: 20,
         });
         draw.text(`${Math.floor(state.distance * 100)}m`, 0.5, 0.5, {
           size: 0.035,
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
       }
     },

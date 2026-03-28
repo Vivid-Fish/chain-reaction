@@ -284,10 +284,16 @@ export function createGame(config) {
     },
 
     render(state, draw, alpha) {
-      // Background — deep dark with subtle color
+      // Background with vignette
       draw.clear(0.04, 0.03, 0.08);
+      draw.circle(0.5, 0.5, 0.7, {
+        gradient: [
+          { stop: 0, color: 'hsla(280, 30%, 12%, 0.3)' },
+          { stop: 1, color: 'hsla(280, 30%, 4%, 0)' },
+        ],
+      });
 
-      // --- Lane dividers ---
+      // Lane dividers
       for (let i = 1; i < LANE_COUNT; i++) {
         const x = i * LANE_WIDTH;
         draw.line(x, 0, x, 1, {
@@ -296,7 +302,7 @@ export function createGame(config) {
         });
       }
 
-      // --- Lane background tint (subtle, shows which lane is which) ---
+      // Lane background tint
       for (let i = 0; i < LANE_COUNT; i++) {
         const hue = LANE_HUES[i];
         draw.rect(
@@ -306,10 +312,12 @@ export function createGame(config) {
         );
       }
 
-      // --- Strike zone ---
-      // Glowing bar across all lanes
+      // Strike zone with gradient glow
       draw.rect(0.5, STRIKE_Y, 1.0, STRIKE_TOLERANCE * 2, {
-        fill: 'rgba(255, 255, 255, 0.06)',
+        gradient: [
+          { stop: 0, color: 'rgba(255, 255, 255, 0.08)' },
+          { stop: 1, color: 'rgba(255, 255, 255, 0.03)' },
+        ],
       });
       draw.line(0, STRIKE_Y - STRIKE_TOLERANCE, 1, STRIKE_Y - STRIKE_TOLERANCE, {
         color: 'rgba(255, 255, 255, 0.15)',
@@ -320,12 +328,16 @@ export function createGame(config) {
         width: 1,
       });
 
-      // Strike zone target circles per lane
+      // Strike zone target circles with gradient
       for (let i = 0; i < LANE_COUNT; i++) {
         const hue = LANE_HUES[i];
         const cx = (i + 0.5) * LANE_WIDTH;
         draw.circle(cx, STRIKE_Y, 0.022, {
-          fill: `hsla(${hue}, 60%, 40%, 0.25)`,
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 60%, 50%, 0.3)` },
+            { stop: 1, color: `hsla(${hue}, 60%, 35%, 0.1)` },
+          ],
+          clip: true,
         });
         draw.circle(cx, STRIKE_Y, 0.022, {
           fill: 'transparent',
@@ -334,55 +346,61 @@ export function createGame(config) {
         });
       }
 
-      // --- Falling beats ---
+      // Falling beats with gradient
       for (const beat of state.beats) {
         if (beat.hit) continue;
         const hue = LANE_HUES[beat.lane];
         const cx = (beat.lane + 0.5) * LANE_WIDTH;
 
-        // Distance to strike zone affects glow intensity
         const distToStrike = Math.abs(beat.y - STRIKE_Y);
         const proximity = Math.max(0, 1 - distToStrike / 0.4);
 
-        // Main beat circle
         const baseRadius = 0.02;
         const pulseRadius = baseRadius + proximity * 0.005;
 
-        // Glow when approaching strike zone
+        // Additive glow when approaching strike zone
         if (proximity > 0.3) {
-          draw.circle(cx, beat.y, pulseRadius + 0.008, {
-            fill: `hsla(${hue}, 80%, 60%, ${proximity * 0.15})`,
+          draw.circle(cx, beat.y, pulseRadius * 2, {
+            gradient: [
+              { stop: 0, color: `hsla(${hue}, 80%, 60%, ${proximity * 0.15})` },
+              { stop: 1, color: `hsla(${hue}, 80%, 50%, 0)` },
+            ],
+            blend: 'lighter',
           });
         }
 
-        // Beat body
+        // Beat body with glossy gradient
         draw.circle(cx, beat.y, pulseRadius, {
-          fill: `hsl(${hue}, 75%, 60%)`,
-          glow: proximity > 0.5 ? 0.01 : 0,
-          glowColor: `hsla(${hue}, 80%, 60%, 0.4)`,
-        });
-
-        // Inner highlight
-        draw.circle(cx, beat.y, pulseRadius * 0.5, {
-          fill: `hsla(${hue}, 60%, 85%, 0.4)`,
+          gradient: [
+            { stop: 0, color: `hsla(${hue}, 55%, 90%, 1)` },
+            { stop: 0.4, color: `hsl(${hue}, 75%, 65%)` },
+            { stop: 1, color: `hsl(${hue}, 80%, 42%)` },
+          ],
+          gradientOffset: { x: -pulseRadius * 0.15, y: -pulseRadius * 0.15 },
+          clip: true,
         });
       }
 
-      // --- Judgment effects ---
+      // Judgment effects
       for (const j of state.judgments) {
-        const progress = j.age / 0.6; // 0..1 over lifetime
+        const progress = j.age / 0.6;
         const fadeAlpha = 1 - progress;
         const riseOffset = progress * 0.06;
 
         if (j.type === 'perfect') {
-          // Bright expanding ring + text
           draw.circle(j.x, j.y - riseOffset, 0.015 + progress * 0.02, {
-            fill: `rgba(255, 255, 100, ${fadeAlpha * 0.3})`,
+            gradient: [
+              { stop: 0, color: `rgba(255, 255, 100, ${fadeAlpha * 0.3})` },
+              { stop: 1, color: `rgba(255, 255, 100, 0)` },
+            ],
+            blend: 'lighter',
           });
           draw.text('PERFECT', j.x, j.y - 0.04 - riseOffset, {
             size: 0.022,
             align: 'center',
             color: `rgba(255, 255, 100, ${fadeAlpha})`,
+            shadow: `rgba(255, 255, 0, ${fadeAlpha * 0.5})`,
+            shadowBlur: 8,
           });
         } else if (j.type === 'good') {
           draw.text('GOOD', j.x, j.y - 0.04 - riseOffset, {
@@ -391,7 +409,6 @@ export function createGame(config) {
             color: `rgba(100, 220, 255, ${fadeAlpha})`,
           });
         } else {
-          // Miss — red X
           draw.text('MISS', j.x, j.y - 0.04 - riseOffset, {
             size: 0.02,
             align: 'center',
@@ -400,16 +417,16 @@ export function createGame(config) {
         }
       }
 
-      // --- HUD ---
-
-      // Score (top center)
+      // HUD — Score
       draw.text(`${state.score}`, 0.5, 0.03, {
         size: 0.04,
         align: 'center',
         color: 'rgba(255, 255, 255, 0.9)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
-      // Combo (below score, only when active)
+      // Combo
       if (state.combo >= 2) {
         const comboScale = Math.min(0.045, 0.025 + state.combo * 0.0005);
         const comboGlow = state.combo >= 10
@@ -419,31 +436,27 @@ export function createGame(config) {
           size: comboScale,
           align: 'center',
           color: comboGlow,
+          shadow: state.combo >= 10 ? 'rgba(255, 255, 0, 0.4)' : undefined,
+          shadowBlur: state.combo >= 10 ? 10 : 0,
         });
       }
 
-      // BPM (top-right)
+      // BPM
       draw.text(`${Math.round(state.bpm)} BPM`, 0.95, 0.03, {
         size: 0.018,
         align: 'right',
         color: 'rgba(255, 255, 255, 0.4)',
       });
 
-      // Health bar (below strike zone, full width)
+      // Health bar with gradient fill
       const healthBarY = 0.93;
       const healthBarH = 0.012;
-      // Background
       draw.rect(0.5, healthBarY, 0.9, healthBarH, {
         fill: 'rgba(255, 255, 255, 0.08)',
         radius: 0.004,
       });
-      // Fill
       const healthFrac = state.health / 100;
-      const healthHue = healthFrac > 0.5
-        ? 120  // green
-        : healthFrac > 0.25
-          ? 50  // yellow
-          : 0;  // red
+      const healthHue = healthFrac > 0.5 ? 120 : healthFrac > 0.25 ? 50 : 0;
       if (healthFrac > 0) {
         draw.rect(
           0.05 + (0.9 * healthFrac) / 2,
@@ -451,13 +464,16 @@ export function createGame(config) {
           0.9 * healthFrac,
           healthBarH,
           {
-            fill: `hsl(${healthHue}, 70%, 50%)`,
+            gradient: [
+              { stop: 0, color: `hsl(${healthHue}, 75%, 60%)` },
+              { stop: 1, color: `hsl(${healthHue}, 70%, 40%)` },
+            ],
             radius: 0.004,
           }
         );
       }
 
-      // Accuracy (top-left)
+      // Accuracy
       const totalJudged = state.perfects + state.goods + state.misses;
       if (totalJudged > 0) {
         const accuracy = ((state.perfects + state.goods * 0.5) / totalJudged * 100).toFixed(1);
@@ -468,9 +484,8 @@ export function createGame(config) {
         });
       }
 
-      // --- Game Over overlay ---
+      // Game Over overlay
       if (!state.alive) {
-        // Dim overlay
         draw.rect(0.5, 0.5, 1, 1, {
           fill: 'rgba(0, 0, 0, 0.6)',
         });
@@ -479,12 +494,16 @@ export function createGame(config) {
           size: 0.06,
           align: 'center',
           color: '#fff',
+          shadow: 'rgba(200, 50, 255, 0.6)',
+          shadowBlur: 20,
         });
 
         draw.text(`Score: ${state.score}`, 0.5, 0.44, {
           size: 0.03,
           align: 'center',
           color: 'rgba(255, 255, 255, 0.8)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
 
         draw.text(`Max Combo: ${state.maxCombo}x`, 0.5, 0.50, {

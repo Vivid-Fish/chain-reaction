@@ -125,18 +125,28 @@ export function createGame(config) {
 
     render(state, draw, alpha) {
       draw.clear(0.04, 0.04, 0.08);
+      // Vignette
+      draw.circle(0.5, 0.5, 0.65, {
+        gradient: [
+          { stop: 0, color: 'hsla(230, 30%, 12%, 0.3)' },
+          { stop: 1, color: 'hsla(230, 30%, 4%, 0)' },
+        ],
+      });
 
-      // Platform (circular)
+      // Platform with radial gradient
       draw.circle(state.platform.x, state.platform.y, state.platform.radius, {
-        fill: 'rgba(40, 40, 60, 0.8)',
-        stroke: 'rgba(100, 130, 200, 0.3)',
-        strokeWidth: 2,
+        gradient: [
+          { stop: 0, color: 'rgba(55, 55, 80, 0.85)' },
+          { stop: 0.8, color: 'rgba(35, 35, 55, 0.8)' },
+          { stop: 1, color: 'rgba(25, 25, 40, 0.7)' },
+        ],
+        clip: true,
       });
 
       // Platform edge ring
       draw.circle(state.platform.x, state.platform.y, state.platform.radius, {
-        stroke: 'rgba(100, 130, 200, 0.15)',
-        strokeWidth: 1,
+        stroke: 'rgba(100, 130, 200, 0.3)',
+        strokeWidth: 2,
       });
 
       // Concentric guide rings
@@ -147,12 +157,18 @@ export function createGame(config) {
         });
       }
 
-      // Hazards
+      // Hazards with gradient
       for (const h of state.hazards) {
         const pulse = 0.5 + 0.5 * Math.sin(h.life * 8);
         const opacity = Math.min(1, (h.maxLife - h.life) / (h.maxLife * 0.3));
-        draw.circle(h.x, h.y, h.radius * (0.8 + pulse * 0.4), {
-          fill: `rgba(255, 60, 60, ${opacity * 0.4})`,
+        const hr = h.radius * (0.8 + pulse * 0.4);
+        draw.circle(h.x, h.y, hr, {
+          gradient: [
+            { stop: 0, color: `rgba(255, 80, 60, ${opacity * 0.5})` },
+            { stop: 1, color: `rgba(255, 40, 40, ${opacity * 0.1})` },
+          ],
+        });
+        draw.circle(h.x, h.y, hr, {
           stroke: `rgba(255, 80, 80, ${opacity * 0.6})`,
           strokeWidth: 1,
         });
@@ -160,14 +176,27 @@ export function createGame(config) {
 
       // Ball
       if (state.alive) {
-        draw.circle(state.ball.x, state.ball.y, state.ball.radius, {
-          fill: '#6cf',
-          glow: 0.01,
-          glowColor: 'rgba(100, 200, 255, 0.5)',
-        });
-        // Ball shadow
+        // Ball shadow (drawn first, offset)
         draw.circle(state.ball.x + 0.003, state.ball.y + 0.003, state.ball.radius, {
           fill: 'rgba(0,0,0,0.2)',
+        });
+        // Ball glow
+        draw.circle(state.ball.x, state.ball.y, state.ball.radius * 3, {
+          gradient: [
+            { stop: 0, color: 'hsla(195, 80%, 70%, 0.12)' },
+            { stop: 1, color: 'hsla(195, 80%, 50%, 0)' },
+          ],
+          blend: 'lighter',
+        });
+        // Ball with glossy gradient
+        draw.circle(state.ball.x, state.ball.y, state.ball.radius, {
+          gradient: [
+            { stop: 0, color: 'hsla(195, 60%, 95%, 1)' },
+            { stop: 0.4, color: 'hsla(195, 80%, 70%, 1)' },
+            { stop: 1, color: 'hsla(195, 85%, 45%, 0.9)' },
+          ],
+          gradientOffset: { x: -state.ball.radius * 0.15, y: -state.ball.radius * 0.15 },
+          clip: true,
         });
       }
 
@@ -175,6 +204,8 @@ export function createGame(config) {
       draw.text(`${state.score}`, 0.5, 0.06, {
         size: 0.04,
         color: 'rgba(255,255,255,0.8)',
+        shadow: 'rgba(0,0,0,0.5)',
+        shadowBlur: 4,
       });
 
       // Tilt hint
@@ -187,10 +218,14 @@ export function createGame(config) {
         draw.text('FELL OFF', 0.5, 0.4, {
           size: 0.06,
           color: '#fff',
+          shadow: 'rgba(100, 200, 255, 0.5)',
+          shadowBlur: 20,
         });
         draw.text(`Survived: ${(state.elapsed).toFixed(1)}s`, 0.5, 0.5, {
           size: 0.03,
           color: 'rgba(255,255,255,0.7)',
+          shadow: 'rgba(0,0,0,0.5)',
+          shadowBlur: 4,
         });
       }
     },
